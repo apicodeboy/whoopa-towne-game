@@ -1,0 +1,145 @@
+import type { TeamId } from '../config/crews';
+
+/**
+ * How a solid participates in collision:
+ *  - 'solid': blocks movement, bullets, grenades and the camera
+ *  - 'fence': blocks movement and grenades, but bullets and the camera pass (chain-link, railings, glass)
+ *  - 'none' : purely visual
+ */
+export type CollisionKind = 'solid' | 'fence' | 'none';
+
+/**
+ * An oriented box. The whole map (collision and greybox visuals) is made of these.
+ * Rotation order is heading (ry, about world Y) applied after tilt (rx, about local X),
+ * i.e. q = qY(ry) * qX(rx) — the same as THREE.Euler order 'YXZ'.
+ */
+export interface Solid {
+  /** Semantic tag the client uses to pick materials / meshes. */
+  kind: string;
+  /** Center. */
+  x: number;
+  y: number;
+  z: number;
+  /** Full sizes. */
+  sx: number;
+  sy: number;
+  sz: number;
+  ry?: number;
+  rx?: number;
+  col?: CollisionKind;
+  /** Visual style hint (facade type, etc). */
+  style?: string;
+  /** Override color 0xRRGGBB. */
+  color?: number;
+  /** Groups solids that belong to one structure (for signage, roofs...). */
+  group?: string;
+  /** Index into MapDef.props when this solid is the collision shape of a prop. */
+  prop?: number;
+  /** Extra per-kind data for visuals (e.g. stairs step count, which faces are exterior). */
+  meta?: Record<string, number | string | boolean>;
+}
+
+export type PropType =
+  | 'car' | 'van' | 'truck'
+  | 'boxcar' | 'boxcar_open' | 'flatcar' | 'container'
+  | 'dumpster' | 'barrier' | 'crate' | 'crate_big' | 'tires'
+  | 'tree' | 'lamp' | 'bench' | 'hoop' | 'hydrant' | 'busstop'
+  | 'acunit' | 'signal' | 'buffer' | 'shelf' | 'trashcan' | 'cone' | 'pallet' | 'banner';
+
+export interface Prop {
+  type: PropType;
+  x: number;
+  y: number;
+  z: number;
+  /** Heading: local +Z (the prop's length axis) is rotated toward (sin ry, 0, cos ry). */
+  ry: number;
+  /** Picks a color / model variation. */
+  variant: number;
+  /** Team association (banners). */
+  team?: TeamId;
+}
+
+export interface SpawnPoint {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+}
+
+export interface ZoneDef {
+  /** 'A' | 'B' | 'C' */
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  radius: number;
+}
+
+/** Visual-only ground patch (asphalt, grass, court...). */
+export interface AreaDef {
+  kind: string;
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  /** Draw order / tiny height offset layer. */
+  layer?: number;
+  color?: number;
+}
+
+/** Visual-only road strip following a polyline. */
+export interface RoadDef {
+  kind: 'road' | 'rail';
+  points: Array<{ x: number; z: number }>;
+  width: number;
+  /** Draw dashed center line. */
+  centerLine?: boolean;
+}
+
+/** Text painted on a wall or sign board. */
+export interface SignDef {
+  text: string;
+  x: number;
+  y: number;
+  z: number;
+  /** Facing direction (yaw of the outward normal: 0 faces -Z, like the player convention). */
+  yaw: number;
+  width: number;
+  height: number;
+  style: 'store' | 'graffiti' | 'street' | 'plain';
+  color?: string;
+  bg?: string;
+  team?: TeamId;
+}
+
+export interface LabelDef {
+  text: string;
+  x: number;
+  z: number;
+}
+
+export interface MapDef {
+  id: string;
+  name: string;
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  solids: Solid[];
+  props: Prop[];
+  /** spawns[team] */
+  spawns: [SpawnPoint[], SpawnPoint[]];
+  zones: ZoneDef[];
+  areas: AreaDef[];
+  roads: RoadDef[];
+  signs: SignDef[];
+  labels: LabelDef[];
+  /** Points of interest bots wander between. */
+  hotspots: Array<{ x: number; z: number }>;
+}
+
+/** Quaternion (x,y,z,w) for a solid's orientation. */
+export function solidQuat(s: { ry?: number; rx?: number }): { x: number; y: number; z: number; w: number } {
+  const ry = s.ry ?? 0;
+  const rx = s.rx ?? 0;
+  const sy = Math.sin(ry / 2), cy = Math.cos(ry / 2);
+  const sx = Math.sin(rx / 2), cx = Math.cos(rx / 2);
+  return { x: cy * sx, y: sy * cx, z: -sy * sx, w: cy * cx };
+}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d0e12" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Whoopa Towne - two crews, one town. A browser-based multiplayer third-person shooter." />
+    <title>Whoopa Towne</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: #0d0e12;
+        color: #ffd23f;
+        font-family: Impact, 'Arial Narrow Bold', sans-serif;
+        z-index: 50;
+      }
+      #loading .ld-word {
+        font-size: 44px;
+        letter-spacing: 4px;
+      }
+      #loading .ld-sub {
+        font: 13px/1 system-ui, sans-serif;
+        color: #9aa3b2;
+        letter-spacing: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport"></div>
+      <div id="ui"></div>
+      <div class="rotate-hint">ROTATE YOUR PHONE<small>Whoopa Towne plays in landscape.</small></div>
+      <div id="loading">
+        <div class="ld-word">WHOOPA TOWNE</div>
+        <div class="ld-sub">Loading the block…</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
