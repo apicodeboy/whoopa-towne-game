@@ -29,8 +29,13 @@ export class MainMenu {
     this.profile = profile;
 
     const title = el('div', 'wordmark');
-    title.innerHTML = `<span class="w1">WHOOPA</span><span class="w2">TOWNE</span>`;
-    title.setAttribute('aria-label', GAME_NAME);
+    const logo = el('img');
+    logo.src = `${import.meta.env.BASE_URL}assets/ui/logo.png`;
+    logo.alt = GAME_NAME;
+    logo.width = 960;
+    logo.height = 219;
+    logo.draggable = false;
+    title.append(logo);
     const versus = el('div', 'versus');
     versus.innerHTML =
       `<span class="crew c0"><i>${crewLogoSvg(0)}</i>${CREWS[0].name}</span><b>VS</b>` +

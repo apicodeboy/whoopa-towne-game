@@ -7,6 +7,12 @@ import { CREWS } from '@shared/config/crews';
 import type { ModeId } from '@shared/config/game';
 import type { BotDifficulty } from '@shared/protocol';
 import { App } from './app';
+import { LoadingScreen } from './ui/loadingScreen';
+
+/** Extra time the loading screen stays up after everything is ready, to show off the artwork. */
+const ARTWORK_HOLD_MS = 5000;
+/** Never keep players on the loading screen longer than this waiting for models (they still swap in later). */
+const MAX_ASSET_WAIT_MS = 20000;
 
 /** Feeds the crew palette from shared/src/config/crews.ts into the stylesheets (--crew0, --crew0-dark, ...). */
 function applyCrewTheme(): void {
@@ -22,13 +28,16 @@ async function boot(): Promise<void> {
   applyCrewTheme();
   const viewport = document.getElementById('viewport')!;
   const ui = document.getElementById('ui')!;
-  const loading = document.getElementById('loading');
+  // bar: physics engine 0-15%, models 15-70%, then the artwork hold fills the rest
+  const loading = new LoadingScreen(document.getElementById('loading'));
+  loading.set(0.05);
   await RAPIER.init();
+  loading.set(0.15);
 
   const q = new URLSearchParams(location.search);
   if (q.get('debug') === 'assets') {
     // developer-only model viewer, loaded on demand so it never ships in the main bundle path
-    loading?.remove();
+    loading.remove();
     const { runAssetViewer } = await import('./debug/assetViewer');
     await runAssetViewer(viewport);
     return;
@@ -41,8 +50,13 @@ async function boot(): Promise<void> {
     warmup: num('warmup'),
     teamSize: num('size'),
     procedural: q.has('procedural'),
+    onAssetProgress: (done, total) => loading.set(0.15 + 0.55 * (done / total)),
   });
-  loading?.remove();
+  // automated runs skip the hold (?loadhold=<ms> overrides, e.g. to screenshot the screen)
+  const holdMs = q.has('loadhold') ? num('loadhold') ?? 0 : navigator.webdriver || q.has('auto') ? 0 : ARTWORK_HOLD_MS;
+  void Promise.race([app.assetsReady, new Promise((r) => setTimeout(r, MAX_ASSET_WAIT_MS))]).then(() =>
+    loading.finish(holdMs),
+  );
 
   // Automation / debugging handle and shortcuts (?auto=practice&mode=turf&diff=hard)
   const handle = {

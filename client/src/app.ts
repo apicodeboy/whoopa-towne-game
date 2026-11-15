@@ -39,6 +39,8 @@ export interface DebugOptions {
   teamSize?: number;
   /** Skip downloading models and use the built-in procedural visuals only. */
   procedural?: boolean;
+  /** Called as each model finishes loading (or fails), for the loading screen's bar. */
+  onAssetProgress?: (done: number, total: number) => void;
 }
 
 /**
@@ -104,7 +106,7 @@ export class App {
     this.backdropCam = new THREE.PerspectiveCamera(verticalFov(80), 1, 0.5, 600);
     this.assetsReady = debug.procedural
       ? Promise.resolve()
-      : this.assets.load().then(() => {
+      : this.assets.load(debug.onAssetProgress).then(() => {
           // swap the stand-in props for the real models (a running match just keeps going)
           this.stage.setWorld(buildWorld(this.stage.map, this.assets));
         }).catch(() => undefined);
