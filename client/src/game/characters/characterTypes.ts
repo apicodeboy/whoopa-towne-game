@@ -2,7 +2,7 @@ import type * as THREE from 'three';
 import type { TeamId } from '@shared/config/crews';
 
 /** What a character is holding (weapon id, throwable id, or nothing). */
-export type HeldItem = 'smg' | 'ar' | 'shotgun' | 'pistol' | 'grenade' | 'smoke' | 'none';
+export type HeldItem = 'smg' | 'ar' | 'shotgun' | 'pistol' | 'sniper' | 'grenade' | 'smoke' | 'none';
 
 /** Per-frame animation inputs for a character (local or remote). */
 export interface CharacterPose {
@@ -53,4 +53,10 @@ export interface CharacterVisual {
   /** World position of the weapon muzzle (for flashes and tracers). */
   getMuzzle(out: THREE.Vector3): THREE.Vector3;
   dispose(): void;
+  /** Menus: relaxed idle, no weapon. */
+  setMenuIdle?(on: boolean): void;
+  /** Character screen: shows a facial expression for a moment. */
+  previewExpression?(id: string): void;
+  /** Bind-pose heights the Character screen frames its camera on (meters, before `scale`). */
+  readonly frame?: { eyeY: number; topY: number; chestY: number; scale: number };
 }

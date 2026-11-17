@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import { BOTTOM_COLORS, SHOE_COLORS, SKIN_TONES, type Appearance } from '@shared/config/appearance';
 import { crewColorHex, type TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp, lerpAngle, wrapAngle } from '@shared/math';
 import type { CharacterPose, CharacterVisual, HeldItem } from './characterTypes';
+import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
 
 const DOWN = new THREE.Vector3(0, -1, 0);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -56,6 +58,7 @@ export function buildWeaponModel(item: HeldItem): WeaponModel {
     hip: new THREE.Vector3(0.17, -0.1, -0.34), ads: new THREE.Vector3(0.085, 0.15, -0.3), twoHanded: true,
   };
   switch (item) {
+    case 'sniper':
     case 'ar':
       g.add(box(0.06, 0.09, 0.42, metal, 0, 0.02, -0.12));
       g.add(box(0.03, 0.03, 0.3, dark, 0, 0.035, -0.46));
@@ -174,11 +177,16 @@ export class ProceduralCharacter implements CharacterVisual {
   private shoulderL = new THREE.Vector3(-0.24, 0.46, 0);
   private shoulderR = new THREE.Vector3(0.24, 0.46, 0);
 
-  constructor(team: TeamId, seed = 0) {
+  private mouth: MouthAccessory | null = null;
+
+  /** The stand-in used when the character models are unavailable; it wears the look's colors. */
+  constructor(team: TeamId, seed = 0, look?: Readonly<Appearance>) {
     const skinTones = [0xe0ac69, 0xc68642, 0x8d5524, 0xf1c27d, 0x6b4423];
-    const skin = new THREE.MeshStandardMaterial({ color: skinTones[seed % skinTones.length], roughness: 0.8, flatShading: true });
-    const pants = new THREE.MeshStandardMaterial({ color: [0x23272e, 0x2d3748, 0x3b3b3b, 0x1f2a24][seed % 4], roughness: 0.9, flatShading: true });
-    const shoes = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.7, flatShading: true });
+    const hex = (list: typeof SKIN_TONES, id: string | undefined) => list.find((o) => o.id === id)?.color;
+    const skin = new THREE.MeshStandardMaterial({ color: hex(SKIN_TONES, look?.skin) ?? skinTones[seed % skinTones.length], roughness: 0.8, flatShading: true });
+    const pants = new THREE.MeshStandardMaterial({ color: hex(BOTTOM_COLORS, look?.bottomColor) ?? [0x23272e, 0x2d3748, 0x3b3b3b, 0x1f2a24][seed % 4], roughness: 0.9, flatShading: true });
+    const shoes = new THREE.MeshStandardMaterial({ color: hex(SHOE_COLORS, look?.shoeColor) ?? 0xe8e8e8, roughness: 0.7, flatShading: true });
+    const mouth = look?.mouthProp;
     this.jacketMat = new THREE.MeshStandardMaterial({ color: crewColorHex(team), roughness: 0.85, flatShading: true });
     this.accentMat = new THREE.MeshStandardMaterial({ color: crewColorHex(team, 'dark'), roughness: 0.85, flatShading: true });
     this.mats.push(skin, pants, shoes, this.jacketMat, this.accentMat);
@@ -216,6 +224,14 @@ export class ProceduralCharacter implements CharacterVisual {
     this.head.add(box(0.23, 0.08, 0.24, this.accentMat, 0, 0.26, 0));
     this.head.add(box(0.21, 0.025, 0.12, this.accentMat, 0, 0.225, -0.16));
     this.spine.add(this.head);
+    this.mouth = createMouthAccessory(mouth);
+    if (this.mouth) {
+      // lips: front face of the head box, a third of the way up
+      this.mouth.object.position.set(0, 0.075, -0.112);
+      this.mouth.object.scale.setScalar(MOUTH_SCALE);
+      this.head.add(this.mouth.object);
+      this.mouth.attachSmoke(this.root);
+    }
 
     this.armLU = bone(UPPER_ARM, 0.11, 0.12, this.jacketMat);
     this.armRU = bone(UPPER_ARM, 0.11, 0.12, this.jacketMat);
@@ -299,6 +315,7 @@ export class ProceduralCharacter implements CharacterVisual {
     this.root.position.set(pose.x, pose.y, pose.z);
     this.root.rotation.y = pose.yaw;
     this.setHeld(pose.held);
+    this.mouth?.update(dt);
 
     if (this.deathT >= 0) {
       this.deathT = Math.min(1, this.deathT + dt / 0.55);
@@ -456,6 +473,7 @@ export class ProceduralCharacter implements CharacterVisual {
   }
 
   dispose(): void {
+    this.mouth?.dispose(); // first: its geometry is shared, disposeTree would free it
     disposeTree(this.root);
     for (const m of this.mats) m.dispose();
     this.root.removeFromParent();

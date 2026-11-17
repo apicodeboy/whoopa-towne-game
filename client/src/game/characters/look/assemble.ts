@@ -1,0 +1,961 @@
+import * as THREE from 'three';
+import { DEFAULT_APPEARANCE, LOOK_FIELD_KEYS, type Appearance } from '@shared/config/appearance';
+import type { CharacterTemplate } from '../../assets';
+import { LIGHTING } from '../../lighting';
+import { buildDetails, buildEarrings, buildFacePiercing, buildFacialHair, buildGlasses, buildLipPiercing, buildMouth } from './face';
+import { buildHair, transferHair, tuckHair } from './hair';
+import { HeadRig, shapeHead, type HeadSurface } from './headRig';
+import { buildHat } from './headwear';
+import { buildCrewBands, buildNecklace, buildWrist, type BodyQuery } from './jewelry';
+import { PartLibrary, centroid, components, type Piece, type Rig } from './library';
+import { ProcMesh, SLOT, smoothstep, v3, type V3 } from './meshKit';
+import { EXPRESSION_PRESETS, PAINT_STRIDE, pack, type Expression } from './palette';
+
+/**
+ * Builds a character's body from an Appearance: picks and fits the model pieces, shapes the
+ * body and face, adds the procedural hair / hats / jewelry, and merges everything into one
+ * skinned geometry (one draw call per character, same as before the creator).
+ */
+
+/** One assembled character body (geometry is shared; colors are painted per character). */
+export interface Assembled {
+  key: string;
+  rig: Rig;
+  /** Position, normal, skinIndex, skinWeight, pbr, index (no color: see paint). */
+  geometry: THREE.BufferGeometry;
+  /** Per vertex: slot, slot B, mix, shade, packed fixed color (see palette.ts). */
+  paint: Float32Array;
+  /** Lips position in the bind pose (meters), for things held in the mouth. */
+  mouth: V3;
+  /** Heights (bind pose, meters) the Character screen frames its camera on. */
+  frame: { eyeY: number; topY: number; chestY: number };
+  /** Uniform scale for the height preset. */
+  heightScale: number;
+}
+
+// ------------------------------------------------------------------ material
+/** Vertex-colored, with per-vertex metalness / roughness (jewelry shines, cloth stays matte). */
+export const LOOK_MATERIAL = new THREE.MeshStandardMaterial({ name: 'look', vertexColors: true, roughness: 1, metalness: 0 });
+LOOK_MATERIAL.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec2 pbr;\nvarying vec2 vPbr;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvPbr = pbr;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec2 vPbr;')
+    .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vPbr.y;')
+    .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.x;')
+    .replace(
+      '#include <emissivemap_fragment>',
+      // a touch of self-light keeps players readable in the dark; metals get a little extra
+      // so they read as shiny without an environment map
+      `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * (${LIGHTING.characterGlow.toFixed(3)} + vPbr.x * 0.22);`,
+    );
+};
+
+// ------------------------------------------------------------------ working pieces
+interface Work {
+  tag: string;
+  pos: Float32Array;
+  nrm: Float32Array;
+  si: Uint16Array;
+  sw: Float32Array;
+  index: Uint32Array;
+  paint: Float32Array;
+  pbr: Float32Array;
+}
+
+interface PaintSpec {
+  slot: number;
+  slotB?: number;
+  mix?: number;
+  shade?: number;
+  /** Linear RGB for FIXED. */
+  color?: [number, number, number];
+}
+
+const _col = new THREE.Color();
+const lin = (hex: number): [number, number, number] => (_col.setHex(hex), [_col.r, _col.g, _col.b]);
+
+/** Copies a model piece (optionally only some of its triangles) onto a rig, painted per vertex. */
+function fromPiece(p: Piece, rig: Rig, tag: string, spec: PaintSpec | ((i: number) => PaintSpec), tris?: Uint32Array): Work {
+  const src = tris ?? p.index;
+  const map = new Map<number, number>();
+  const order: number[] = [];
+  for (const i of src) if (!map.has(i)) map.set(i, order.push(i) - 1);
+  const n = order.length;
+  const w: Work = {
+    tag,
+    pos: new Float32Array(n * 3), nrm: new Float32Array(n * 3), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4),
+    index: Uint32Array.from(src, (i) => map.get(i)!), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2),
+  };
+  // the piece was modelled on its own skeleton: move each vertex by how much its bones moved
+  const delta: V3[] = p.rig.joints.map((k) => (rig.at.get(k) ?? v3()).clone().sub(p.rig.at.get(k)!));
+  const same = p.rig === rig;
+  const sp = typeof spec === 'function' ? spec : () => spec;
+  order.forEach((s, d) => {
+    let x = p.pos[s * 3], y = p.pos[s * 3 + 1], z = p.pos[s * 3 + 2];
+    for (let k = 0; k < 4; k++) {
+      const j = p.skinIndex[s * 4 + k];
+      const wt = p.skinWeight[s * 4 + k];
+      w.si[d * 4 + k] = rig.jointIndex.get(p.rig.joints[j]) ?? 0;
+      w.sw[d * 4 + k] = wt;
+      if (!same && wt > 0) {
+        x += delta[j].x * wt;
+        y += delta[j].y * wt;
+        z += delta[j].z * wt;
+      }
+    }
+    w.pos.set([x, y, z], d * 3);
+    w.nrm.set([p.nrm[s * 3], p.nrm[s * 3 + 1], p.nrm[s * 3 + 2]], d * 3);
+    const ps = sp(s);
+    const c = ps.color ?? [1, 1, 1];
+    w.paint.set([ps.slot, ps.slotB ?? ps.slot, ps.mix ?? 0, (ps.shade ?? 1) * p.shade[s], pack(c[0], c[1], c[2])], d * PAINT_STRIDE);
+    w.pbr.set([0.04, 0.82], d * 2);
+  });
+  return w;
+}
+
+/** Turns a procedural mesh into a working piece bound to the rig. */
+function fromProc(m: ProcMesh, rig: Rig, tag: string, nearestIn: Work[]): Work | null {
+  const n = m.count;
+  if (n === 0) return null;
+  const w: Work = {
+    tag,
+    pos: Float32Array.from(m.pos), nrm: Float32Array.from(m.nrm), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4),
+    index: Uint32Array.from(m.idx), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2),
+  };
+  for (let i = 0; i < n; i++) {
+    const a = m.attr.slice(i * 9, i * 9 + 9);
+    w.paint.set([a[0], a[1], a[2], a[3], pack(a[6], a[7], a[8])], i * PAINT_STRIDE);
+    w.pbr.set([a[4], a[5]], i * 2);
+  }
+  if ('bone' in m.binding) {
+    const j = rig.jointIndex.get(m.binding.bone) ?? 0;
+    for (let i = 0; i < n; i++) {
+      w.si[i * 4] = j;
+      w.sw[i * 4] = 1;
+    }
+  } else {
+    const grid = nearestGrid(nearestIn);
+    const fb = rig.jointIndex.get(m.binding.fallback) ?? 0;
+    const p = v3();
+    for (let i = 0; i < n; i++) {
+      p.fromArray(w.pos, i * 3);
+      const hit = grid(p);
+      if (!hit) {
+        w.si[i * 4] = fb;
+        w.sw[i * 4] = 1;
+        continue;
+      }
+      for (let k = 0; k < 4; k++) {
+        w.si[i * 4 + k] = hit.work.si[hit.i * 4 + k];
+        w.sw[i * 4 + k] = hit.work.sw[hit.i * 4 + k];
+      }
+    }
+  }
+  return w;
+}
+
+/** Nearest-vertex lookup over some pieces (2 cm buckets). */
+function nearestGrid(works: Work[]): (p: V3) => { work: Work; i: number } | null {
+  const C = 0.02;
+  const key = (x: number, y: number, z: number) => ((x + 512) * 1024 + (y + 512)) * 1024 + (z + 512);
+  const cells = new Map<number, number[]>();
+  for (let wi = 0; wi < works.length; wi++) {
+    const pos = works[wi].pos;
+    for (let i = 0; i < pos.length / 3; i++) {
+      const k = key(Math.floor(pos[i * 3] / C), Math.floor(pos[i * 3 + 1] / C), Math.floor(pos[i * 3 + 2] / C));
+      let list = cells.get(k);
+      if (!list) cells.set(k, (list = []));
+      list.push(wi, i);
+    }
+  }
+  return (p) => {
+    let bw = -1, bi = -1, bd = Infinity;
+    const cx = Math.floor(p.x / C), cy = Math.floor(p.y / C), cz = Math.floor(p.z / C);
+    for (let r = 1; r <= 4 && bw < 0; r++) {
+      for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
+        const list = cells.get(key(cx + dx, cy + dy, cz + dz));
+        if (!list) continue;
+        for (let n = 0; n < list.length; n += 2) {
+          const pos = works[list[n]].pos, i = list[n + 1];
+          const d = (pos[i * 3] - p.x) ** 2 + (pos[i * 3 + 1] - p.y) ** 2 + (pos[i * 3 + 2] - p.z) ** 2;
+          if (d < bd) {
+            bd = d;
+            bw = list[n];
+            bi = i;
+          }
+        }
+      }
+    }
+    return bw < 0 ? null : { work: works[bw], i: bi };
+  };
+}
+
+/** Weight of a vertex on a set of joints (by index). */
+function weightOnSet(w: Work, i: number, set: Uint8Array): number {
+  let s = 0;
+  for (let k = 0; k < 4; k++) {
+    const wt = w.sw[i * 4 + k];
+    if (wt > 0 && set[w.si[i * 4 + k]]) s += wt;
+  }
+  return s;
+}
+
+function jointSet(rig: Rig, test: (key: string) => boolean): Uint8Array {
+  return Uint8Array.from(rig.joints, (k) => (test(k) ? 1 : 0));
+}
+
+/** Total weight of a vertex on the joints whose key passes `test`. */
+function weightOn(w: Work, i: number, rig: Rig, test: (key: string) => boolean): number {
+  let s = 0;
+  for (let k = 0; k < 4; k++) if (w.sw[i * 4 + k] > 0 && test(rig.joints[w.si[i * 4 + k]])) s += w.sw[i * 4 + k];
+  return s;
+}
+
+// ------------------------------------------------------------------ body shape
+/** Girth multipliers per bone (x = side to side, z = front to back for the spine). */
+type Girth = Partial<Record<string, [number, number] | [number, number, number]>>;
+
+const BUILDS: Record<string, Girth> = {
+  slim: { Hips: [0.88, 0.88], Abdomen: [0.82, 0.8], Torso: [0.86, 0.85], Chest: [0.9, 0.88], Neck: [0.9, 0.9], Shoulder: [0.9, 0.9], UpperArm: [0.82, 0.82], LowerArm: [0.86, 0.86], UpperLeg: [0.85, 0.85], LowerLeg: [0.88, 0.88] },
+  average: {},
+  athletic: { Abdomen: [0.96, 0.97], Torso: [1.08, 1.06], Chest: [1.16, 1.12], Neck: [1.14, 1.14], Shoulder: [1.16, 1.16], UpperArm: [1.3, 1.3], LowerArm: [1.16, 1.16], UpperLeg: [1.12, 1.12], LowerLeg: [1.08, 1.08] },
+  // [side, front, back]: the belly goes out the front
+  heavy: { Hips: [1.2, 1.2, 1.14], Abdomen: [1.32, 1.62, 1.12], Torso: [1.24, 1.42, 1.1], Chest: [1.13, 1.2, 1.08], Neck: [1.2, 1.2], Shoulder: [1.1, 1.1], UpperArm: [1.26, 1.26], LowerArm: [1.14, 1.14], UpperLeg: [1.26, 1.26], LowerLeg: [1.12, 1.12] },
+};
+const NEUTRAL: Girth = { Chest: [0.93, 0.98], Shoulder: [0.92, 0.92], UpperArm: [0.94, 0.94], Hips: [1.07, 1.04], UpperLeg: [1.05, 1.05] };
+
+/** The next joint down each bone (its direction). */
+const CHILD: Record<string, string> = {
+  Hips: 'Abdomen', Body: 'Abdomen', Abdomen: 'Torso', Torso: 'Chest', Chest: 'Neck', Neck: 'Head',
+  ShoulderL: 'UpperArmL', ShoulderR: 'UpperArmR', UpperArmL: 'LowerArmL', UpperArmR: 'LowerArmR', LowerArmL: 'WristL', LowerArmR: 'WristR',
+  UpperLegL: 'LowerLegL', UpperLegR: 'LowerLegR', LowerLegL: 'FootL', LowerLegR: 'FootR',
+};
+
+function combine(a: Girth, b: Girth): Girth {
+  const out: Girth = { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    const o = out[k];
+    out[k] = o ? (o.map((x, i) => x * (v![i] ?? v![1])) as [number, number, number]) : v;
+  }
+  return out;
+}
+
+/** Scales each vertex's distance from its bones (blended by skin weight): thinner or wider. */
+function shapeBody(works: Work[], rig: Rig, girth: Girth): void {
+  if (Object.keys(girth).length === 0) return;
+  const per = rig.joints.map((key) => {
+    const base = key.replace(/[LR]$/, '');
+    const g = girth[base];
+    const child = CHILD[key];
+    if (!g || !child || !rig.at.has(child)) return null;
+    const a = rig.at.get(key)!, b = rig.at.get(child)!;
+    return { a, axis: v3().subVectors(b, a).normalize(), g, spine: !/[LR]$/.test(key) };
+  });
+  const p = v3(), q = v3(), r = v3(), acc = v3();
+  for (const w of works) {
+    for (let i = 0; i < w.pos.length / 3; i++) {
+      p.fromArray(w.pos, i * 3);
+      acc.set(0, 0, 0);
+      for (let k = 0; k < 4; k++) {
+        const wt = w.sw[i * 4 + k];
+        const s = wt > 0 ? per[w.si[i * 4 + k]] : null;
+        if (!s) continue;
+        // radial offset from the bone's line
+        q.subVectors(p, s.a);
+        r.copy(q).addScaledVector(s.axis, -q.dot(s.axis));
+        if (s.spine) {
+          // spine: separate side-to-side and front/back (the belly)
+          const side = s.g[0], front = r.z >= 0 ? s.g[1] : s.g[2] ?? s.g[1];
+          acc.x += r.x * (side - 1) * wt;
+          acc.z += r.z * (front - 1) * wt;
+        } else {
+          acc.addScaledVector(r, (s.g[0] - 1) * wt);
+        }
+      }
+      w.pos[i * 3] += acc.x;
+      w.pos[i * 3 + 1] += acc.y;
+      w.pos[i * 3 + 2] += acc.z;
+    }
+  }
+}
+
+// ------------------------------------------------------------------ measuring the body
+function bodyQuery(rig: Rig, works: Work[]): BodyQuery {
+  const neck = rig.at.get('Neck')!.clone();
+  const axis = v3(neck.x, 0, neck.z);
+  const NA = 72, y0 = neck.y - 0.24, y1 = neck.y + 0.07, DY = 0.004;
+  const NY = Math.ceil((y1 - y0) / DY) + 1;
+  const field = new Float32Array(NA * NY);
+  const limbish = jointSet(rig, (key) => /^(UpperArm|LowerArm|Wrist|Index|Middle|Ring|Pinky|Thumb|Head)/.test(key));
+  const a = v3(), b = v3(), c = v3(), e1 = v3(), e2 = v3(), d = v3(), o = v3(), pv = v3(), tv = v3(), qv = v3();
+  for (const w of works) {
+    for (let t = 0; t < w.index.length; t += 3) {
+      const ids = [w.index[t], w.index[t + 1], w.index[t + 2]];
+      if (weightOnSet(w, ids[0], limbish) > 0.5 || weightOnSet(w, ids[1], limbish) > 0.5 || weightOnSet(w, ids[2], limbish) > 0.5) continue;
+      a.fromArray(w.pos, ids[0] * 3);
+      b.fromArray(w.pos, ids[1] * 3);
+      c.fromArray(w.pos, ids[2] * 3);
+      const ymin = Math.min(a.y, b.y, c.y), ymax = Math.max(a.y, b.y, c.y);
+      if (ymax < y0 || ymin > y1) continue;
+      const ang = [a, b, c].map((p) => Math.atan2(p.x - axis.x, p.z - axis.z));
+      let lo = ang[0], hi = ang[0];
+      for (const x0 of ang) {
+        let x = x0;
+        while (x - ang[0] > Math.PI) x -= Math.PI * 2;
+        while (x - ang[0] < -Math.PI) x += Math.PI * 2;
+        lo = Math.min(lo, x);
+        hi = Math.max(hi, x);
+      }
+      if (hi - lo > 2) continue;
+      e1.subVectors(b, a);
+      e2.subVectors(c, a);
+      const DA = (Math.PI * 2) / NA;
+      for (let j = Math.max(0, Math.floor((ymin - y0) / DY)); j <= Math.min(NY - 1, Math.ceil((ymax - y0) / DY)); j++) {
+        for (let k = Math.floor(lo / DA); k <= Math.ceil(hi / DA); k++) {
+          const kk = ((k % NA) + NA) % NA;
+          const al = kk * DA;
+          d.set(Math.sin(al), 0, Math.cos(al));
+          o.set(axis.x, y0 + j * DY, axis.z);
+          pv.crossVectors(d, e2);
+          const det = e1.dot(pv);
+          if (Math.abs(det) < 1e-12) continue;
+          tv.subVectors(o, a);
+          const u = tv.dot(pv) / det;
+          if (u < 0 || u > 1) continue;
+          qv.crossVectors(tv, e1);
+          const v = d.dot(qv) / det;
+          if (v < 0 || u + v > 1) continue;
+          const dist = e2.dot(qv) / det;
+          if (dist > field[j * NA + kk]) field[j * NA + kk] = dist;
+        }
+      }
+    }
+  }
+  // fill holes from the neighbours (rows and columns)
+  for (let it = 0; it < 40; it++) {
+    for (let i = 0; i < field.length; i++) {
+      if (field[i] > 0) continue;
+      const j = Math.floor(i / NA), k = i % NA;
+      let s = 0, n = 0;
+      for (const [dj, dk] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const jj = j + dj;
+        if (jj < 0 || jj >= NY) continue;
+        const v = field[jj * NA + ((k + dk + NA) % NA)];
+        if (v > 0) (s += v), n++;
+      }
+      if (n) field[i] = s / n;
+    }
+  }
+  return {
+    joint: (key) => (rig.at.get(key) ?? v3()).clone(),
+    neckAxis: axis,
+    torso: (alpha, y) => {
+      let x = alpha / ((Math.PI * 2) / NA);
+      x = ((x % NA) + NA) % NA;
+      const fy = Math.min(NY - 1, Math.max(0, (y - y0) / DY));
+      const k0 = Math.floor(x), k1 = (k0 + 1) % NA, j0 = Math.floor(fy), j1 = Math.min(NY - 1, j0 + 1);
+      const tx = x - k0, ty = fy - j0;
+      const v = (field[j0 * NA + k0] * (1 - tx) + field[j0 * NA + k1] * tx) * (1 - ty) + (field[j1 * NA + k0] * (1 - tx) + field[j1 * NA + k1] * tx) * ty;
+      return v > 0 ? v : 0.06;
+    },
+    limb: (ka, kb, s, half) => {
+      const A = rig.at.get(ka), B = rig.at.get(kb);
+      if (!A || !B) return 0.04;
+      const ax = v3().subVectors(B, A);
+      const len = ax.length();
+      ax.normalize();
+      const at = A.clone().addScaledVector(ax, s * len);
+      let best = 0;
+      const p = v3();
+      const set = jointSet(rig, (key) => key === ka || key === kb);
+      for (const w of works) {
+        for (let i = 0; i < w.pos.length / 3; i++) {
+          p.fromArray(w.pos, i * 3).sub(at);
+          const along = p.dot(ax);
+          if (Math.abs(along) > half) continue;
+          if (weightOnSet(w, i, set) < 0.3) continue;
+          best = Math.max(best, p.addScaledVector(ax, -along).length());
+        }
+      }
+      return best > 0 ? best : 0.04;
+    },
+  };
+}
+
+// ------------------------------------------------------------------ timing (debug)
+const timing: Record<string, number> = {};
+let tMark = 0;
+function mark(label?: string): void {
+  const now = performance.now();
+  if (label) timing[label] = (timing[label] ?? 0) + now - tMark;
+  tMark = now;
+}
+/** Per-phase build times so far (ms), for profiling. */
+export function lookTimings(): Record<string, number> {
+  return { ...timing };
+}
+
+// ------------------------------------------------------------------ the builder
+const HEAD_SOURCE: Record<string, string> = { masc: 'hoodie', neutral: 'casual', fem: 'punk' };
+const HEAD_MATS: Record<string, { brows: string; eyes: string; dark?: string }> = {
+  hoodie: { brows: 'Eyebrows', eyes: 'Eye' },
+  casual: { brows: 'Eyebrows', eyes: 'Eye', dark: 'Skin_Darker' },
+  punk: { brows: 'Hair_Brown', eyes: 'Brown' },
+};
+const ASSET_HAIR: Record<string, [string, string]> = { spiky: ['hoodie', 'Hair'], ponytail: ['casual', 'Hair'], mohawk: ['punk', 'Pink'] };
+const HEIGHT_SCALE: Record<string, number> = { short: 0.95, average: 1, tall: 1.05 };
+
+/** Fields that change the geometry (colors are painted per character and stay out of the key). */
+const COLOR_FIELDS = new Set(['skin', 'eyeColor', 'hairColor', 'facialHairColor', 'topColor', 'bottomColor', 'shoeColor', 'teeth', 'mouthProp', 'height']);
+
+export function geometryKey(look: Readonly<Appearance>, expression = 'neutral'): string {
+  return LOOK_FIELD_KEYS.filter((k) => !COLOR_FIELDS.has(k)).map((k) => look[k]).join('|') + `|${look.details.join(',')}|${expression}`;
+}
+
+export class LookBuilder {
+  private lib: PartLibrary | null = null;
+  private cache = new Map<string, Assembled>();
+  /** Source heads (as modelled), measured once: hair is moved from these onto new heads. */
+  private sourceHeads = new Map<string, HeadRig>();
+  private templates: () => CharacterTemplate[];
+
+  constructor(templates: () => CharacterTemplate[]) {
+    this.templates = templates;
+  }
+
+  get ready(): boolean {
+    return this.library()?.ready ?? false;
+  }
+
+  private library(): PartLibrary | null {
+    if (!this.lib) {
+      const t = this.templates();
+      if (t.length === 0 || t.some((x) => !x.merged)) return null;
+      this.lib = new PartLibrary(t);
+    }
+    return this.lib;
+  }
+
+  /** The (cached) body for a look; `expression` previews a face on the Character screen. */
+  build(look: Readonly<Appearance>, expression = 'neutral'): Assembled | null {
+    const lib = this.library();
+    if (!lib?.ready) return null;
+    const key = geometryKey(look, expression);
+    const hit = this.cache.get(key);
+    if (hit) {
+      // keep recently used looks at the end (least recently used get dropped first)
+      this.cache.delete(key);
+      this.cache.set(key, hit);
+      return hit;
+    }
+    let made: Assembled | null = null;
+    try {
+      made = this.assemble(lib, look, key, EXPRESSION_PRESETS[expression] ?? EXPRESSION_PRESETS.neutral);
+    } catch (err) {
+      console.error('character build failed, using the default look', err);
+      if (key !== geometryKey(DEFAULT_APPEARANCE)) return this.build(DEFAULT_APPEARANCE);
+      return null;
+    }
+    this.cache.set(key, made);
+    // geometry is small but there is no need to keep every look ever seen
+    while (this.cache.size > 40) {
+      const oldest = this.cache.keys().next().value!;
+      this.cache.delete(oldest);
+      // characters still using it keep their own references; GPU buffers go when they do
+    }
+    return made;
+  }
+
+  private sourceHead(lib: PartLibrary, template: string): HeadRig | null {
+    let h = this.sourceHeads.get(template);
+    if (h) return h;
+    const mats = HEAD_MATS[template];
+    const skin = lib.piece(template, 'Head', 'Skin'), eyes = lib.piece(template, 'Head', mats.eyes), brows = lib.piece(template, 'Head', mats.brows);
+    const rig = lib.rigs.get(template);
+    if (!skin || !eyes || !brows || !rig) return null;
+    const w = fromPiece(skin, rig, 'src', { slot: SLOT.SKIN });
+    const t0 = performance.now();
+    h = new HeadRig(surfaceOf([w], rig), fromPiece(eyes, rig, 'e', { slot: 0 }).pos, fromPiece(brows, rig, 'b', { slot: 0 }).pos);
+    timing['source heads'] = (timing['source heads'] ?? 0) + performance.now() - t0;
+    tMark += performance.now() - t0;
+    this.sourceHeads.set(template, h);
+    return h;
+  }
+
+  private assemble(lib: PartLibrary, look: Readonly<Appearance>, key: string, expr: Expression): Assembled {
+    mark();
+    const rig = lib.rigFor(look.bodyType)!;
+    const works: Work[] = [];
+    const headSet = jointSet(rig, (k) => k === 'Head');
+    const headW = (w: Work, i: number) => weightOnSet(w, i, headSet);
+
+    // ---------------- head
+    const src = HEAD_SOURCE[look.bodyType] ?? 'hoodie';
+    const mats = HEAD_MATS[src];
+    const srcHead = this.sourceHead(lib, src);
+    const skinP = lib.piece(src, 'Head', 'Skin')!;
+    const skin = fromPiece(skinP, rig, 'head', { slot: SLOT.SKIN });
+    const headParts: Work[] = [skin];
+    const darkP = mats.dark ? lib.piece(src, 'Head', mats.dark) : null;
+    if (darkP) headParts.push(fromPiece(darkP, rig, 'head-dark', { slot: SLOT.SKIN_DARK }));
+    const eyes = fromPiece(lib.piece(src, 'Head', mats.eyes)!, rig, 'eyes', { slot: SLOT.IRIS });
+    const brows = fromPiece(lib.piece(src, 'Head', mats.brows)!, rig, 'brows', { slot: SLOT.BROW });
+
+    if (srcHead) {
+      // head shape + face shape (everything that sits on the head moves together)
+      const f = { center: srcHead.center, eyeY: srcHead.eyeY, chinY: srcHead.chinY, half: v3(srcHead.halfWidth, 0.1, (srcHead.frontZ - srcHead.backZ) / 2) };
+      const p = v3();
+      for (const w of [...headParts, eyes, brows]) {
+        for (let i = 0; i < w.pos.length / 3; i++) {
+          shapeHead(p.fromArray(w.pos, i * 3), headW(w, i), f, look.headShape, look.faceShape);
+          w.pos.set([p.x, p.y, p.z], i * 3);
+        }
+      }
+      const moved = (q: V3) => shapeHead(q.clone(), 1, f, look.headShape, look.faceShape);
+      tweakFeatures(look, srcHead, moved, headParts, eyes, brows);
+    }
+    mark('head pieces + shape');
+    // measured on the neutral face, so every expression builds exactly the same pieces
+    const h = new HeadRig(surfaceOf(headParts, rig), eyes.pos, brows.pos);
+    mark('head measure');
+    applyExpression(expr, h, eyes, brows);
+    works.push(...headParts, eyes, brows);
+
+    // an open skull (the punk model's hair covered it): close it with skin
+    const cap = new ProcMesh({ bone: 'Head' });
+    skullCap(h, cap);
+    pushProc(works, cap, rig, 'skullcap', []);
+
+    mark('skull cap');
+    // ---------------- hair (+ hat)
+    const hairWorks: Work[] = [];
+    const procHair = new ProcMesh({ bone: 'Head' });
+    const asset = ASSET_HAIR[look.hair];
+    if (asset) {
+      const p = lib.piece(asset[0], 'Head', asset[1]);
+      const from = this.sourceHead(lib, asset[0]);
+      if (p && from) {
+        const w = fromPiece(p, rig, 'hair', { slot: SLOT.HAIR });
+        transferHair(w.pos, from, h);
+        hairWorks.push(w);
+      }
+    } else {
+      buildHair(look.hair, h, procHair);
+    }
+    const hat = new ProcMesh({ bone: 'Head' });
+    const fit = buildHat(look.hat, h, hat);
+    if (fit) {
+      for (const w of hairWorks) tuckHair(w.pos, h, fit.covered, fit.room);
+      tuckHair(procHair.pos, h, fit.covered, fit.room);
+    }
+    works.push(...hairWorks);
+    pushProc(works, procHair, rig, 'hair', []);
+    pushProc(works, hat, rig, 'hat', []);
+
+    mark('hair + hat');
+    // ---------------- face pieces
+    const grill = look.mouthAcc.endsWith('grill') ? look.mouthAcc.replace('grill', '') : 'none';
+    const mouth = new ProcMesh({ bone: 'Head' });
+    buildMouth(h, mouth, look.lips, expr, grill);
+    pushProc(works, mouth, rig, 'mouth', []);
+    const beard = new ProcMesh({ nearest: true, fallback: 'Head' });
+    buildFacialHair(look.facialHair, h, beard, look.lips);
+    pushProc(works, beard, rig, 'beard', headParts);
+    const bits = new ProcMesh({ bone: 'Head' });
+    buildLipPiercing(look.mouthAcc, h, bits, look.lips);
+    buildFacePiercing(look.faceAcc, h, bits);
+    buildDetails(look.details, h, bits);
+    buildEarrings(look.earrings, h, bits);
+    buildGlasses(look.glasses, h, bits);
+    pushProc(works, bits, rig, 'face', []);
+
+    mark('face');
+    // ---------------- outfit
+    const body: Work[] = [];
+    const add = (t: string, part: string, mat: string, spec: PaintSpec | ((i: number) => PaintSpec), tag: string, tris?: Uint32Array) => {
+      const p = lib.piece(t, part, mat);
+      if (p) body.push(fromPiece(p, rig, tag, spec, tris));
+      return p;
+    };
+    const SKIN = { slot: SLOT.SKIN };
+    switch (look.top) {
+      case 'tee':
+      case 'tank':
+        add('casual', 'Body', 'LightBrown', { slot: SLOT.TOP }, 'top');
+        add('casual', 'Body', 'Skin', SKIN, 'top-skin');
+        if (look.top === 'tank') makeTank(body, rig);
+        break;
+      case 'crop': {
+        add('punk', 'Body', 'Pink', { slot: SLOT.TOP }, 'top');
+        add('punk', 'Body', 'Skin', SKIN, 'top-skin');
+        // the black band of the crop top (its wristbands are separate options now)
+        const black = lib.piece('punk', 'Body', 'Black');
+        if (black) {
+          const keep = components(black).filter((tris) => {
+            const c = centroid(black, tris);
+            return Math.abs(c.x - (black.rig.at.get('Neck')?.x ?? 0)) < 0.17 && c.y > 1.0;
+          });
+          for (const tris of keep) body.push(fromPiece(black, rig, 'top-trim', { slot: SLOT.FIXED, color: lin(0x111114) }, tris));
+        }
+        break;
+      }
+      default:
+        add('hoodie', 'Body', 'Purple', { slot: SLOT.TOP }, 'top');
+        add('hoodie', 'Body', 'Skin', SKIN, 'top-skin');
+    }
+    switch (look.bottom) {
+      case 'jeans':
+        add('casual', 'Legs', 'LightBlue', { slot: SLOT.BOTTOM }, 'bottom');
+        break;
+      case 'slimjeans':
+      case 'leggings':
+        add('punk', 'Legs', 'Black', { slot: SLOT.BOTTOM }, 'bottom');
+        add('punk', 'Legs', 'Skin', look.bottom === 'leggings' ? { slot: SLOT.BOTTOM, shade: 0.86 } : SKIN, 'bottom-skin');
+        break;
+      default:
+        add('hoodie', 'Legs', 'LightBlue', { slot: SLOT.BOTTOM }, 'bottom');
+        add('hoodie', 'Legs', 'Skin', SKIN, 'bottom-skin');
+    }
+    switch (look.shoes) {
+      case 'running':
+        add('casual', 'Feet', 'Red_Dark', { slot: SLOT.SHOE }, 'shoes');
+        add('casual', 'Feet', 'White', { slot: SLOT.FIXED, color: lin(0xf0efe9) }, 'soles');
+        break;
+      case 'boots':
+        add('punk', 'Feet', 'Black', { slot: SLOT.SHOE }, 'shoes');
+        add('punk', 'Feet', 'Grey', { slot: SLOT.FIXED, color: lin(0x2b2c30) }, 'soles');
+        break;
+      default:
+        add('hoodie', 'Feet', 'Purple', { slot: SLOT.SHOE }, 'shoes');
+        add('hoodie', 'Feet', 'White', { slot: SLOT.FIXED, color: lin(0xf0efe9) }, 'soles');
+    }
+    // pants and shoes have to meet: hems that were made to hide in the punk's boots come down
+    // to the shoe, and wide jeans get tucked into boots
+    const legs = body.filter((w) => w.tag.startsWith('bottom'));
+    const feet = body.filter((w) => w.tag === 'shoes' || w.tag === 'soles');
+    if (look.shoes !== 'boots' && (look.bottom === 'slimjeans' || look.bottom === 'leggings')) lowerHems(legs, rig, 0.13);
+    if (look.shoes === 'boots' && look.bottom === 'jeans') tuckIntoBoots(legs, feet, rig);
+
+    // build and body type: the head's own skin takes part too (its neck)
+    let girth = BUILDS[look.build] ?? {};
+    if (look.bodyType === 'neutral') girth = combine(girth, NEUTRAL);
+    shapeBody([...body, skin], rig, girth);
+    works.push(...body);
+
+    mark('outfit + shape');
+    // ---------------- pieces fitted to the body
+    const bq = bodyQuery(rig, [...body, skin]);
+    mark('body measure');
+    const jew = new ProcMesh({ nearest: true, fallback: 'Chest' });
+    buildNecklace(look.necklace, bq, jew);
+    buildWrist(look.wrist, bq, jew);
+    buildCrewBands(bq, jew);
+    pushProc(works, jew, rig, 'jewelry', [...body, skin]);
+    mark('jewelry');
+    const out = this.merge(key, rig, works, h, look);
+    mark('merge');
+    return out;
+  }
+
+  private merge(key: string, rig: Rig, works: Work[], h: HeadRig, look: Readonly<Appearance>): Assembled {
+    let nv = 0, ni = 0;
+    for (const w of works) {
+      nv += w.pos.length / 3;
+      ni += w.index.length;
+    }
+    const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
+    const paint = new Float32Array(nv * PAINT_STRIDE), pbr = new Float32Array(nv * 2);
+    const index = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+    const nm = new THREE.Matrix3().getNormalMatrix(rig.Finv);
+    const p = v3();
+    let ov = 0, oi = 0;
+    for (const w of works) {
+      const n = w.pos.length / 3;
+      for (let i = 0; i < n; i++) {
+        p.fromArray(w.pos, i * 3).applyMatrix4(rig.Finv);
+        pos.set([p.x, p.y, p.z], (ov + i) * 3);
+        p.fromArray(w.nrm, i * 3).applyMatrix3(nm).normalize();
+        nrm.set([p.x, p.y, p.z], (ov + i) * 3);
+      }
+      si.set(w.si, ov * 4);
+      sw.set(w.sw, ov * 4);
+      paint.set(w.paint, ov * PAINT_STRIDE);
+      pbr.set(w.pbr, ov * 2);
+      for (let k = 0; k < w.index.length; k++) index[oi + k] = w.index[k] + ov;
+      ov += n;
+      oi += w.index.length;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+    g.setAttribute('pbr', new THREE.BufferAttribute(pbr, 2));
+    g.setIndex(new THREE.BufferAttribute(index, 1));
+    g.computeBoundingBox();
+    g.computeBoundingSphere();
+    const shapeLift = look.build === 'heavy' ? 0.01 : 0;
+    return {
+      key, rig, geometry: g, paint,
+      mouth: h.mouth.clone(),
+      frame: { eyeY: h.eyeY, topY: h.crownY + (look.hat !== 'none' ? 0.04 : 0), chestY: (rig.at.get('Chest')?.y ?? 1.35) + shapeLift },
+      heightScale: HEIGHT_SCALE[look.height] ?? 1,
+    };
+  }
+}
+
+function pushProc(works: Work[], m: ProcMesh, rig: Rig, tag: string, nearestIn: Work[]): void {
+  const w = fromProc(m, rig, tag, nearestIn);
+  if (w) works.push(w);
+}
+
+function surfaceOf(parts: Work[], rig: Rig): HeadSurface {
+  let n = 0, ni = 0;
+  for (const w of parts) {
+    n += w.pos.length / 3;
+    ni += w.index.length;
+  }
+  const pos = new Float32Array(n * 3), index = new Uint32Array(ni), headWeight = new Float32Array(n);
+  let ov = 0, oi = 0;
+  for (const w of parts) {
+    const c = w.pos.length / 3;
+    pos.set(w.pos, ov * 3);
+    const headSet = jointSet(rig, (k) => k === 'Head');
+    for (let i = 0; i < c; i++) headWeight[ov + i] = weightOnSet(w, i, headSet);
+    for (let k = 0; k < w.index.length; k++) index[oi + k] = w.index[k] + ov;
+    ov += c;
+    oi += w.index.length;
+  }
+  return { pos, index, headWeight };
+}
+
+/** Closes a skull that was left open under the model's own hair. */
+function skullCap(h: HeadRig, out: ProcMesh): void {
+  const step = (3 * Math.PI) / 180;
+  const pts: Array<Array<V3 | null>> = [];
+  const nt = Math.round((Math.PI * 2) / step);
+  let any = false;
+  for (let phi = Math.PI / 2; phi > 0.1; phi -= step) {
+    const row: Array<V3 | null> = [];
+    for (let k = 0; k < nt; k++) {
+      const t = (k / nt) * Math.PI * 2 - Math.PI;
+      // the gap, plus a cell of overlap under the skin around it
+      let near = false;
+      for (const [dt, dp] of [[0, 0], [step, 0], [-step, 0], [0, step], [0, -step], [step, step], [-step, -step], [step, -step], [-step, step]]) {
+        if (!h.measured(t + dt, phi + dp)) near = true;
+      }
+      if (near) any = true;
+      row.push(near ? h.surface(t, phi, h.measured(t, phi) ? -0.0012 : -0.0004) : null);
+    }
+    pts.push(row);
+  }
+  if (any) out.grid(pts, () => ({ slot: SLOT.SKIN }), { flat: false, wrap: true });
+}
+
+/** Eyes, brows, nose and ears presets. */
+function tweakFeatures(look: Readonly<Appearance>, src: HeadRig, moved: (p: V3) => V3, skins: Work[], eyes: Work, brows: Work): void {
+  const cx = moved(src.mouth).x;
+  const p = v3();
+  // eyes: scale each eye around its own center
+  const eyeScale = { small: [0.78, 0.78], large: [1.28, 1.28], narrow: [1.1, 0.55] }[look.eyes] ?? [1, 1];
+  const centers = [moved(src.eyeL), moved(src.eyeR)];
+  for (let i = 0; i < eyes.pos.length / 3; i++) {
+    p.fromArray(eyes.pos, i * 3);
+    const c = p.x >= cx ? centers[0] : centers[1];
+    p.x = c.x + (p.x - c.x) * eyeScale[0];
+    p.y = c.y + (p.y - c.y) * eyeScale[1];
+    eyes.pos.set([p.x, p.y, p.z], i * 3);
+  }
+  // brows: thickness, an arch, and the expression lifting the inner / outer ends
+  const bc = [moved(src.browL), moved(src.browR)];
+  const extent = [0, 0];
+  for (let i = 0; i < brows.pos.length / 3; i++) {
+    const x = brows.pos[i * 3];
+    const s = x >= cx ? 0 : 1;
+    extent[s] = Math.max(extent[s], Math.abs(x - bc[s].x));
+  }
+  for (let i = 0; i < brows.pos.length / 3; i++) {
+    p.fromArray(brows.pos, i * 3);
+    const s = p.x >= cx ? 0 : 1;
+    const c = bc[s];
+    // 0 at the inner end (toward the nose), 1 at the outer end
+    const u = Math.min(1, Math.max(0, ((p.x - c.x) * (s === 0 ? 1 : -1)) / Math.max(1e-4, extent[s]) * 0.5 + 0.5));
+    const thick = { thin: 0.5, thick: 1.8 }[look.brows] ?? 1;
+    p.y = c.y + (p.y - c.y) * thick;
+    if (look.brows === 'thick') p.x = c.x + (p.x - c.x) * 1.06;
+    if (look.brows === 'arched') p.y += 0.0055 * Math.sin(Math.PI * Math.pow(u, 0.75)) - 0.0012;
+    brows.pos.set([p.x, p.y, p.z], i * 3);
+  }
+  // nose: everything near the nose, fading out smoothly
+  const tip = moved(src.noseTip);
+  const root = v3(cx, (moved(v3(cx, src.noseBaseY, 0)).y + tip.y) / 2 + 0.004, tip.z - 0.014);
+  const ns = { small: [0.8, 0.85, 0.8], wide: [1.38, 1, 1], narrow: [0.74, 1, 1.02] }[look.nose];
+  const earScale = { small: 0.72, large: 1.32 }[look.ears];
+  const ears = [moved(src.earL.center), moved(src.earR.center)];
+  for (const w of skins) {
+    for (let i = 0; i < w.pos.length / 3; i++) {
+      p.fromArray(w.pos, i * 3);
+      if (ns && p.z > root.z - 0.012) {
+        const d = p.distanceTo(root.clone().setZ(tip.z - 0.006));
+        const k = smoothstep(0.034, 0.014, d);
+        if (k > 0) {
+          const q = p.clone().sub(root);
+          q.set(q.x * ns[0], q.y * ns[1], q.z * ns[2]);
+          p.lerp(q.add(root), k);
+        }
+      }
+      if (earScale) {
+        const s = p.x >= cx ? 0 : 1;
+        const e = ears[s];
+        const out = Math.abs(p.x - cx) - (Math.abs(e.x - cx) - 0.012);
+        const k = smoothstep(0, 0.009, out) * smoothstep(0.06, 0.035, p.distanceTo(e));
+        if (k > 0) {
+          const anchor = e.clone().setX(cx + (e.x - cx) * 0.86);
+          p.lerp(p.clone().sub(anchor).multiplyScalar(earScale).add(anchor), k);
+        }
+      }
+      w.pos.set([p.x, p.y, p.z], i * 3);
+    }
+  }
+}
+
+/** An expression on the eyes (open / squint) and brows (inner and outer ends up or down). */
+function applyExpression(expr: Expression, h: HeadRig, eyes: Work, brows: Work): void {
+  if (expr === EXPRESSION_PRESETS.neutral) return;
+  const cx = h.mouth.x;
+  const p = v3();
+  for (let i = 0; i < eyes.pos.length / 3; i++) {
+    p.fromArray(eyes.pos, i * 3);
+    const c = p.x >= cx ? h.eyeL : h.eyeR;
+    eyes.pos[i * 3 + 1] = c.y + (p.y - c.y) * expr.eyeOpen;
+  }
+  const bc = [h.browL, h.browR];
+  for (let i = 0; i < brows.pos.length / 3; i++) {
+    p.fromArray(brows.pos, i * 3);
+    const s = p.x >= cx ? 0 : 1;
+    const half = Math.max(0.01, Math.abs(bc[s].x - cx));
+    // 0 at the inner end (toward the nose), 1 at the outer end
+    const u = Math.min(1, Math.max(0, Math.abs(p.x - cx) / (half * 2)));
+    brows.pos[i * 3 + 1] = p.y + expr.browIn * (1 - u) + expr.browOut * u;
+    brows.pos[i * 3 + 2] = p.z + 0.0008 * Math.max(0, expr.browIn) * (1 - u);
+  }
+}
+
+/** Position along a leg's shin (0 = knee, 1 = ankle) and distance from it. */
+function shin(rig: Rig, side: string): { A: V3; axis: V3; len: number } {
+  const A = rig.at.get(`LowerLeg${side}`)!, B = rig.at.get(`Foot${side}`)!;
+  const axis = v3().subVectors(B, A);
+  const len = axis.length();
+  return { A, axis: axis.normalize(), len };
+}
+
+/** Stretches the lower legs of pants down so their hems reach `hemY` (meters). */
+function lowerHems(legs: Work[], rig: Rig, hemY: number): void {
+  for (const side of ['L', 'R']) {
+    const { A, axis, len } = shin(rig, side);
+    const onShin = (w: Work, i: number) => weightOn(w, i, rig, (k) => k === `LowerLeg${side}` || k === `Foot${side}`) > 0.5;
+    let hem = 0;
+    for (const w of legs) for (let i = 0; i < w.pos.length / 3; i++) if (onShin(w, i)) hem = Math.max(hem, v3().fromArray(w.pos, i * 3).sub(A).dot(axis) / len);
+    const target = Math.min(0.97, (A.y - hemY) / (A.y - (A.y + axis.y * len)));
+    const from = 0.2;
+    if (hem <= from || target <= hem) continue;
+    for (const w of legs) {
+      for (let i = 0; i < w.pos.length / 3; i++) {
+        if (!onShin(w, i)) continue;
+        const p = v3().fromArray(w.pos, i * 3);
+        const s = p.clone().sub(A).dot(axis) / len;
+        if (s <= from) continue;
+        const s2 = from + ((s - from) * (target - from)) / (hem - from);
+        p.addScaledVector(axis, (s2 - s) * len);
+        w.pos.set([p.x, p.y, p.z], i * 3);
+      }
+    }
+  }
+}
+
+/** Squeezes pant legs inside boot shafts. */
+function tuckIntoBoots(legs: Work[], boots: Work[], rig: Rig): void {
+  for (const side of ['L', 'R']) {
+    const { A, axis, len } = shin(rig, side);
+    const radial = (p: V3) => {
+      const q = p.clone().sub(A);
+      const s = q.dot(axis);
+      return { s: s / len, r: q.addScaledVector(axis, -s) };
+    };
+    // the shaft's narrowest cross-section (boots are not round): widest point per direction, then the smallest
+    let top = 1;
+    const bins = new Float32Array(16);
+    const ref = Math.abs(axis.y) < 0.9 ? v3(0, 1, 0) : v3(0, 0, 1);
+    const e1 = ref.sub(axis.clone().multiplyScalar(ref.dot(axis))).normalize(), e2 = axis.clone().cross(e1);
+    for (const w of boots) {
+      for (let i = 0; i < w.pos.length / 3; i++) {
+        if (weightOn(w, i, rig, (k) => k === `LowerLeg${side}`) < 0.5) continue;
+        const { s, r } = radial(v3().fromArray(w.pos, i * 3));
+        top = Math.min(top, s);
+        if (s > 0.35 && s < 0.75) {
+          const b = Math.floor(((Math.atan2(r.dot(e2), r.dot(e1)) / (Math.PI * 2) + 1) % 1) * 16);
+          bins[b] = Math.max(bins[b], r.length());
+        }
+      }
+    }
+    const filled = [...bins].filter((v) => v > 0);
+    if (filled.length < 8) continue;
+    const shaft = Math.min(...filled);
+    for (const w of legs) {
+      for (let i = 0; i < w.pos.length / 3; i++) {
+        const p = v3().fromArray(w.pos, i * 3);
+        const { s, r } = radial(p);
+        if (s < top + 0.02 || weightOn(w, i, rig, (k) => k === `LowerLeg${side}`) < 0.5) continue;
+        const max = shaft - 0.006, cur = r.length();
+        if (cur <= max) continue;
+        p.addScaledVector(r, max / cur - 1);
+        w.pos.set([p.x, p.y, p.z], i * 3);
+      }
+    }
+  }
+}
+
+/** T-shirt -> tank top: the sleeves become bare upper arms. */
+function makeTank(body: Work[], rig: Rig): void {
+  const top = body.find((w) => w.tag === 'top'), skin = body.find((w) => w.tag === 'top-skin');
+  if (!top || !skin) return;
+  for (const side of ['L', 'R']) {
+    const up = `UpperArm${side}`, sh = `Shoulder${side}`;
+    const A = rig.at.get(up)!, B = rig.at.get(`LowerArm${side}`)!;
+    const axis = v3().subVectors(B, A);
+    const len = axis.length();
+    axis.normalize();
+    const radial = (w: Work, i: number) => {
+      const q = v3().fromArray(w.pos, i * 3).sub(A);
+      const along = q.dot(axis);
+      return { along, r: q.addScaledVector(axis, -along) };
+    };
+    // the bare arm under the sleeve's hem sets how thick the arm is
+    let armR = 0, armN = 0, hem = 0;
+    for (let i = 0; i < top.pos.length / 3; i++) if (weightOn(top, i, rig, (k) => k === up) > 0.5) hem = Math.max(hem, radial(top, i).along);
+    for (let i = 0; i < skin.pos.length / 3; i++) {
+      if (weightOn(skin, i, rig, (k) => k === up) < 0.5) continue;
+      const { along, r } = radial(skin, i);
+      if (along > hem && along < hem + 0.06) (armR += r.length()), armN++;
+    }
+    armR = armN ? armR / armN : 0.04;
+    for (let i = 0; i < top.pos.length / 3; i++) {
+      const wUp = weightOn(top, i, rig, (k) => k === up), wSh = weightOn(top, i, rig, (k) => k === sh);
+      if (wUp < 0.25) continue;
+      const { along, r } = radial(top, i);
+      const t = Math.min(1, Math.max(0, along / (len * 0.5)));
+      const target = armR * (1.0 + 0.12 * (1 - t));
+      const cur = r.length();
+      const k = Math.min(1, wUp * 2.2);
+      if (cur > target) {
+        const shrink = cur - (cur - target) * k;
+        const q = v3().fromArray(top.pos, i * 3).addScaledVector(r, (shrink - cur) / cur);
+        top.pos.set([q.x, q.y, q.z], i * 3);
+      }
+      if (wUp > 0.4) top.paint[i * PAINT_STRIDE] = SLOT.SKIN, (top.paint[i * PAINT_STRIDE + 1] = SLOT.SKIN);
+      void wSh;
+    }
+  }
+}

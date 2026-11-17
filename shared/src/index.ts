@@ -1,4 +1,6 @@
 export * from './math';
+export * from './config/appearance';
+export * from './config/porch';
 export * from './config/crews';
 export * from './config/game';
 export * from './config/weapons';
@@ -13,3 +15,4 @@ export * from './sim/combat';
 export * from './sim/nav';
 export * from './sim/bots';
 export * from './sim/game';
+export * from './sim/porch';

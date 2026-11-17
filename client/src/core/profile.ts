@@ -1,5 +1,7 @@
+import { DEFAULT_APPEARANCE, sanitizeAppearance, type Appearance } from '@shared/config/appearance';
 import { NAME_MAX_LENGTH, sanitizeName, type ModeId } from '@shared/config/game';
 import { DEFAULT_LOADOUT, sanitizeLoadout, type Loadout } from '@shared/config/weapons';
+import { sanitizeSquadMode, type SquadMode } from '@shared/config/porch';
 import type { BotDifficulty } from '@shared/protocol';
 
 const KEY = 'whoopa.profile.v1';
@@ -7,19 +9,25 @@ const KEY = 'whoopa.profile.v1';
 interface Saved {
   name?: string;
   loadout?: unknown;
+  look?: unknown;
   mode?: string;
+  squads?: string;
   difficulty?: string;
 }
 
 /**
- * The player's local identity. There are no accounts: the display name, saved loadout and
- * last-used menu choices live in this browser's localStorage.
+ * The player's local identity. There are no accounts: the display name, saved loadout,
+ * character look and last-used menu choices live in this browser's localStorage.
  */
 export class Profile {
   name: string;
   loadout: Loadout;
+  /** Character look from the Character screen. */
+  look: Appearance = { ...DEFAULT_APPEARANCE };
   /** Last mode picked on the main menu. */
   mode: ModeId = 'tdm';
+  /** JUMP OFF THE PORCH team size. */
+  squads: SquadMode = 'solo';
   /** Bot difficulty for practice matches. */
   difficulty: BotDifficulty = 'normal';
   private listeners = new Set<() => void>();
@@ -33,7 +41,9 @@ export class Profile {
         const s = JSON.parse(raw) as Saved;
         if (typeof s.name === 'string' && s.name.trim()) this.name = sanitizeName(s.name);
         this.loadout = sanitizeLoadout(s.loadout);
-        if (s.mode === 'tdm' || s.mode === 'turf') this.mode = s.mode;
+        this.look = sanitizeAppearance(s.look);
+        if (s.mode === 'tdm' || s.mode === 'turf' || s.mode === 'porch') this.mode = s.mode;
+        this.squads = sanitizeSquadMode(s.squads);
         if (s.difficulty === 'easy' || s.difficulty === 'normal' || s.difficulty === 'hard') this.difficulty = s.difficulty;
       }
     } catch {
@@ -53,8 +63,18 @@ export class Profile {
     for (const l of this.listeners) l();
   }
 
+  setLook(look: Appearance): void {
+    this.look = sanitizeAppearance(look);
+    this.save();
+  }
+
   setMode(mode: ModeId): void {
     this.mode = mode;
+    this.save();
+  }
+
+  setSquads(squads: SquadMode): void {
+    this.squads = squads;
     this.save();
   }
 
@@ -70,7 +90,7 @@ export class Profile {
 
   private save(): void {
     try {
-      localStorage.setItem(KEY, JSON.stringify({ name: this.name, loadout: this.loadout, mode: this.mode, difficulty: this.difficulty }));
+      localStorage.setItem(KEY, JSON.stringify({ name: this.name, loadout: this.loadout, look: this.look, mode: this.mode, squads: this.squads, difficulty: this.difficulty }));
     } catch {
       /* ignore */
     }

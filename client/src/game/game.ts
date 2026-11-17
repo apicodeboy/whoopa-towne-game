@@ -1,29 +1,35 @@
 import * as THREE from 'three';
+import { decodeAppearance, type Appearance } from '@shared/config/appearance';
 import { CREWS, type TeamId } from '@shared/config/crews';
 import { INTERP_DELAY_MS, PLAYER, TICK_DT, TURF } from '@shared/config/game';
-import { THROWABLE_IDS, WEAPON_IDS, weaponForSlot, type Loadout, type WeaponDef } from '@shared/config/weapons';
+import { BAGS, HEAL_KINDS, ITEM, PORCH } from '@shared/config/porch';
+import { AMMO_NAMES, AMMO_TYPES, SLOT_PRIMARY_B, THROWABLES, THROWABLE_IDS, WEAPONS, WEAPON_IDS, type Loadout, type WeaponDef } from '@shared/config/weapons';
 import type { MapDef } from '@shared/map/types';
 import { DEG, Rng, clamp, wrapAngle, type Vec3 } from '@shared/math';
 import {
-  EV, PF, PHASE, quantizeInput, type RosterEntry, type SnapPlayer, type Snapshot,
+  EV, PF, PHASE, quantizeInput, type MatchEndMsg, type RosterEntry, type SnapPlayer, type Snapshot,
 } from '@shared/protocol';
+import { transportAt } from '@shared/sim/porch';
 import {
   HIT_PLAYER, HIT_WORLD, makeShotResult, shotSeed, spreadDirection, traceShot, type ShotTarget,
 } from '@shared/sim/combat';
 import { stepProjectile, type Projectile } from '@shared/sim/game';
 import type { PhysicsWorld } from '@shared/sim/physics';
 import {
-  BTN, currentSpread, eyeHeight, makeInputCmd, makePlayerState, playerStateFromArray,
+  AIR_BALLOON, AIR_RIDING, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, playerStateFromArray, reserveOf, weaponInSlot,
   type InputCmd, type PlayerState, type StepActions,
 } from '@shared/sim/player';
+import type { Assets } from './assets';
 import type { SettingsStore } from '../core/settings';
 import type { InputManager } from '../input/inputManager';
 import type { Session } from '../net/session';
 import { Hud, makeHudState, type HudPlayerRow, type HudState } from '../ui/hud';
+import { PorchHud, type PorchHudState } from '../ui/porchHud';
 import { CameraRig } from './camera';
 import { makePose, type CharacterPose, type CharacterVisual } from './characters/characterTypes';
 import { ProceduralCharacter } from './characters/proceduralCharacter';
 import { Effects } from './fx/effects';
+import { PorchWorld, makeBalloon } from './porch/porchWorld';
 import { Predictor } from './predictor';
 import { RemotePlayer } from './remotePlayer';
 import type { GameRenderer } from './renderer';
@@ -51,6 +57,9 @@ export interface GameAudio {
   smoke(pos: THREE.Vector3): void;
   zone(kind: 'captured' | 'lost' | 'neutral'): void;
   phase(kind: 'start' | 'win' | 'lose' | 'draw' | 'tick'): void;
+  pop?(pos: THREE.Vector3 | null): void;
+  loot?(): void;
+  riot?(): void;
 }
 
 export interface GameDeps {
@@ -62,7 +71,11 @@ export interface GameDeps {
   loadout: Loadout;
   audio?: GameAudio;
   /** Builds a character visual (lets the art pass swap in skinned models). */
-  characterFactory?: (team: TeamId, seed: number) => CharacterVisual;
+  characterFactory?: (team: TeamId, seed: number, look?: Appearance) => CharacterVisual;
+  /** Builds characters' bodies ahead of time (so players appearing later cost nothing). */
+  prewarmLooks?: (looks: Appearance[]) => void;
+  /** Models (JUMP OFF THE PORCH draws loose guns with them). */
+  assets?: Assets;
 }
 
 export interface GameStats {
@@ -83,6 +96,18 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
+const _xz = { x: 0, z: 0 };
+
+/** "Kingpin AR" / "30 Rifle Ammo" / "3x Bandage" for prompts. */
+function itemName(kind: number, code: number, count: number): string {
+  if (kind === ITEM.WEAPON) return (WEAPONS[WEAPON_IDS[code]]?.name ?? 'Weapon').toUpperCase();
+  if (kind === ITEM.AMMO) return `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`.toUpperCase();
+  if (kind === ITEM.HEAL) return `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`.toUpperCase();
+  if (kind === ITEM.ARMOR) return `ARMOR (${code})`;
+  if (kind === ITEM.THROWABLE) return `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`.toUpperCase();
+  return 'ITEM';
+}
+
 /** Generous bounds of one character (covers a dead body, its shadow and a frame of movement). */
 const _sphere = new THREE.Sphere(new THREE.Vector3(), 3);
 
@@ -114,7 +139,18 @@ export class Game {
   onPause: (() => void) | null = null;
   /** Fired once when the match reaches its final whistle. */
   onMatchOver: (() => void) | null = null;
+  /** JUMP OFF THE PORCH: the player asked to leave after being eliminated. */
+  onLeaveRequest: (() => void) | null = null;
   paused = false;
+  /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
+  readonly porchWorld: PorchWorld | null = null;
+  readonly porchHud: PorchHud | null = null;
+  private mySquad = 0;
+  private spectateIdx = -1;
+  private balloons = new Map<number, THREE.Group>();
+  private myBalloon: THREE.Group | null = null;
+  private promptTarget = '';
+  private fireWas = false;
 
   private deps: GameDeps;
   private stage: Stage;
@@ -181,9 +217,13 @@ export class Game {
     this.unsubSettings = deps.settings.onChange(() => this.applyEffectDensity());
 
     for (const r of this.session.roster) this.roster.set(r.idx, r);
+    // build every player's body now, while the match is starting, not mid-game when they appear
+    deps.prewarmLooks?.(this.session.roster.flatMap((r) => (r.look ? [decodeAppearance(r.look)] : [])));
     const mine = this.roster.get(this.session.myIdx);
-    this.myTeam = mine ? mine.team : 0;
-    this.localChar = this.makeCharacter(this.myTeam, this.session.myIdx);
+    this.mySquad = mine?.squad ?? mine?.team ?? 0;
+    // battle royale: your squad is "blue", everyone else "red" (name tags, arm bands, minimap)
+    this.myTeam = this.session.mode === 'porch' ? 0 : mine ? mine.team : 0;
+    this.localChar = this.makeCharacter(this.myTeam, this.session.myIdx, mine?.look ? decodeAppearance(mine.look) : undefined);
     this.gfx.scene.add(this.localChar.root);
     this.localChar.setVisible(false);
 
@@ -198,12 +238,32 @@ export class Game {
     this.session.handlers.onSnapshot = (s) => this.handleSnapshot(s);
     this.session.handlers.onRoster = (r) => this.setRoster(r);
 
+    if (this.session.mode === 'porch' && this.session.porch) {
+      this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
+      this.gfx.scene.add(this.porchWorld.group);
+      this.porchHud = new PorchHud(deps.uiRoot, {
+        spectate: () => this.nextSpectate(),
+        leave: () => this.onLeaveRequest?.(),
+      });
+      this.porchHud.setVoice(deps.settings.values.volume > 0);
+      deps.input.porchSlots = true;
+      this.session.handlers.onMatchEnd = (msg: MatchEndMsg) => this.porchHud?.showResult(msg.players, this.session.myIdx, msg.winner);
+    }
+
     window.addEventListener('resize', this.onResize);
     this.resize();
   }
 
-  private makeCharacter(team: TeamId, seed: number): CharacterVisual {
-    return this.deps.characterFactory ? this.deps.characterFactory(team, seed) : new ProceduralCharacter(team, seed);
+  /** Color side of a player as seen from here (battle royale: my squad vs everyone else). */
+  private visTeam(r: RosterEntry): TeamId {
+    if (this.session.mode === 'porch') return (r.squad ?? r.team) === this.mySquad ? 0 : 1;
+    return r.team;
+  }
+
+  private makeCharacter(team: TeamId, seed: number, look?: Appearance): CharacterVisual {
+    return this.deps.characterFactory
+      ? this.deps.characterFactory(team, seed, look)
+      : new ProceduralCharacter(team, seed, look);
   }
 
   private applyEffectDensity(): void {
@@ -241,12 +301,14 @@ export class Game {
 
   // ------------------------------------------------------------------ roster
   setRoster(list: RosterEntry[]): void {
+    const fresh = list.filter((r) => r.look && this.roster.get(r.idx)?.look !== r.look);
     this.roster.clear();
     for (const r of list) this.roster.set(r.idx, r);
+    if (fresh.length) this.deps.prewarmLooks?.(fresh.map((r) => decodeAppearance(r.look)));
     // drop visuals of players who left
     for (const [idx, rp] of this.remotes) {
       const r = this.roster.get(idx);
-      if (!r || r.name !== rp.name || r.team !== rp.team) {
+      if (!r || r.name !== rp.name || this.visTeam(r) !== rp.team || r.look !== rp.look) {
         rp.dispose();
         this.remotes.delete(idx);
       }
@@ -258,7 +320,8 @@ export class Game {
   }
 
   private teamOf(idx: number): TeamId {
-    return this.roster.get(idx)?.team ?? 0;
+    const r = this.roster.get(idx);
+    return r ? this.visTeam(r) : 0;
   }
 
   private ensureRemote(idx: number): RemotePlayer | null {
@@ -266,9 +329,11 @@ export class Game {
     if (rp) return rp;
     const r = this.roster.get(idx);
     if (!r) return null;
-    const visual = this.makeCharacter(r.team, idx);
+    const team = this.visTeam(r);
+    const visual = this.makeCharacter(team, idx, r.look ? decodeAppearance(r.look) : undefined);
     this.gfx.scene.add(visual.root);
-    rp = new RemotePlayer(idx, r.name, r.team, r.bot, visual, r.team === this.myTeam);
+    rp = new RemotePlayer(idx, r.name, team, r.bot, visual, team === this.myTeam);
+    rp.look = r.look;
     this.gfx.scene.add(rp.tag);
     this.remotes.set(idx, rp);
     return rp;
@@ -331,8 +396,11 @@ export class Game {
   private onPhase(snap: Snapshot): void {
     const audio = this.deps.audio;
     if (snap.phase === PHASE.PLAYING) {
-      this.hud.announce('GO!', 'good', 1.4);
+      if (!this.porchHud) this.hud.announce('GO!', 'good', 1.4);
       audio?.phase('start');
+    } else if (snap.phase === PHASE.ENDED && this.porchHud) {
+      audio?.phase(snap.porch && snap.porch.place === 1 ? 'win' : 'lose');
+      this.onMatchOver?.();
     } else if (snap.phase === PHASE.ENDED) {
       // the final scoreboard shows the result; here just the sting
       const [a, b] = snap.scores;
@@ -484,6 +552,37 @@ export class Game {
         }
         break;
       }
+      case EV.BAG_OPEN:
+        this.porchWorld?.openBag(e[1]);
+        break;
+      case EV.PICKUP_ADD:
+        this.porchWorld?.addPickup(e[1], e[2], e[3], e[4], e[5] / 100, e[6] / 100, e[7] / 100);
+        break;
+      case EV.PICKUP_GONE:
+        this.porchWorld?.removePickup(e[1]);
+        break;
+      case EV.LOOT:
+        if (e[1] === myIdx) {
+          this.porchHud?.loot(e[2], e[3], e[4]);
+          audio?.loot?.();
+        }
+        break;
+      case EV.TOUCHDOWN: {
+        const at = e[1] === myIdx ? _v.set(this.predictor.state.x, this.predictor.state.y, this.predictor.state.z) : this.remotes.get(e[1]);
+        if (at) {
+          _v2.set(at.x, at.y, at.z);
+          this.porchWorld?.pop(_v2);
+          audio?.pop?.(e[1] === myIdx ? null : _v2);
+        }
+        this.dropBalloon(e[1]);
+        break;
+      }
+      case EV.STAGE:
+        if (e[1] >= 3) audio?.riot?.();
+        break;
+      case EV.HEALED:
+        if (e[1] === myIdx) audio?.reloadDone();
+        break;
       case EV.RELOAD: {
         if (e[1] !== myIdx) {
           const rp = this.remotes.get(e[1]);
@@ -550,15 +649,43 @@ export class Game {
     const dy = this.renderPos.y - this.visY;
     if (Math.abs(dy) > 0.7 || !st.grounded) this.visY = this.renderPos.y;
     else this.visY += dy * Math.min(1, dt * 20);
+    const riding = !!this.porchWorld && this.alive && st.air === AIR_RIDING;
+    if (riding && this.session.porch) {
+      // aboard the blimp: ride along with it (the server moves riders; drawing it from the clock is smoother)
+      const pi = this.session.porch;
+      const takeoff = snap?.porch && snap.porch.takeoff >= 0 ? snap.porch.takeoff : Infinity;
+      transportAt(pi.route, pi.speed, takeoff, this.session.serverTime(), _xz);
+      this.renderPos.x = _xz.x;
+      this.renderPos.z = _xz.z;
+      // hanging under the gondola, so the camera looks around under the blimp and out over the town
+      this.renderPos.y = this.visY = pi.altitude - 7;
+    }
+    let spectating = false;
+    if (this.porchWorld && !this.alive && this.myLife >= 0) {
+      const t = this.spectateTarget();
+      if (t) {
+        spectating = true;
+        this.renderPos.x = t.x;
+        this.renderPos.y = this.visY = t.y;
+        this.renderPos.z = t.z;
+      }
+      // fire switches who you watch
+      const fire = this.deps.input.frame.fire;
+      if (fire && !this.fireWas) {
+        if (t) this.nextSpectate();
+        this.porchHud?.hideOut();
+      }
+      this.fireWas = fire;
+    }
 
     const aimYaw = this.view.yaw;
     const aimPitch = clamp(this.view.pitch + this.recoilP, -PLAYER.maxPitch, PLAYER.maxPitch);
-    const weapon = weaponForSlot(this.loadout, st.slot);
+    const weapon = weaponInSlot(st, st.slot);
     this.rig.baseFov = settings.values.fov;
     this.rig.aimFovMult = weapon ? weapon.aimFov : 1;
     this.rig.update(
       dt, this.renderPos.x, this.visY, this.renderPos.z, aimYaw, aimPitch,
-      this.alive && st.aiming === 1, this.alive && st.crouching === 1, this.alive && st.sprinting === 1, this.phys,
+      (this.alive || spectating) && st.aiming === 1 && !spectating, this.alive && st.crouching === 1 && !spectating, this.alive && st.sprinting === 1, this.phys,
     );
 
     const p = this.pose;
@@ -569,10 +696,19 @@ export class Game {
     p.sprinting = st.sprinting === 1; p.aiming = st.aiming === 1;
     p.reload = weapon && st.reloadT > 0 ? 1 - st.reloadT / weapon.reloadTime : -1;
     p.alive = this.alive;
-    p.held = st.slot === 0 ? this.loadout.primary : st.slot === 1 ? this.loadout.secondary : this.loadout.throwable;
+    p.held = st.slot === 2 ? (THROWABLE_IDS[st.thr - 1] ?? 'none') : !weapon || weapon.id === 'fists' ? 'none' : weapon.id;
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
-      this.localChar.setVisible(this.rig.dist > 0.55 || !this.alive);
+      this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding);
+    }
+    // hanging from a balloon
+    const wantBalloon = !!this.porchWorld && this.alive && st.air === AIR_BALLOON;
+    if (wantBalloon && !this.myBalloon) {
+      this.myBalloon = makeBalloon();
+      this.localChar.root.add(this.myBalloon);
+    } else if (!wantBalloon && this.myBalloon) {
+      this.myBalloon.removeFromParent();
+      this.myBalloon = null;
     }
 
     // footsteps
@@ -597,7 +733,19 @@ export class Game {
       _sphere.center.set(rp.x, rp.y + 0.9, rp.z);
       rp.update(dt, rt, camPos, this.frustum.intersectsSphere(_sphere));
       if (audio && rp.takeStep()) audio.footstep(_v.set(rp.x, rp.y, rp.z), rp.sprinting);
+      if (this.porchWorld) {
+        const ballooning = rp.alive && (rp.flags & PF.BALLOON) !== 0;
+        const has = this.balloons.get(rp.idx);
+        if (ballooning && !has) {
+          const b = makeBalloon();
+          rp.visual.root.add(b);
+          this.balloons.set(rp.idx, b);
+        } else if (!ballooning && has) this.dropBalloon(rp.idx);
+        const b = this.balloons.get(rp.idx);
+        if (b) b.rotation.z = Math.sin(this.time * 1.7 + rp.idx) * 0.12;
+      }
     }
+    if (this.myBalloon) this.myBalloon.rotation.z = Math.sin(this.time * 1.7) * 0.12;
 
     // ---- projectiles, effects, world ----
     for (const vp of this.projectiles.values()) {
@@ -608,6 +756,11 @@ export class Game {
     this.effects.update(dt);
     this.updateZoneMarkers();
     this.stage.world.update(dt, this.time, camPos);
+    if (this.porchWorld && snap?.porch) {
+      this.porchWorld.zone = snap.porch.zone;
+      this.porchWorld.next = snap.porch.next;
+    }
+    this.porchWorld?.update(dt, this.session.serverTime(), snap?.porch ? snap.porch.takeoff : -1);
     audio?.setListener(camPos, aimYaw);
 
     this.gfx.followShadow(this.renderPos.x, this.renderPos.z);
@@ -616,6 +769,7 @@ export class Game {
     // ---- HUD ----
     this.fillHud(phase, weapon, aimYaw, aimPitch);
     this.hud.update(this.hudState, dt);
+    if (this.porchHud) this.updatePorchHud(dt, aimYaw, spectating);
 
     // warm-up countdown beeps
     if (snap && snap.phase === PHASE.WARMUP) {
@@ -742,6 +896,11 @@ export class Game {
     if (f.aim) b |= BTN.AIM;
     if (f.reload) b |= BTN.RELOAD;
     if (f.throwBtn) b |= BTN.THROW;
+    if (this.porchWorld) {
+      if (f.use || (f.useOrHeal && this.promptTarget)) b |= BTN.USE;
+      if (f.heal || (f.useOrHeal && !this.promptTarget)) b |= BTN.HEAL;
+      if (f.drop) b |= BTN.DROP;
+    }
     return b;
   }
 
@@ -763,7 +922,7 @@ export class Game {
 
   /** Instant feedback for our own shot: tracers, impacts, recoil. The server decides the damage. */
   private predictShot(cmd: InputCmd, act: StepActions): void {
-    const w = weaponForSlot(this.loadout, act.shotSlot);
+    const w = weaponInSlot(this.predictor.state, act.shotSlot);
     if (!w) return;
     const st = this.predictor.state;
     const eyeX = st.x, eyeY = st.y + eyeHeight(st.crouching), eyeZ = st.z;
@@ -842,9 +1001,13 @@ export class Game {
     h.health = this.me ? this.me.hp : 0;
     h.spawnProtected = !!this.me && (this.me.flags & PF.PROTECTED) !== 0;
     h.slot = st.slot;
-    h.mag = st.slot === 0 ? st.mag0 : st.mag1;
-    h.reserve = st.slot === 0 ? st.res0 : st.res1;
-    h.magSize = weapon ? weapon.magSize : 1;
+    h.mag = magOf(st, st.slot);
+    h.reserve = reserveOf(st, st.slot);
+    h.magSize = weapon ? Math.max(1, weapon.magSize) : 1;
+    h.gun = !!weapon;
+    h.melee = !!weapon && weapon.magSize === 0;
+    h.weaponName = weapon ? weapon.name : st.thr > 0 ? THROWABLES[THROWABLE_IDS[st.thr - 1]].name : 'Nothing';
+    h.porch = this.porchWorld && snap?.porch ? { zone: snap.porch.zone, next: snap.porch.next } : null;
     h.reload = weapon && st.reloadT > 0 ? 1 - st.reloadT / weapon.reloadTime : -1;
     h.throwables = st.throwables;
     h.spreadDeg = weapon ? currentSpread(st, weapon) : 1;
@@ -863,7 +1026,7 @@ export class Game {
     // what is under the reticle, and is our muzzle blocked by nearby cover?
     h.blocked = false;
     h.onTarget = false;
-    if (this.alive && weapon) {
+    if (this.alive && weapon && st.air === 0) {
       const eyeY = st.y + eyeHeight(st.crouching);
       const cam = this.rig.camera.position;
       const cp = Math.cos(aimPitch);
@@ -886,7 +1049,7 @@ export class Game {
       const r = this.roster.get(idx);
       row.idx = idx;
       row.name = r ? r.name : '?';
-      row.team = r ? r.team : 0;
+      row.team = r ? this.visTeam(r) : 0;
       row.bot = r ? r.bot : false;
       return row;
     };
@@ -901,6 +1064,113 @@ export class Game {
       row.alive = rp.alive; row.me = false; row.x = rp.x; row.z = rp.z; row.yaw = rp.yaw;
     }
     rows.length = n;
+  }
+
+  // ------------------------------------------------------------------ JUMP OFF THE PORCH
+  private dropBalloon(idx: number): void {
+    if (idx === this.session.myIdx) {
+      this.myBalloon?.removeFromParent();
+      this.myBalloon = null;
+      return;
+    }
+    const b = this.balloons.get(idx);
+    if (b) {
+      b.removeFromParent();
+      this.balloons.delete(idx);
+    }
+  }
+
+  /** Who to watch while out: a squad mate first, then whoever is left. */
+  private spectateTarget(): RemotePlayer | null {
+    const cur = this.remotes.get(this.spectateIdx);
+    if (cur && cur.alive && (cur.flags & PF.RIDING) === 0) return cur;
+    this.spectateIdx = -1;
+    let pick: RemotePlayer | null = null;
+    for (const rp of this.remotes.values()) {
+      if (!rp.alive || (rp.flags & PF.RIDING) !== 0) continue;
+      if (!pick || (rp.team === this.myTeam && pick.team !== this.myTeam)) pick = rp;
+    }
+    if (pick) this.spectateIdx = pick.idx;
+    return pick;
+  }
+
+  private nextSpectate(): void {
+    const list = [...this.remotes.values()].filter((r) => r.alive && (r.flags & PF.RIDING) === 0).map((r) => r.idx).sort((a, b) => a - b);
+    if (!list.length) return;
+    const i = list.indexOf(this.spectateIdx);
+    this.spectateIdx = list[(i + 1) % list.length];
+  }
+
+  private updatePorchHud(dt: number, yaw: number, spectating: boolean): void {
+    const hud = this.porchHud!, world = this.porchWorld!;
+    const st = this.predictor.state;
+    const snap = this.snap;
+    // what is in reach (same rule as the server)
+    let prompt = '';
+    this.promptTarget = '';
+    if (this.alive && st.air === 0) {
+      let best = PORCH.reach * PORCH.reach;
+      for (const [id, b] of world.allBags) {
+        if (b.opened || Math.abs(b.y - st.y) > 1.8) continue;
+        const d = (b.x - st.x) ** 2 + (b.z - st.z) ** 2;
+        if (d < best) {
+          best = d;
+          prompt = `SEARCH BOOKBAG · ${BAGS[b.variant]?.name ?? 'Backpack'}`;
+          this.promptTarget = `b${id}`;
+        }
+      }
+      for (const [id, it] of world.allPickups) {
+        if (Math.abs(it.y - st.y) > 1.8) continue;
+        const d = (it.x - st.x) ** 2 + (it.z - st.z) ** 2;
+        if (d < best) {
+          best = d;
+          prompt = `PICK UP ${itemName(it.kind, it.code, it.count)}`;
+          this.promptTarget = `p${id}`;
+        }
+      }
+    }
+    const device = this.deps.input.device;
+    const key = device === 'kbm' ? 'E' : device === 'touch' ? 'TAP' : '▼';
+    const slot = (n: number) => {
+      const w = weaponInSlot(st, n);
+      const empty = !w || w.id === 'fists';
+      return { name: empty ? '' : w!.name, mag: magOf(st, n), reserve: reserveOf(st, n), empty, active: st.slot === n };
+    };
+    const squad: PorchHudState['squad'] = [];
+    for (const r of this.roster.values()) {
+      if ((r.squad ?? r.team) !== this.mySquad) continue;
+      const me = r.idx === this.session.myIdx;
+      const rp = this.remotes.get(r.idx);
+      squad.push({ name: r.name, me, alive: me ? this.alive : !!rp?.alive, hp: me ? (this.me?.hp ?? 0) : rp?.hp ?? 0 });
+    }
+    const doorsAt = snap?.porch && snap.porch.takeoff >= 0 ? snap.porch.takeoff + PORCH.transport.doorsOpen * 1000 : Infinity;
+    const state: PorchHudState = {
+      snap: snap?.porch ?? null,
+      alive: this.alive,
+      air: st.air,
+      inRiot: st.riot === 1,
+      armor: st.armor,
+      kills: this.me?.kills ?? 0,
+      slots: [slot(0), slot(SLOT_PRIMARY_B), slot(1), { name: st.thr > 0 ? THROWABLES[THROWABLE_IDS[st.thr - 1]].name : '', mag: st.throwables, reserve: 0, empty: st.thr === 0 || st.throwables === 0, active: st.slot === 2 }],
+      ammo: [st.ammoL, st.ammoM, st.ammoS, st.ammoH],
+      heals: [st.bandages, st.medkits, st.drinks],
+      healing: st.healT > 0 ? 1 - st.healT / PORCH.heals[HEAL_KINDS[st.healKind]].time : -1,
+      healName: PORCH.heals[HEAL_KINDS[st.healKind]]?.name ?? '',
+      prompt: prompt ? `[${key}] ${prompt}` : '',
+      doorsIn: Math.max(0, (doorsAt - this.session.serverTime()) / 1000),
+      spectating: spectating ? this.remotes.get(this.spectateIdx)?.name ?? '' : '',
+      squad,
+      yaw,
+      total: this.roster.size,
+      device,
+    };
+    hud.update(state, dt);
+    const rows = [...this.roster.values()].map((r) => {
+      const me = r.idx === this.session.myIdx;
+      const rp = this.remotes.get(r.idx);
+      return { name: r.name, bot: r.bot, me, mate: (r.squad ?? r.team) === this.mySquad, alive: me ? this.alive : !!rp?.alive, kills: me ? this.me?.kills ?? 0 : rp?.kills ?? 0 };
+    });
+    hud.board(this.deps.input.frame.scoreboard, rows);
   }
 
   /** Change the loadout for the next respawn. */
@@ -924,6 +1194,9 @@ export class Game {
     this.smokeGeo.dispose();
     this.smokeMat.dispose();
     this.hud.dispose();
+    this.porchHud?.dispose();
+    this.porchWorld?.dispose();
+    this.deps.input.porchSlots = false;
     this.effects.dispose();
     this.localChar.dispose();
     for (const z of this.stage.world.zones) z.group.visible = false;

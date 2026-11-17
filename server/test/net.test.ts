@@ -5,7 +5,8 @@ import { LobbyConnection, NetClient, OnlineSession, describeJoinError } from '..
 import { Predictor } from '../../client/src/game/predictor.ts';
 import {
   BTN, DEFAULT_LOADOUT, EV, INTERP_DELAY_MS, INVITE_CODE_ALPHABET, PF, PHASE, PhysicsWorld, PLAYER, TICK_MS,
-  getWhoopaTowne, makeInputCmd, makePlayerState, playerStateFromArray, quantizeInput, yawToward,
+  LOOK_FIELD_KEYS, decodeAppearance, encodeAppearance, getWhoopaTowne, makeInputCmd, makePlayerState, playerStateFromArray,
+  quantizeInput, sameAppearance, sanitizeAppearance, yawToward,
   type GameSim, type InputCmd, type Loadout, type MatchEndMsg, type Snapshot,
 } from '../../shared/src/index.ts';
 import { approx, assert, test } from '../../shared/test/harness.ts';
@@ -440,6 +441,35 @@ test('leaving mid-match hands the slot to a bot; match end returns everyone to t
   await leaveAll();
 });
 
+test('character looks: sent on join and from the lobby, validated, and seen by everyone in the match', async () => {
+  const hostLook = sanitizeAppearance({ bodyType: 'fem', hair: 'braids', hairColor: 'pink', top: 'crop', glasses: 'aviators', necklace: 'thickgold' });
+  const guestLook = sanitizeAppearance({ hair: 'largeafro', facialHair: 'fullbeard', hat: 'bucket', build: 'heavy' });
+  const host = new Bot().attach(await new NetClient(URL).createPrivate('tdm', 'Host', DEFAULT_LOADOUT, hostLook));
+  const guest = new Bot().attach(await new NetClient(URL).joinByCode(host.lobby.code, 'Guest', DEFAULT_LOADOUT));
+  // the guest changes their look in the lobby; a forged code tries an option with no art ("No Shirt")
+  guest.lobby.setLook(guestLook);
+  const forged = encodeAppearance(hostLook).split('');
+  forged[2 + LOOK_FIELD_KEYS.indexOf('top')] = '0';
+  host.lobby.room.send('look', forged.join(''));
+  await until(() => host.lobby.view().players.length === 2, 'lobby');
+  host.lobby.configure({ fillBots: false });
+  guest.lobby.setReady(true);
+  await until(() => host.lobby.view().players.some((p) => p.ready), 'ready');
+  await until(() => host.lobby.view().fillBots === false, 'config applied');
+  host.lobby.start();
+  await until(() => host.session !== null && guest.session !== null, 'match start');
+  for (const b of [host, guest]) {
+    const roster = b.session!.roster;
+    const h = roster.find((r) => r.name === 'Host')!, g = roster.find((r) => r.name === 'Guest')!;
+    assert(typeof h.look === 'string' && typeof g.look === 'string', 'roster carries look codes');
+    assert(sameAppearance(decodeAppearance(g.look), guestLook), 'guest lobby look reached the match');
+    const hl = decodeAppearance(h.look);
+    assert(hl.top !== 'none', 'server let an unavailable option through');
+    assert(hl.hair === 'braids' && hl.glasses === 'aviators', 'valid parts of the forged look kept');
+  }
+  await leaveAll();
+});
+
 test('the server shrugs off malformed messages', async () => {
   const [a, b] = await privateMatch(2);
   const room = a.lobby.room;
@@ -451,6 +481,7 @@ test('the server shrugs off malformed messages', async () => {
     room.send('config', j);
     room.send('ready', j);
     room.send('ping', j);
+    room.send('look', j);
   }
   const loadout: Loadout = { primary: 'shotgun', secondary: 'pistol', throwable: 'smoke' };
   a.lobby.setLoadout(loadout);

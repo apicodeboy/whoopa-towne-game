@@ -1,7 +1,8 @@
 import { PLAYER, THROW } from '../config/game';
+import { HEAL_KINDS, PORCH } from '../config/porch';
 import {
-  SLOT_PRIMARY, SLOT_SECONDARY, SLOT_THROWABLE, WEAPONS, weaponForSlot,
-  type Loadout, type WeaponDef,
+  SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, SLOT_THROWABLE, THROWABLE_IDS, WEAPONS, WEAPON_IDS,
+  type AmmoType, type Loadout, type WeaponDef, type WeaponId,
 } from '../config/weapons';
 import type { SpawnPoint } from '../map/types';
 import { clamp } from '../math';
@@ -16,7 +17,18 @@ export const BTN = {
   AIM: 16,
   RELOAD: 32,
   THROW: 64,
+  /** Search a bookbag / pick something up (JUMP OFF THE PORCH). */
+  USE: 128,
+  /** Use a healing item. */
+  HEAL: 256,
+  /** Drop the weapon in hand. */
+  DROP: 512,
 } as const;
+
+/** PlayerState.air: on the ground, riding the transport, or hanging from a balloon. */
+export const AIR_GROUND = 0;
+export const AIR_RIDING = 1;
+export const AIR_BALLOON = 2;
 
 /** One tick of player intent. The client predicts with it and the server replays it. */
 export interface InputCmd {
@@ -28,7 +40,7 @@ export interface InputCmd {
   yaw: number;
   pitch: number;
   buttons: number;
-  /** Weapon slot the player wants out (0 primary, 1 secondary, 2 throwable). */
+  /** Weapon slot the player wants out (0 primary, 1 secondary / handgun, 2 throwable, 3 second primary). */
   slot: number;
   /** Camera position: third-person shots aim from the camera, then fire from the body. */
   ox: number;
@@ -84,10 +96,45 @@ export interface PlayerState {
   bloom: number;
   /** Total shots fired; seeds the per-shot spread RNG identically on client and server. */
   shots: number;
-  /** Was FIRE / JUMP / THROW held last tick (edge detection). */
+  /** Was FIRE / JUMP / THROW / HEAL held last tick (edge detection). */
   trig: number;
   jumpHeld: number;
   throwHeld: number;
+  healHeld: number;
+
+  // ---- what is carried (classic modes fill it from the loadout on spawn) ----
+  /** Weapon in the primary, second primary and handgun slots: WEAPON_IDS index + 1 (0 = empty: fists). */
+  wA: number;
+  wB: number;
+  wH: number;
+  /** Throwable type: THROWABLE_IDS index + 1 (0 = none). */
+  thr: number;
+  /** Magazine of the second primary. */
+  magB: number;
+  /** 1 = reserves come from the shared ammo pools below (JUMP OFF THE PORCH), 0 = res0 / res1. */
+  pool: number;
+  ammoL: number;
+  ammoM: number;
+  ammoS: number;
+  ammoH: number;
+  bandages: number;
+  medkits: number;
+  drinks: number;
+  /** Seconds left using a healing item, and which one (HEAL_KINDS index). */
+  healT: number;
+  healKind: number;
+
+  // ---- JUMP OFF THE PORCH ----
+  /** AIR_GROUND / AIR_RIDING / AIR_BALLOON. */
+  air: number;
+  /** Wind pushing balloons this match (m/s). */
+  windX: number;
+  windZ: number;
+  /** 1 while caught in the riot (slows you down). */
+  riot: number;
+  /** Mirrors of the server's health and armor (so healing choices predict exactly). */
+  hp: number;
+  armor: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -95,7 +142,10 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'grounded', 'crouching', 'sprinting', 'aiming', 'slot',
   'mag0', 'mag1', 'res0', 'res1', 'throwables',
   'fireCd', 'reloadT', 'swapT', 'throwCd', 'bloom', 'shots',
-  'trig', 'jumpHeld', 'throwHeld',
+  'trig', 'jumpHeld', 'throwHeld', 'healHeld',
+  'wA', 'wB', 'wH', 'thr', 'magB', 'pool', 'ammoL', 'ammoM', 'ammoS', 'ammoH',
+  'bandages', 'medkits', 'drinks', 'healT', 'healKind',
+  'air', 'windX', 'windZ', 'riot', 'hp', 'armor',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -130,6 +180,10 @@ export function playerStateDiffers(a: PlayerState, b: PlayerState): boolean {
   if (a.grounded !== b.grounded || a.crouching !== b.crouching || a.slot !== b.slot) return true;
   if (a.mag0 !== b.mag0 || a.mag1 !== b.mag1 || a.res0 !== b.res0 || a.res1 !== b.res1) return true;
   if (a.throwables !== b.throwables || a.shots !== b.shots) return true;
+  if (a.wA !== b.wA || a.wB !== b.wB || a.wH !== b.wH || a.thr !== b.thr || a.magB !== b.magB || a.air !== b.air) return true;
+  if (a.ammoL !== b.ammoL || a.ammoM !== b.ammoM || a.ammoS !== b.ammoS || a.ammoH !== b.ammoH) return true;
+  if (a.bandages !== b.bandages || a.medkits !== b.medkits || a.drinks !== b.drinks || a.riot !== b.riot) return true;
+  if (Math.abs(a.healT - b.healT) > 1e-4 || a.hp !== b.hp || a.armor !== b.armor) return true;
   if (Math.abs(a.fireCd - b.fireCd) > 1e-4 || Math.abs(a.reloadT - b.reloadT) > 1e-4) return true;
   if (Math.abs(a.swapT - b.swapT) > 1e-4 || Math.abs(a.throwCd - b.throwCd) > 1e-4) return true;
   if (Math.abs(a.bloom - b.bloom) > 1e-3) return true;
@@ -149,11 +203,75 @@ export function spawnPlayerState(s: PlayerState, spawn: SpawnPoint, loadout: Loa
   s.slot = SLOT_PRIMARY;
   const p = WEAPONS[loadout.primary];
   const q = WEAPONS[loadout.secondary];
+  s.wA = weaponCode(loadout.primary);
+  s.wH = weaponCode(loadout.secondary);
+  s.thr = THROWABLE_IDS.indexOf(loadout.throwable) + 1;
   s.mag0 = p.magSize;
   s.res0 = p.reserve;
   s.mag1 = q.magSize;
   s.res1 = q.reserve;
   s.throwables = THROW.perLife;
+  s.hp = PLAYER.maxHealth;
+}
+
+/** Slot code for a weapon id (WEAPON_IDS index + 1). */
+export function weaponCode(id: WeaponId): number {
+  return WEAPON_IDS.indexOf(id) + 1;
+}
+
+/** The weapon in a slot (fists when a gun slot is empty, null for the throwable slot). */
+export function weaponInSlot(s: PlayerState, slot: number): WeaponDef | null {
+  const code = slot === SLOT_PRIMARY ? s.wA : slot === SLOT_SECONDARY ? s.wH : slot === SLOT_PRIMARY_B ? s.wB : -1;
+  if (code < 0) return null;
+  return code > 0 ? WEAPONS[WEAPON_IDS[code - 1]] ?? WEAPONS.fists : WEAPONS.fists;
+}
+
+/** Rounds in a slot's magazine. */
+export function magOf(s: PlayerState, slot: number): number {
+  return slot === SLOT_PRIMARY ? s.mag0 : slot === SLOT_SECONDARY ? s.mag1 : slot === SLOT_PRIMARY_B ? s.magB : 0;
+}
+
+export function setMag(s: PlayerState, slot: number, v: number): void {
+  if (slot === SLOT_PRIMARY) s.mag0 = v;
+  else if (slot === SLOT_SECONDARY) s.mag1 = v;
+  else if (slot === SLOT_PRIMARY_B) s.magB = v;
+}
+
+/** PlayerState field holding an ammo family's pool. */
+export function ammoField(type: AmmoType): 'ammoL' | 'ammoM' | 'ammoS' | 'ammoH' | null {
+  return type === 'light' ? 'ammoL' : type === 'medium' ? 'ammoM' : type === 'shells' ? 'ammoS' : type === 'heavy' ? 'ammoH' : null;
+}
+
+/** Spare rounds available for the weapon in a slot. */
+export function reserveOf(s: PlayerState, slot: number): number {
+  const w = weaponInSlot(s, slot);
+  if (!w || w.magSize === 0) return 0;
+  if (s.pool) {
+    const f = ammoField(w.ammo);
+    return f ? s[f] : 0;
+  }
+  return slot === SLOT_PRIMARY ? s.res0 : slot === SLOT_SECONDARY ? s.res1 : 0;
+}
+
+function setReserve(s: PlayerState, slot: number, v: number): void {
+  if (s.pool) {
+    const w = weaponInSlot(s, slot);
+    const f = w ? ammoField(w.ammo) : null;
+    if (f) s[f] = v;
+  } else if (slot === SLOT_PRIMARY) s.res0 = v;
+  else if (slot === SLOT_SECONDARY) s.res1 = v;
+}
+
+/** Which healing item the HEAL button would use right now (HEAL_KINDS index), or -1. */
+export function pickHeal(s: PlayerState): number {
+  const hp = s.hp;
+  if (hp >= PLAYER.maxHealth) return -1;
+  const B = HEAL_KINDS.indexOf('bandage'), M = HEAL_KINDS.indexOf('medkit'), D = HEAL_KINDS.indexOf('drink');
+  if (hp < 50 && s.medkits > 0) return M;
+  if (hp < PORCH.heals.bandage.cap && s.bandages > 0) return B;
+  if (s.drinks > 0) return D;
+  if (s.medkits > 0) return M;
+  return -1;
 }
 
 /** Things that happened during a step. The server turns them into hits/events, the client into effects. */
@@ -174,6 +292,11 @@ export interface StepActions {
   /** Downward speed at the moment of landing (m/s). */
   landSpeed: number;
   swapped: boolean;
+  /** Finished using a healing item this step (HEAL_KINDS index, -1 = none). */
+  healed: number;
+  healStart: boolean;
+  /** Touched down from a balloon this step. */
+  touchdown: boolean;
 }
 
 export function makeStepActions(): StepActions {
@@ -181,6 +304,7 @@ export function makeStepActions(): StepActions {
     shot: false, shotSeed: 0, shotSpread: 0, shotSlot: 0, threw: false,
     reloadStart: false, reloadDone: false, dryFire: false,
     jumped: false, landed: false, landSpeed: 0, swapped: false,
+    healed: -1, healStart: false, touchdown: false,
   };
 }
 
@@ -188,6 +312,7 @@ function resetActions(a: StepActions): void {
   a.shot = false; a.shotSeed = 0; a.shotSpread = 0; a.shotSlot = 0; a.threw = false;
   a.reloadStart = false; a.reloadDone = false; a.dryFire = false;
   a.jumped = false; a.landed = false; a.landSpeed = 0; a.swapped = false;
+  a.healed = -1; a.healStart = false; a.touchdown = false;
 }
 
 export function eyeHeight(crouching: number | boolean): number {
@@ -208,7 +333,53 @@ export function currentSpread(s: PlayerState, w: WeaponDef): number {
 export function targetSpeed(s: PlayerState, w: WeaponDef | null): number {
   let speed: number = s.crouching ? PLAYER.crouchSpeed : s.sprinting ? PLAYER.sprintSpeed : PLAYER.walkSpeed;
   if (s.aiming) speed = Math.min(speed, PLAYER.aimSpeed);
+  if (s.riot) speed *= PORCH.riotSlow;
+  if (s.healT > 0) speed *= PORCH.healSlow;
   return speed * (w ? w.moveMult : 1);
+}
+
+/**
+ * Hanging from a balloon: sink slowly (faster holding crouch), steer with the move keys,
+ * drift with the wind, stay over the town. Touching anything solid underneath lands you.
+ */
+function stepBalloon(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWorld, act: StepActions, frozen: boolean): void {
+  const B = PORCH.balloon;
+  let mx = frozen ? 0 : clamp(cmd.mx, -1, 1);
+  let mz = frozen ? 0 : clamp(cmd.mz, -1, 1);
+  const len = Math.hypot(mx, mz);
+  if (len > 1) {
+    mx /= len;
+    mz /= len;
+  }
+  const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
+  const wishX = (cosY * mx - sinY * mz) * B.steerSpeed + s.windX;
+  const wishZ = (-sinY * mx - cosY * mz) * B.steerSpeed + s.windZ;
+  const k = Math.min(1, B.steerAccel * dt / B.steerSpeed * 2);
+  s.vx += (wishX - s.vx) * k;
+  s.vz += (wishZ - s.vz) * k;
+  const dive = !frozen && (cmd.buttons & BTN.CROUCH) !== 0;
+  const wantVy = -(dive ? B.diveSpeed : B.fallSpeed);
+  s.vy += (wantVy - s.vy) * Math.min(1, dt * 3);
+  s.crouching = 0;
+  s.sprinting = 0;
+  s.aiming = 0;
+  phys.moveCharacter(s.x, s.y, s.z, s.vx * dt, s.vy * dt, s.vz * dt, false, mv);
+  const b = phys.bounds;
+  s.x = clamp(mv.x, b.minX + 1, b.maxX - 1);
+  s.y = mv.y;
+  s.z = clamp(mv.z, b.minZ + 1, b.maxZ - 1);
+  if (mv.grounded) {
+    act.landed = true;
+    act.landSpeed = -s.vy;
+    act.touchdown = true;
+    s.air = AIR_GROUND;
+    s.grounded = 1;
+    s.vy = 0;
+    s.vx *= 0.4;
+    s.vz *= 0.4;
+  } else {
+    s.grounded = 0;
+  }
 }
 
 const mv: MoveResult = { x: 0, y: 0, z: 0, grounded: false };
@@ -222,12 +393,24 @@ const mv: MoveResult = { x: 0, y: 0, z: 0, grounded: false };
  */
 export function stepPlayer(
   s: PlayerState, cmd: InputCmd, dt: number,
-  phys: PhysicsWorld, loadout: Loadout, act: StepActions, frozen = false,
+  phys: PhysicsWorld, _loadout: Loadout, act: StepActions, frozen = false,
 ): void {
   resetActions(act);
 
   s.yaw = cmd.yaw;
   s.pitch = clamp(cmd.pitch, -PLAYER.maxPitch, PLAYER.maxPitch);
+
+  // on the transport the server carries you; hanging from a balloon is its own movement
+  if (s.air === AIR_RIDING) {
+    s.jumpHeld = (cmd.buttons & BTN.JUMP) !== 0 ? 1 : 0;
+    return;
+  }
+  if (s.air === AIR_BALLOON) {
+    stepBalloon(s, cmd, dt, phys, act, frozen);
+    s.jumpHeld = (cmd.buttons & BTN.JUMP) !== 0 ? 1 : 0;
+    s.trig = (cmd.buttons & BTN.FIRE) !== 0 ? 1 : 0;
+    return;
+  }
 
   const btn = frozen ? 0 : cmd.buttons;
   let mx = frozen ? 0 : clamp(cmd.mx, -1, 1);
@@ -244,8 +427,8 @@ export function stepPlayer(
   if (wantCrouch) s.crouching = 1;
   else if (s.crouching && phys.canStandAt(s.x, s.y, s.z)) s.crouching = 0;
 
-  let weapon = weaponForSlot(loadout, s.slot);
-  s.aiming = (btn & BTN.AIM) !== 0 && weapon !== null ? 1 : 0;
+  let weapon = weaponInSlot(s, s.slot);
+  s.aiming = (btn & BTN.AIM) !== 0 && weapon !== null && weapon.magSize > 0 ? 1 : 0;
   s.sprinting =
     (btn & BTN.SPRINT) !== 0 && mz > 0.5 && Math.abs(mx) < 0.75 && !s.crouching && !s.aiming && !firing ? 1 : 0;
 
@@ -311,20 +494,51 @@ export function stepPlayer(
   if (s.swapT > 0) s.swapT = Math.max(0, s.swapT - dt);
   if (s.throwCd > 0) s.throwCd = Math.max(0, s.throwCd - dt);
 
-  // slot change
+  // slot change (the second primary slot only exists when carrying from the ammo pools)
   const want = cmd.slot | 0;
-  if (!frozen && want !== s.slot && want >= SLOT_PRIMARY && want <= SLOT_THROWABLE && !(want === SLOT_THROWABLE && s.throwables <= 0)) {
+  if (
+    !frozen && want !== s.slot && want >= SLOT_PRIMARY && want <= SLOT_PRIMARY_B &&
+    !(want === SLOT_THROWABLE && (s.throwables <= 0 || s.thr === 0)) && !(want === SLOT_PRIMARY_B && !s.pool)
+  ) {
     s.slot = want;
-    weapon = weaponForSlot(loadout, s.slot);
+    weapon = weaponInSlot(s, s.slot);
     s.swapT = weapon ? weapon.swapTime : 0.3;
     s.reloadT = 0;
+    s.healT = 0;
     act.swapped = true;
   }
 
-  if (weapon) {
-    const primary = s.slot === SLOT_PRIMARY;
-    let mag = primary ? s.mag0 : s.mag1;
-    let res = primary ? s.res0 : s.res1;
+  // healing: HEAL starts the best item for the moment; firing or swapping cancels it
+  const healBtn = !frozen && (btn & BTN.HEAL) !== 0;
+  if (s.healT > 0) {
+    if (firing && weapon && weapon.magSize > 0) {
+      s.healT = 0;
+    } else {
+      s.healT -= dt;
+      if (s.healT <= 0) {
+        s.healT = 0;
+        const kind = HEAL_KINDS[s.healKind];
+        if (kind === 'bandage' && s.bandages > 0) s.bandages--;
+        else if (kind === 'medkit' && s.medkits > 0) s.medkits--;
+        else if (kind === 'drink' && s.drinks > 0) s.drinks--;
+        act.healed = s.healKind;
+      }
+    }
+  } else if (healBtn && !s.healHeld && s.reloadT <= 0) {
+    const kind = pickHeal(s);
+    if (kind >= 0) {
+      s.healKind = kind;
+      s.healT = PORCH.heals[HEAL_KINDS[kind]].time;
+      act.healStart = true;
+    }
+  }
+  s.healHeld = healBtn ? 1 : 0;
+  const healing = s.healT > 0;
+
+  if (weapon && !healing) {
+    const melee = weapon.magSize === 0;
+    let mag = magOf(s, s.slot);
+    let res = reserveOf(s, s.slot);
 
     if (s.bloom > 0) s.bloom = Math.max(0, s.bloom - weapon.bloomRecover * dt);
 
@@ -342,7 +556,7 @@ export function stepPlayer(
 
     // start a reload (manual, or automatic when trying to fire an empty magazine)
     if (
-      s.reloadT <= 0 && s.swapT <= 0 && mag < weapon.magSize && res > 0 &&
+      !melee && s.reloadT <= 0 && s.swapT <= 0 && mag < weapon.magSize && res > 0 &&
       ((btn & BTN.RELOAD) !== 0 || (mag === 0 && firing))
     ) {
       s.reloadT = weapon.reloadTime;
@@ -351,8 +565,8 @@ export function stepPlayer(
 
     // fire
     if (firing && s.reloadT <= 0 && s.swapT <= 0 && s.fireCd <= 0 && (weapon.auto || !s.trig)) {
-      if (mag > 0) {
-        mag -= 1;
+      if (mag > 0 || melee) {
+        if (!melee) mag -= 1;
         s.fireCd += 60 / weapon.rpm;
         act.shot = true;
         act.shotSeed = s.shots;
@@ -365,12 +579,9 @@ export function stepPlayer(
       }
     }
 
-    if (primary) {
-      s.mag0 = mag;
-      s.res0 = res;
-    } else {
-      s.mag1 = mag;
-      s.res1 = res;
+    if (!melee) {
+      setMag(s, s.slot, mag);
+      setReserve(s, s.slot, res);
     }
   }
   if (s.fireCd < 0 && !act.shot) s.fireCd = 0;
@@ -378,13 +589,13 @@ export function stepPlayer(
   // throwables: dedicated quick-throw button, or FIRE while the throwable slot is out
   const throwBtn = (btn & BTN.THROW) !== 0;
   const throwEdge = (throwBtn && !s.throwHeld) || (s.slot === SLOT_THROWABLE && firing && !s.trig);
-  if (throwEdge && s.throwables > 0 && s.throwCd <= 0 && s.swapT <= 0) {
+  if (throwEdge && s.throwables > 0 && s.thr > 0 && s.throwCd <= 0 && s.swapT <= 0 && !healing) {
     s.throwables -= 1;
     s.throwCd = THROW.cooldown;
     act.threw = true;
     if (s.slot === SLOT_THROWABLE && s.throwables === 0) {
       s.slot = SLOT_PRIMARY;
-      s.swapT = WEAPONS[loadout.primary].swapTime;
+      s.swapT = weaponInSlot(s, SLOT_PRIMARY)?.swapTime ?? 0.3;
       act.swapped = true;
     }
   }
@@ -392,4 +603,4 @@ export function stepPlayer(
   s.trig = firing ? 1 : 0;
 }
 
-export { SLOT_PRIMARY, SLOT_SECONDARY, SLOT_THROWABLE };
+export { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, SLOT_THROWABLE };

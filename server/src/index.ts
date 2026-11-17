@@ -97,7 +97,7 @@ export async function startServer(listenPort = port): Promise<Server> {
   });
 
   // Quick Play matches players into public lobbies of the mode they picked.
-  server.define(ROOM_NAME, MatchRoom).filterBy(['mode']);
+  server.define(ROOM_NAME, MatchRoom).filterBy(['mode', 'squads']);
 
   if (process.env.SIMULATE_LATENCY) server.simulateLatency(Number(process.env.SIMULATE_LATENCY));
 

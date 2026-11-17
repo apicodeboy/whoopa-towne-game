@@ -1,8 +1,10 @@
+import type { Appearance } from '@shared/config/appearance';
 import type { TeamId } from '@shared/config/crews';
 import { SNAPSHOT_EVERY, TICK_DT, TICK_MS, type ModeId } from '@shared/config/game';
+import { PORCH, SQUAD_MODES, type SquadMode } from '@shared/config/porch';
 import type { Loadout } from '@shared/config/weapons';
 import {
-  decodeSnapshot, type BotDifficulty, type MatchEndMsg, type RosterEntry, type Snapshot, type WireSnapshot,
+  decodeSnapshot, type BotDifficulty, type MatchEndMsg, type PorchInit, type RosterEntry, type Snapshot, type WireSnapshot,
 } from '@shared/protocol';
 import { BOT_NAMES } from '@shared/sim/bots';
 import { GameSim } from '@shared/sim/game';
@@ -27,6 +29,8 @@ export interface Session {
   /** Our player index in snapshots. */
   readonly myIdx: number;
   roster: RosterEntry[];
+  /** JUMP OFF THE PORCH: bags, transport route, pickups at the time we joined. */
+  porch?: PorchInit;
   handlers: SessionHandlers;
   /** Round-trip time estimate in ms. */
   ping: number;
@@ -43,9 +47,13 @@ export interface LocalSessionOptions {
   mode: ModeId;
   name: string;
   loadout: Loadout;
+  look?: Appearance;
   team?: TeamId;
   /** Players per crew including you (default 4 => 4v4 with 7 bots). */
   teamSize?: number;
+  /** JUMP OFF THE PORCH team size (and how many players in total, bots filling the rest). */
+  squads?: SquadMode;
+  lobbySize?: number;
   difficulty?: BotDifficulty;
   /** Artificial one-way latency in ms (netcode testing). */
   latencyMs?: number;
@@ -64,6 +72,7 @@ export class LocalSession implements Session {
   readonly myIdx: number;
   readonly sim: GameSim;
   roster: RosterEntry[];
+  porch?: PorchInit;
   handlers: SessionHandlers = {};
   ping = 0;
 
@@ -80,10 +89,29 @@ export class LocalSession implements Session {
     this.mode = opts.mode;
     this.latency = Math.max(0, opts.latencyMs ?? 0);
     this.ping = this.latency * 2;
-    this.sim = new GameSim(R, { mode: opts.mode, botDifficulty: opts.difficulty ?? 'normal', seed: opts.seed, warmup: opts.warmup });
+    this.sim = new GameSim(R, {
+      mode: opts.mode, botDifficulty: opts.difficulty ?? 'normal', seed: opts.seed, warmup: opts.warmup,
+      squads: opts.squads, maxPlayers: opts.mode === 'porch' ? (opts.lobbySize ?? PORCH.lobbySize) : undefined,
+    });
+    if (this.sim.porch) {
+      // battle royale practice: you, then bots in squads until the lobby is full
+      const size = SQUAD_MODES[this.sim.porch.squadMode].size;
+      const me = this.sim.addPlayer({ id: 'local', name: opts.name, team: 0, squad: 0, loadout: opts.loadout, look: opts.look })!;
+      this.myIdx = me.idx;
+      const names = BOT_NAMES.slice();
+      for (let k = 1; k < this.sim.players.length; k++) {
+        const name = names.splice(Math.floor(this.sim.rng.next() * names.length), 1)[0] ?? `Bot ${k}`;
+        const squad = Math.floor(k / size);
+        this.sim.addPlayer({ id: `bot-${k}`, name, team: (squad % 2) as TeamId, squad, isBot: true });
+      }
+      this.roster = this.sim.roster();
+      this.sim.start();
+      this.porch = this.sim.porch.init();
+      return;
+    }
     const team = opts.team ?? 0;
     const size = Math.max(1, Math.min(4, opts.teamSize ?? 4));
-    const me = this.sim.addPlayer({ id: 'local', name: opts.name, team, loadout: opts.loadout })!;
+    const me = this.sim.addPlayer({ id: 'local', name: opts.name, team, loadout: opts.loadout, look: opts.look })!;
     this.myIdx = me.idx;
     const names = BOT_NAMES.slice();
     const takeName = (): string => names.splice(Math.floor(this.sim.rng.next() * names.length), 1)[0] ?? 'Bot';

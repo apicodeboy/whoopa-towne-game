@@ -151,6 +151,32 @@ export class Minimap {
       });
     }
 
+    // JUMP OFF THE PORCH: the riot (everything outside the safe area) and where it is heading
+    if (st.porch) {
+      const z = st.porch.zone, n = st.porch.next;
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, this.canvas.width, this.canvas.height);
+      g.arc(this.X(z.x), this.Z(z.z), z.r * this.scale, 0, Math.PI * 2, true);
+      g.fillStyle = 'rgba(230, 40, 30, 0.32)';
+      g.fill('evenodd');
+      g.beginPath();
+      g.arc(this.X(z.x), this.Z(z.z), z.r * this.scale, 0, Math.PI * 2);
+      g.strokeStyle = 'rgba(255, 80, 60, 0.95)';
+      g.lineWidth = 1.6;
+      g.stroke();
+      if (n.r < z.r - 0.5) {
+        g.beginPath();
+        g.arc(this.X(n.x), this.Z(n.z), Math.max(1.5, n.r * this.scale), 0, Math.PI * 2);
+        g.setLineDash([4, 3]);
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = 1.4;
+        g.stroke();
+        g.setLineDash([]);
+      }
+      g.restore();
+    }
+
     // teammates
     for (const p of st.players) {
       if (p.me || p.team !== st.myTeam || !p.alive) continue;

@@ -100,7 +100,16 @@ export class InputManager {
         else f.sprint = true;
       }
 
-      if (f.slotSelect >= 0) this.selectSlot(f.slotSelect);
+      if (this.porchSlots) {
+        // JUMP OFF THE PORCH: 1 primary, 2 second primary, 3 handgun, 4 throwable; cycling skips the throwable
+        const MAP = [0, 3, 1, 2];
+        if (f.slotSelect >= 0 && f.slotSelect < 4) this.selectSlot(MAP[f.slotSelect]);
+        else if (f.slotCycle !== 0) {
+          const order = [0, 3, 1];
+          const i = Math.max(0, order.indexOf(this.slot));
+          this.selectSlot(order[(i + (f.slotCycle > 0 ? 1 : order.length - 1)) % order.length]);
+        }
+      } else if (f.slotSelect >= 0 && f.slotSelect <= 2) this.selectSlot(f.slotSelect);
       else if (f.slotCycle !== 0) this.selectSlot(this.slot === 0 ? 1 : 0);
     }
     return f;
@@ -111,8 +120,11 @@ export class InputManager {
     return this.crouch || this.frame.crouchHold;
   }
 
+  /** Battle royale slot layout (two primaries, a handgun, a throwable). */
+  porchSlots = false;
+
   selectSlot(slot: number): void {
-    if (slot < 0 || slot > 2) return;
+    if (slot < 0 || slot > (this.porchSlots ? 3 : 2)) return;
     if (this.slot < 2) this.lastGunSlot = this.slot;
     this.slot = slot;
   }

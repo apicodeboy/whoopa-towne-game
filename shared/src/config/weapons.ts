@@ -1,12 +1,21 @@
-/** Weapon and loadout definitions. All weapons are hitscan. */
+/** Weapon and loadout definitions. All weapons are hitscan (fists are a 2 m "shot"). */
 
-export type WeaponId = 'smg' | 'ar' | 'shotgun' | 'pistol';
+export type WeaponId = 'smg' | 'ar' | 'shotgun' | 'pistol' | 'sniper' | 'fists';
 export type ThrowableId = 'grenade' | 'smoke';
+
+/** Ammo families (battle royale: reloads draw from a shared pool per family). */
+export type AmmoType = 'light' | 'medium' | 'shells' | 'heavy' | 'none';
+export const AMMO_TYPES: readonly Exclude<AmmoType, 'none'>[] = ['light', 'medium', 'shells', 'heavy'];
+export const AMMO_NAMES: Record<Exclude<AmmoType, 'none'>, string> = {
+  light: 'Light Ammo', medium: 'Rifle Ammo', shells: 'Shells', heavy: 'Heavy Ammo',
+};
 
 export interface WeaponDef {
   id: WeaponId;
   name: string;
-  kind: 'primary' | 'secondary';
+  kind: 'primary' | 'secondary' | 'melee';
+  /** Ammo family it reloads from in JUMP OFF THE PORCH. */
+  ammo: AmmoType;
   blurb: string;
   /** Hold-to-fire if true, one shot per trigger pull if false. */
   auto: boolean;
@@ -59,6 +68,7 @@ export interface WeaponDef {
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   smg: {
     id: 'smg',
+    ammo: 'light',
     name: 'Stinger SMG',
     kind: 'primary',
     blurb: 'Fast and loose. Shreds up close, fades at range.',
@@ -89,6 +99,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
   ar: {
     id: 'ar',
+    ammo: 'medium',
     name: 'Kingpin AR',
     kind: 'primary',
     blurb: 'All-round rifle. Accurate when aimed, hits hard at mid range.',
@@ -119,6 +130,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
   shotgun: {
     id: 'shotgun',
+    ammo: 'shells',
     name: 'Block Sweeper',
     kind: 'primary',
     blurb: 'Pump shotgun. Owns alleys and doorways.',
@@ -149,6 +161,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
   pistol: {
     id: 'pistol',
+    ammo: 'light',
     name: 'Deuce Pistol',
     kind: 'secondary',
     blurb: 'Reliable sidearm. Quick to draw, rewards headshots.',
@@ -177,6 +190,68 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     aimFov: 0.8,
     moveMult: 1.05,
   },
+  sniper: {
+    id: 'sniper',
+    ammo: 'heavy',
+    name: 'Long Distance',
+    kind: 'primary',
+    blurb: 'Bolt-action rifle. One good shot ends the conversation.',
+    auto: false,
+    rpm: 42,
+    damage: 88,
+    pellets: 1,
+    magSize: 5,
+    reserve: 15,
+    reloadTime: 3.0,
+    swapTime: 0.6,
+    spreadHip: 5.0,
+    spreadAim: 0.04,
+    spreadMove: 2.4,
+    spreadAir: 6.0,
+    bloomPerShot: 0,
+    bloomMax: 0,
+    bloomRecover: 10,
+    recoilPitch: 3.4,
+    recoilYaw: 0.6,
+    headMult: 2.2,
+    falloffStart: 80,
+    falloffEnd: 220,
+    minDamageMult: 0.8,
+    range: 300,
+    aimFov: 0.32,
+    moveMult: 0.9,
+  },
+  fists: {
+    id: 'fists',
+    ammo: 'none',
+    name: 'Hands',
+    kind: 'melee',
+    blurb: 'Two hands and a bad attitude.',
+    auto: false,
+    rpm: 100,
+    damage: 22,
+    pellets: 1,
+    magSize: 0,
+    reserve: 0,
+    reloadTime: 0,
+    swapTime: 0.2,
+    spreadHip: 0,
+    spreadAim: 0,
+    spreadMove: 0,
+    spreadAir: 0,
+    bloomPerShot: 0,
+    bloomMax: 0,
+    bloomRecover: 10,
+    recoilPitch: 0,
+    recoilYaw: 0,
+    headMult: 1.2,
+    falloffStart: 10,
+    falloffEnd: 20,
+    minDamageMult: 1,
+    range: 2.2,
+    aimFov: 1,
+    moveMult: 1.05,
+  },
 };
 
 export interface ThrowableDef {
@@ -190,8 +265,8 @@ export const THROWABLES: Record<ThrowableId, ThrowableDef> = {
   smoke: { id: 'smoke', name: 'Smoke Canister', blurb: 'Blocks sightlines for a push or a getaway.' },
 };
 
-/** Stable numeric ids for the wire. */
-export const WEAPON_IDS: readonly WeaponId[] = ['smg', 'ar', 'shotgun', 'pistol'];
+/** Stable numeric ids for the wire (append only). */
+export const WEAPON_IDS: readonly WeaponId[] = ['smg', 'ar', 'shotgun', 'pistol', 'sniper', 'fists'];
 export const THROWABLE_IDS: readonly ThrowableId[] = ['grenade', 'smoke'];
 export const PRIMARY_IDS: readonly WeaponId[] = ['smg', 'ar', 'shotgun'];
 export const SECONDARY_IDS: readonly WeaponId[] = ['pistol'];
@@ -225,6 +300,9 @@ export function sanitizeLoadout(raw: unknown): Loadout {
 export const SLOT_PRIMARY = 0;
 export const SLOT_SECONDARY = 1;
 export const SLOT_THROWABLE = 2;
+
+/** Weapon slot for the second primary (JUMP OFF THE PORCH carries two). */
+export const SLOT_PRIMARY_B = 3;
 
 export function weaponForSlot(loadout: Loadout, slot: number): WeaponDef | null {
   if (slot === SLOT_PRIMARY) return WEAPONS[loadout.primary];

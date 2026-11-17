@@ -2,6 +2,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import './styles/base.css';
 import './styles/hud.css';
 import './styles/menu.css';
+import './styles/creator.css';
+import './styles/porch.css';
 import './styles/touch.css';
 import { CREWS } from '@shared/config/crews';
 import type { ModeId } from '@shared/config/game';

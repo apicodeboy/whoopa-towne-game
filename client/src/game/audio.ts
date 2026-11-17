@@ -206,6 +206,15 @@ export class AudioEngine implements GameAudio {
     this.make(ctx, 'hit', 0.07, (t) => (Math.sin(TAU * 1750 * t) + Math.sin(TAU * 2620 * t) * 0.5) * expDecay(t, 0.014));
     this.make(ctx, 'hit_head', 0.16, (t) => (Math.sin(TAU * 2350 * t) + Math.sin(TAU * 3520 * t) * 0.6) * expDecay(t, 0.04));
     this.make(ctx, 'hit_kill', 0.3, (t) => Math.sin(TAU * 1320 * t) * expDecay(t, 0.03) + (t > 0.08 ? Math.sin(TAU * 1980 * (t - 0.08)) * expDecay(t - 0.08, 0.06) : 0));
+    // JUMP OFF THE PORCH: balloon pop, loot zip, punch, riot siren
+    this.make(ctx, 'pop', 0.16, (t) => rnd() * expDecay(t, 0.012) * 1.2 + Math.sin(TAU * 1200 * t) * expDecay(t, 0.02) * 0.4);
+    this.make(ctx, 'loot', 0.22, (t) => Math.sin(TAU * (700 + 900 * Math.min(1, t / 0.1)) * t) * expDecay(t, 0.07) * 0.7);
+    const pn = lpNoise(600);
+    this.make(ctx, 'punch', 0.16, (t) => pn() * expDecay(t, 0.02) + Math.sin(TAU * 90 * t) * expDecay(t, 0.04) * 0.9);
+    this.make(ctx, 'siren', 1.6, (t) => {
+      const f = 620 + 260 * Math.sin(TAU * 1.4 * t);
+      return (Math.sin(TAU * f * t) * 0.6 + Math.sin(TAU * f * 2 * t) * 0.15) * Math.min(1, t / 0.2) * Math.min(1, (1.6 - t) / 0.3);
+    });
     const hn = lpNoise(320);
     this.make(ctx, 'hurt', 0.18, (t) => hn() * expDecay(t, 0.035) + Math.sin(TAU * 110 * t) * expDecay(t, 0.05));
     this.make(ctx, 'death', 0.7, (t) => Math.sin(TAU * (220 - 150 * Math.min(1, t / 0.6)) * t) * expDecay(t, 0.25) * 0.8 + hn() * expDecay(t, 0.12));
@@ -342,9 +351,24 @@ export class AudioEngine implements GameAudio {
   }
 
   gunshot(weapon: number, pos: THREE.Vector3 | null, own: boolean): void {
-    // index = WEAPON_IDS order
-    const name = ['gun_smg', 'gun_ar', 'gun_shotgun', 'gun_pistol'][weapon] ?? 'gun_ar';
-    this.play(name, own ? 0.6 : 0.75, own ? null : pos, 1, 22);
+    // index = WEAPON_IDS order (the sniper is a slowed-down rifle crack, fists a thump)
+    const name = ['gun_smg', 'gun_ar', 'gun_shotgun', 'gun_pistol', 'gun_shotgun', 'punch'][weapon] ?? 'gun_ar';
+    this.play(name, own ? 0.6 : 0.75, own ? null : pos, weapon === 4 ? 0.72 : 1, weapon === 4 ? 40 : 22);
+  }
+
+  /** A balloon popping on landing. */
+  pop(pos: THREE.Vector3 | null): void {
+    this.play('pop', 0.5, pos, 0.9 + Math.random() * 0.2, 14);
+  }
+
+  /** Something went into your inventory. */
+  loot(): void {
+    this.play('loot', 0.3);
+  }
+
+  /** The riot is coming (stage changes). */
+  riot(): void {
+    this.play('siren', 0.32);
   }
 
   impact(pos: THREE.Vector3): void {

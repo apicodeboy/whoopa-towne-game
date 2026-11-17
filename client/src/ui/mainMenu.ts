@@ -1,5 +1,5 @@
-import { CREWS, crewLogoSvg } from '@shared/config/crews';
-import { GAME_NAME, INVITE_CODE_LENGTH, MODES, MODE_IDS, NAME_MAX_LENGTH, type ModeId } from '@shared/config/game';
+import { CLASSIC_MODES, GAME_NAME, INVITE_CODE_LENGTH, MODES, NAME_MAX_LENGTH, type ModeId } from '@shared/config/game';
+import { PORCH, SQUAD_MODES, SQUAD_MODE_IDS, type SquadMode } from '@shared/config/porch';
 import type { BotDifficulty } from '@shared/protocol';
 import type { Profile } from '../core/profile';
 import { button, el } from './dom';
@@ -9,6 +9,7 @@ export interface MainMenuActions {
   createPrivate(mode: ModeId): void;
   joinWithCode(code: string): void;
   practice(mode: ModeId, difficulty: BotDifficulty): void;
+  openCharacter(): void;
   openLoadout(): void;
   openSettings(): void;
 }
@@ -19,6 +20,8 @@ export class MainMenu {
   private nameInput: HTMLInputElement;
   private codeInput: HTMLInputElement;
   private modeButtons = new Map<ModeId, HTMLButtonElement>();
+  private squadButtons = new Map<SquadMode, HTMLButtonElement>();
+  private squadRow: HTMLElement;
   private diffButtons = new Map<BotDifficulty, HTMLButtonElement>();
   private blurb: HTMLElement;
   private busyEl: HTMLElement;
@@ -36,10 +39,6 @@ export class MainMenu {
     logo.height = 219;
     logo.draggable = false;
     title.append(logo);
-    const versus = el('div', 'versus');
-    versus.innerHTML =
-      `<span class="crew c0"><i>${crewLogoSvg(0)}</i>${CREWS[0].name}</span><b>VS</b>` +
-      `<span class="crew c1">${CREWS[1].name}<i>${crewLogoSvg(1)}</i></span>`;
 
     // ---- name ----
     this.nameInput = el('input', 'field');
@@ -53,13 +52,23 @@ export class MainMenu {
     this.nameInput.addEventListener('change', () => (this.nameInput.value = profile.setName(this.nameInput.value)));
     this.nameInput.addEventListener('blur', () => (this.nameInput.value = profile.setName(this.nameInput.value)));
 
-    // ---- mode ----
+    // ---- mode: the two crew modes, and the battle royale (featured) ----
     const modes = el('div', 'segmented');
-    for (const id of MODE_IDS) {
+    for (const id of CLASSIC_MODES) {
       const b = button(MODES[id].name, 'seg', () => this.setMode(id));
       this.modeButtons.set(id, b);
       modes.append(b);
     }
+    const porch = button('', 'porch-mode', () => this.setMode('porch'));
+    porch.innerHTML = `<span class="pm-tag">NEW</span><span class="pm-name">${PORCH.name}</span><span class="pm-sub">BATTLE ROYALE · ${PORCH.lobbySize} PLAYERS</span>`;
+    this.modeButtons.set('porch', porch);
+    const squads = el('div', 'segmented small');
+    for (const id of SQUAD_MODE_IDS) {
+      const b = button(SQUAD_MODES[id].name.toUpperCase(), 'seg', () => this.setSquads(id));
+      this.squadButtons.set(id, b);
+      squads.append(b);
+    }
+    this.squadRow = el('div', 'squad-row hidden', [el('span', 'lbl', 'TEAMS'), squads]);
     this.blurb = el('div', 'blurb', '');
 
     // ---- actions ----
@@ -87,6 +96,7 @@ export class MainMenu {
       diffs.append(b);
     }
     const practice = button('PRACTICE VS BOTS', 'btn', () => actions.practice(profile.mode, profile.difficulty));
+    const character = button('CHARACTER', 'btn ghost', () => actions.openCharacter());
     const loadout = button('LOADOUT', 'btn ghost', () => actions.openLoadout());
     const settings = button('SETTINGS', 'btn ghost', () => actions.openSettings());
     this.actionButtons = [quick, create, join, practice];
@@ -94,24 +104,26 @@ export class MainMenu {
 
     const panel = el('div', 'menu-panel', [
       title,
-      versus,
       el('label', 'lbl', 'DISPLAY NAME'),
       this.nameInput,
       el('label', 'lbl', 'MODE'),
+      porch,
       modes,
+      this.squadRow,
       this.blurb,
       quick,
       create,
       el('div', 'row', [this.codeInput, join]),
       el('div', 'divider', 'OFFLINE'),
       el('div', 'row', [practice, diffs]),
-      el('div', 'row', [loadout, settings]),
+      el('div', 'row', [character, loadout, settings]),
       this.busyEl,
       el('div', 'menu-footer', 'Keyboard + mouse, controllers and touch supported · No account needed'),
     ]);
     this.root = el('div', 'screen menu', [panel]);
     parent.append(this.root);
     this.setMode(profile.mode);
+    this.setSquads(profile.squads);
     this.setDifficulty(profile.difficulty);
   }
 
@@ -129,7 +141,13 @@ export class MainMenu {
   private setMode(mode: ModeId): void {
     this.profile.setMode(mode);
     for (const [id, b] of this.modeButtons) b.classList.toggle('on', id === mode);
-    this.blurb.textContent = MODES[mode].blurb;
+    this.squadRow.classList.toggle('hidden', mode !== 'porch');
+    this.blurb.textContent = mode === 'porch' ? `“${PORCH.tagline}”` : MODES[mode].blurb;
+  }
+
+  private setSquads(squads: SquadMode): void {
+    this.profile.setSquads(squads);
+    for (const [id, b] of this.squadButtons) b.classList.toggle('on', id === squads);
   }
 
   private setDifficulty(d: BotDifficulty): void {

@@ -1,27 +1,30 @@
+import { botAppearance, encodeAppearance, sanitizeAppearance, type Appearance } from '../config/appearance';
 import type { TeamId } from '../config/crews';
 import {
   ENDED_SECONDS, GRENADE, MAX_PLAYERS, MAX_REWIND_MS, MODES, NET, PLAYER, SMOKE, THROW, TICK_DT, TICK_MS, TURF,
   WARMUP_SECONDS, type ModeId,
 } from '../config/game';
+import { PORCH, sanitizeSquadMode, type SquadMode } from '../config/porch';
 import {
-  SLOT_PRIMARY, SLOT_SECONDARY, sanitizeLoadout, throwableIndex, weaponForSlot, weaponIndex,
+  SLOT_THROWABLE, sanitizeLoadout, throwableIndex, weaponIndex,
   type Loadout,
 } from '../config/weapons';
 import { getWhoopaTowne } from '../map/whoopaTowne';
 import type { MapDef, SpawnPoint } from '../map/types';
 import { Rng, clamp, forwardFromYawPitch, rightFromYaw, type Vec3 } from '../math';
 import {
-  EV, HELD_GRENADE, HELD_SMOKE, KILL_GRENADE, KILL_WORLD, PF, PHASE,
-  type BotDifficulty, type Phase, type RosterEntry, type WireSnapshot,
+  EV, HELD_GRENADE, HELD_NONE, HELD_SMOKE, KILL_GRENADE, KILL_WORLD, PF, PHASE,
+  type BotDifficulty, type Phase, type RosterEntry, type StandingRow, type WireSnapshot,
 } from '../protocol';
 import { BotBrain, randomBotLoadout } from './bots';
 import { HIT_PLAYER, makeShotResult, pelletDamage, shotSeed, spreadDirection, traceShot, type ShotTarget } from './combat';
 import { NavGrid } from './nav';
 import { PhysicsWorld, Q_PROJECTILE, type Rapier } from './physics';
 import {
-  copyInputCmd, eyeHeight, makeInputCmd, makePlayerState, makeStepActions, playerStateToArray, spawnPlayerState,
-  stepPlayer, type InputCmd, type PlayerState, type StepActions,
+  AIR_RIDING, copyInputCmd, eyeHeight, makeInputCmd, makePlayerState, makeStepActions, playerStateToArray, spawnPlayerState,
+  stepPlayer, weaponInSlot, type InputCmd, type PlayerState, type StepActions,
 } from './player';
+import { PorchRules } from './porch';
 
 const HISTORY = 64;
 
@@ -31,8 +34,14 @@ export interface SimPlayer {
   id: string;
   name: string;
   team: TeamId;
+  /** Fights alongside everyone with the same squad (the crew in classic modes). */
+  squad: number;
   isBot: boolean;
   loadout: Loadout;
+  /** Armor points (JUMP OFF THE PORCH): soaks up weapon damage before health. */
+  armor: number;
+  /** Cosmetic only (sent in the roster, never used by the simulation). */
+  look: Appearance;
   /** Applied on the next spawn. */
   nextLoadout: Loadout | null;
   state: PlayerState;
@@ -102,13 +111,20 @@ export interface GameSimOptions {
   /** Override warm-up length in seconds (tests). */
   warmup?: number;
   map?: MapDef;
+  /** Player capacity (default MAX_PLAYERS; JUMP OFF THE PORCH uses its lobby size). */
+  maxPlayers?: number;
+  /** JUMP OFF THE PORCH team size. */
+  squads?: SquadMode;
 }
 
 export interface AddPlayerInfo {
   id: string;
   name: string;
   team: TeamId;
+  /** Defaults to the team. */
+  squad?: number;
   loadout?: Loadout;
+  look?: Appearance;
   isBot?: boolean;
 }
 
@@ -197,7 +213,9 @@ export class GameSim {
   readonly mode: ModeId;
   readonly rng: Rng;
   readonly botDifficulty: BotDifficulty;
-  readonly players: Array<SimPlayer | null> = new Array(MAX_PLAYERS).fill(null);
+  readonly players: Array<SimPlayer | null>;
+  /** JUMP OFF THE PORCH rules (null in the classic modes). */
+  readonly porch: PorchRules | null = null;
   readonly projectiles: Projectile[] = [];
   readonly smokes: SmokeCloud[] = [];
   readonly zones: ZoneState[];
@@ -223,8 +241,8 @@ export class GameSim {
   private dir: Vec3 = { x: 0, y: 0, z: 0 };
   private launch = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
   private stateArr: number[] = [];
-  private dmgByTarget = new Float32Array(MAX_PLAYERS);
-  private headByTarget = new Uint8Array(MAX_PLAYERS);
+  private dmgByTarget: Float32Array;
+  private headByTarget: Uint8Array;
 
   constructor(R: Rapier, opts: GameSimOptions) {
     this.map = opts.map ?? getWhoopaTowne();
@@ -233,8 +251,24 @@ export class GameSim {
     this.mode = opts.mode;
     this.rng = new Rng(opts.seed ?? (Date.now() & 0x7fffffff));
     this.botDifficulty = opts.botDifficulty ?? 'normal';
-    this.warmupMs = (opts.warmup ?? WARMUP_SECONDS) * 1000;
+    const porch = opts.mode === 'porch';
+    const cap = Math.max(1, Math.min(PORCH.maxPlayers, opts.maxPlayers ?? (porch ? PORCH.lobbySize : MAX_PLAYERS)));
+    this.players = new Array(cap).fill(null);
+    this.dmgByTarget = new Float32Array(cap);
+    this.headByTarget = new Uint8Array(cap);
+    this.warmupMs = (opts.warmup ?? (porch ? PORCH.pregame : WARMUP_SECONDS)) * 1000;
     this.zones = this.map.zones.map(() => ({ owner: -1, capTeam: -1, progress: 0, contested: false, count: [0, 0] }));
+    if (porch) this.porch = new PorchRules(this, sanitizeSquadMode(opts.squads));
+  }
+
+  /** Queues a match event (sent with the next snapshot). */
+  pushEvent(e: number[]): void {
+    this.events.push(e);
+  }
+
+  /** Same side (no friendly fire, no kill credit). */
+  allies(a: SimPlayer, b: SimPlayer): boolean {
+    return a.squad === b.squad;
   }
 
   // ------------------------------------------------------------------ roster
@@ -246,8 +280,11 @@ export class GameSim {
       id: info.id,
       name: info.name,
       team: info.team,
+      squad: info.squad ?? info.team,
       isBot: !!info.isBot,
+      armor: 0,
       loadout: info.isBot && !info.loadout ? randomBotLoadout(this.rng) : sanitizeLoadout(info.loadout),
+      look: info.isBot && !info.look ? botAppearance(info.name, idx) : sanitizeAppearance(info.look),
       nextLoadout: null,
       state: makePlayerState(),
       alive: false,
@@ -304,8 +341,15 @@ export class GameSim {
 
   roster(): RosterEntry[] {
     const out: RosterEntry[] = [];
-    for (const p of this.players) if (p) out.push({ idx: p.idx, name: p.name, team: p.team, bot: p.isBot });
+    for (const p of this.players) if (p) out.push({ idx: p.idx, name: p.name, team: p.team, squad: p.squad, bot: p.isBot, look: encodeAppearance(p.look) });
     return out;
+  }
+
+  /** Players on a squad (JUMP OFF THE PORCH). */
+  squadCount(squad: number): number {
+    let n = 0;
+    for (const p of this.players) if (p && p.squad === squad) n++;
+    return n;
   }
 
   teamCount(team: TeamId): number {
@@ -334,15 +378,29 @@ export class GameSim {
   private beginPlaying(): void {
     this.phase = PHASE.PLAYING;
     this.phaseEndsAt = this.time + MODES[this.mode].timeLimit * 1000;
+    this.porch?.goLive(this.time);
     this.events.push([EV.PHASE, PHASE.PLAYING, -1]);
   }
 
-  private endMatch(): void {
+  private endMatch(porchWinner?: number): void {
     if (this.phase === PHASE.ENDED) return;
     this.phase = PHASE.ENDED;
-    this.winner = this.scores[0] === this.scores[1] ? -1 : this.scores[0] > this.scores[1] ? 0 : 1;
-    this.phaseEndsAt = this.time + ENDED_SECONDS * 1000;
+    if (this.porch) this.winner = porchWinner ?? -1;
+    else this.winner = this.scores[0] === this.scores[1] ? -1 : this.scores[0] > this.scores[1] ? 0 : 1;
+    this.phaseEndsAt = this.time + (this.porch ? PORCH.endedSeconds : ENDED_SECONDS) * 1000;
     this.events.push([EV.PHASE, PHASE.ENDED, this.winner]);
+  }
+
+  /** A player quit a battle royale: out for good, gear left behind. */
+  forfeit(idx: number): void {
+    const p = this.players[idx];
+    if (!p || !p.alive || !this.started) return;
+    p.protectedUntil = 0;
+    if (this.phase === PHASE.PLAYING) this.kill(p, -1, KILL_WORLD, false);
+    else {
+      p.alive = false;
+      p.respawnAt = Infinity;
+    }
   }
 
   /** Ends the match now with the current scores (host ended it early). */
@@ -376,7 +434,7 @@ export class GameSim {
     this.tickCount++;
     const frozen = this.phase !== PHASE.PLAYING;
 
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
       if (!p) continue;
       if (p.brain) {
@@ -407,8 +465,12 @@ export class GameSim {
 
     if (this.phase === PHASE.WARMUP) {
       if (this.started && this.time >= this.phaseEndsAt) this.beginPlaying();
-    } else if (this.phase === PHASE.PLAYING) {
+    } else if (this.phase === PHASE.PLAYING && !this.porch) {
       this.updateMode();
+    }
+    if (this.porch && this.started) {
+      const won = this.porch.tick();
+      if (won !== null && this.phase === PHASE.PLAYING) this.endMatch(won);
     }
 
     this.recordHistory();
@@ -417,16 +479,19 @@ export class GameSim {
   private applyInput(p: SimPlayer, cmd: InputCmd, frozen: boolean): void {
     p.lastSeq = cmd.seq;
     if (!p.alive) return;
+    this.porch?.onInput(p, cmd);
     const act = this.act;
     stepPlayer(p.state, cmd, TICK_DT, this.phys, p.loadout, act, frozen);
     if (act.shot) this.fire(p, cmd, act);
     if (act.threw) this.throwItem(p);
     if (act.reloadStart) this.events.push([EV.RELOAD, p.idx]);
+    if (act.healed >= 0) this.porch?.healed(p, act.healed);
+    if (act.touchdown) this.events.push([EV.TOUCHDOWN, p.idx]);
   }
 
   // ------------------------------------------------------------------ combat
   private fire(p: SimPlayer, cmd: InputCmd, act: StepActions): void {
-    const w = weaponForSlot(p.loadout, act.shotSlot);
+    const w = weaponInSlot(p.state, act.shotSlot);
     if (!w) return;
     const s = p.state;
     p.protectedUntil = 0; // shooting ends spawn protection
@@ -448,9 +513,9 @@ export class GameSim {
     const targets = this.targets;
     for (const t of targets) this.targetPool.push(t);
     targets.length = 0;
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       const e = this.players[i];
-      if (!e || e === p || e.team === p.team || !e.alive || this.time < e.protectedUntil) continue;
+      if (!e || e === p || this.allies(e, p) || !e.alive || this.time < e.protectedUntil || e.state.air === AIR_RIDING) continue;
       const t = this.targetPool.pop() ?? { id: 0, x: 0, y: 0, z: 0, crouching: false };
       t.id = e.idx;
       this.rewound(e, rewindTo, t);
@@ -474,7 +539,7 @@ export class GameSim {
       }
     }
     this.events.push(ev);
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       if (dmg[i] > 0) {
         const v = this.players[i];
         if (v) this.damage(v, dmg[i], p.idx, weaponIndex(w.id), heads[i] === 1, s.x, s.z);
@@ -485,7 +550,7 @@ export class GameSim {
   private shotRng = new Rng(1);
 
   private throwItem(p: SimPlayer): void {
-    const type = throwableIndex(p.loadout.throwable);
+    const type = Math.max(0, p.state.thr - 1);
     const l = this.launch;
     throwLaunch(p.state, this.phys, l);
     const proj: Projectile = {
@@ -524,11 +589,11 @@ export class GameSim {
   private explode(pr: Projectile): void {
     const owner = this.players[pr.owner];
     const ox = pr.x, oy = pr.y + 0.25, oz = pr.z;
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       const v = this.players[i];
-      if (!v || !v.alive) continue;
+      if (!v || !v.alive || v.state.air === AIR_RIDING) continue;
       // no friendly fire, but you can blow yourself up
-      if (owner && v.team === owner.team && v !== owner) continue;
+      if (owner && this.allies(v, owner) && v !== owner) continue;
       const s = v.state;
       const cy = s.y + (s.crouching ? 0.6 : 0.95);
       const d = Math.hypot(s.x - ox, cy - oy, s.z - oz);
@@ -547,6 +612,10 @@ export class GameSim {
   damage(v: SimPlayer, amount: number, attackerIdx: number, weaponCode: number, head: boolean, srcX: number, srcZ: number): void {
     if (!v.alive || this.phase !== PHASE.PLAYING) return;
     if (this.time < v.protectedUntil) return;
+    if (this.porch) {
+      this.porch.noteDamage(attackerIdx, v.idx, amount);
+      amount = this.porch.absorb(v, amount, attackerIdx, weaponCode);
+    }
     v.health -= amount;
     v.lastDamageAt = this.time;
     if (attackerIdx >= 0 && attackerIdx !== v.idx) {
@@ -565,18 +634,30 @@ export class GameSim {
     v.alive = false;
     v.health = 0;
     v.deaths++;
-    v.respawnAt = this.time + PLAYER.respawnTime * 1000;
+    v.respawnAt = this.porch ? Infinity : this.time + PLAYER.respawnTime * 1000;
     v.state.vx = v.state.vz = 0;
+    v.state.healT = 0;
     const a = attackerIdx >= 0 ? this.players[attackerIdx] : null;
-    if (a && a !== v && a.team !== v.team) {
+    if (a && a !== v && !this.allies(a, v)) {
       a.kills++;
       if (this.mode === 'tdm') this.scores[a.team]++;
     }
     this.events.push([EV.KILL, a ? a.idx : -1, v.idx, weaponCode, head ? 1 : 0]);
+    this.porch?.eliminated(v);
   }
 
   // ------------------------------------------------------------------ spawning
   spawn(p: SimPlayer): void {
+    if (this.porch) {
+      // battle royale: everyone starts on the transport (late joiners too, if it is still flying)
+      this.porch.board(p);
+      p.life++;
+      p.lastCmd.yaw = p.state.yaw;
+      p.hCount = 0;
+      p.brain?.onSpawn();
+      this.events.push([EV.SPAWN, p.idx, Math.round(p.state.x * 100), Math.round(p.state.y * 100), Math.round(p.state.z * 100), Math.round(p.state.yaw * 1000), -1, -1, -1]);
+      return;
+    }
     if (p.nextLoadout) {
       p.loadout = p.nextLoadout;
       p.nextLoadout = null;
@@ -626,11 +707,16 @@ export class GameSim {
   }
 
   private updatePlayers(): void {
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
       if (!p) continue;
       if (!p.alive) {
         if (this.started && this.phase !== PHASE.ENDED && this.time >= p.respawnAt) this.spawn(p);
+        continue;
+      }
+      if (this.porch) {
+        // no regeneration: health comes back only from healing items
+        if (p.state.y < -15) this.kill(p, -1, KILL_WORLD, false);
         continue;
       }
       if (p.state.y < -15) {
@@ -722,7 +808,7 @@ export class GameSim {
 
   // ------------------------------------------------------------------ lag compensation
   private recordHistory(): void {
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
       if (!p || !p.alive) continue;
       const h = p.hHead;
@@ -799,7 +885,7 @@ export class GameSim {
   /** Builds the compact snapshot for one recipient (pass -1 for a spectator). */
   snapshot(forIdx: number, events: number[][]): WireSnapshot {
     const p: number[] = [];
-    for (let i = 0; i < MAX_PLAYERS; i++) {
+    for (let i = 0; i < this.players.length; i++) {
       const pl = this.players[i];
       if (!pl) continue;
       const s = pl.state;
@@ -811,10 +897,14 @@ export class GameSim {
       if (s.aiming) flags |= PF.AIM;
       if (s.reloadT > 0) flags |= PF.RELOAD;
       if (pl.alive && this.time < pl.protectedUntil) flags |= PF.PROTECTED;
+      if (s.air === AIR_RIDING) flags |= PF.RIDING;
+      else if (s.air !== 0) flags |= PF.BALLOON;
+      if (s.healT > 0) flags |= PF.HEALING;
+      const w = weaponInSlot(s, s.slot);
       const held =
-        s.slot === SLOT_PRIMARY ? weaponIndex(pl.loadout.primary)
-        : s.slot === SLOT_SECONDARY ? weaponIndex(pl.loadout.secondary)
-        : pl.loadout.throwable === 'grenade' ? HELD_GRENADE : HELD_SMOKE;
+        s.slot === SLOT_THROWABLE ? (s.thr === 1 ? HELD_GRENADE : HELD_SMOKE)
+        : !w || w.id === 'fists' ? HELD_NONE
+        : weaponIndex(w.id);
       p.push(
         pl.idx,
         Math.round(s.x * 100), Math.round(s.y * 100), Math.round(s.z * 100),
@@ -828,7 +918,12 @@ export class GameSim {
       z.push(zn.owner + 1, zn.capTeam + 1, Math.round(clamp(zn.progress, 0, 0.99) * 100) + (zn.contested ? 1000 : 0));
     }
     const me = forIdx >= 0 ? this.players[forIdx] : null;
+    if (me) {
+      me.state.hp = Math.max(0, Math.ceil(me.health));
+      me.state.armor = Math.round(me.armor);
+    }
     return {
+      ...(this.porch ? { b: this.porch.snapshot(forIdx) } : {}),
       t: Math.round(this.time * 100) / 100,
       m: [this.phase, Math.round(this.timeLeft * 10), this.scores[0], this.scores[1]],
       z,
@@ -842,10 +937,19 @@ export class GameSim {
   }
 
   /** Final standings for the end-of-match screen. */
-  standings(): Array<{ idx: number; name: string; team: TeamId; bot: boolean; kills: number; deaths: number; score: number }> {
-    const out = [];
+  standings(): StandingRow[] {
+    const out: StandingRow[] = [];
+    const br = this.porch;
     for (const p of this.players) {
-      if (p) out.push({ idx: p.idx, name: p.name, team: p.team, bot: p.isBot, kills: p.kills, deaths: p.deaths, score: p.score });
+      if (!p) continue;
+      const row: StandingRow = { idx: p.idx, name: p.name, team: p.team, bot: p.isBot, kills: p.kills, deaths: p.deaths, score: p.score };
+      if (br) {
+        row.squad = p.squad;
+        row.place = br.place[p.idx] || 1;
+        row.damage = Math.round(br.damageDealt[p.idx]);
+        row.survived = Math.round(br.survived(p.idx));
+      }
+      out.push(row);
     }
     return out;
   }

@@ -58,8 +58,8 @@ export class GameRenderer {
   private container: HTMLElement;
   private settings: SettingsStore;
   private unsub: () => void;
-  /** Moonlight direction (the only shadow-casting light at night). */
-  private sunDir = new THREE.Vector3(...LIGHTING.moon.dir).normalize();
+  /** Sun (or moon) direction: the only shadow-casting light. */
+  private sunDir = new THREE.Vector3(...LIGHTING.sun.dir).normalize();
   /** Light sources in the world, and the small pool of real lights handed to the nearest ones. */
   private spots: LightSpot[] = [];
   private spotDist = new Float32Array(0);
@@ -79,10 +79,11 @@ export class GameRenderer {
     this.scene.background = new THREE.Color(SKY);
     this.scene.fog = new THREE.Fog(SKY, this.profile.fogNear, this.profile.fogFar);
 
-    // night: a dim blue sky fill keeps the streets readable between lamps; the moon adds soft shadows
+    // sky fill (day: bright blue sky bounce; night: a dim blue that keeps the streets readable
+    // between lamps) plus the sun or moon, which casts the shadows
     this.hemi = new THREE.HemisphereLight(LIGHTING.ambient.sky, LIGHTING.ambient.ground, LIGHTING.ambient.intensity);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(LIGHTING.moon.color, LIGHTING.moon.intensity);
+    this.sun = new THREE.DirectionalLight(LIGHTING.sun.color, LIGHTING.sun.intensity);
     this.sun.position.copy(this.sunDir).multiplyScalar(80);
     this.scene.add(this.sun, this.sun.target);
 
@@ -191,8 +192,9 @@ export class GameRenderer {
     return this.governor.scale;
   }
 
-  /** The world's light sources (street lamps, shop lights). */
+  /** The world's light sources (street lamps, shop lights). Kinds switched off in the preset are skipped. */
   setLights(spots: LightSpot[]): void {
+    spots = spots.filter((s) => LIGHTING[s.kind].intensity > 0);
     this.spots = spots;
     this.spotDist = new Float32Array(spots.length);
     this.order = spots.map((_s, i) => i);

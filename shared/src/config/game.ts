@@ -60,7 +60,7 @@ export const HITBOX = {
 } as const;
 
 // ---- Modes -------------------------------------------------------------------
-export type ModeId = 'tdm' | 'turf';
+export type ModeId = 'tdm' | 'turf' | 'porch';
 
 export interface ModeConfig {
   id: ModeId;
@@ -86,9 +86,19 @@ export const MODES: Record<ModeId, ModeConfig> = {
     scoreLimit: 200,
     timeLimit: 600,
   },
+  porch: {
+    id: 'porch',
+    name: 'Jump Off the Porch',
+    blurb: 'Everybody gotta jump off the porch someday. Only one makes it out.',
+    scoreLimit: 0,
+    // no clock: the riot ends it (see config/porch.ts)
+    timeLimit: 3600,
+  },
 };
 
-export const MODE_IDS: readonly ModeId[] = ['tdm', 'turf'];
+export const MODE_IDS: readonly ModeId[] = ['tdm', 'turf', 'porch'];
+/** Crew-vs-crew modes (two teams, respawns). */
+export const CLASSIC_MODES: readonly ModeId[] = ['tdm', 'turf'];
 
 export const TURF = {
   /** Seconds for one uncontested player to flip a neutral zone. */

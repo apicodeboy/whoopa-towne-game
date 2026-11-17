@@ -1,0 +1,93 @@
+import {
+  DEFAULT_APPEARANCE, GameSim, LOOK_FIELDS, LOOK_FIELD_KEYS, TOPS, botAppearance, decodeAppearance, encodeAppearance,
+  randomAppearance, sameAppearance, sanitizeAppearance, seededRandom, type Appearance, type TeamId,
+} from '../src/index';
+import { assert, test } from './harness';
+import { initRapier } from './env';
+
+/** Every field holds an id that exists and is available. */
+function assertValid(a: Appearance, what: string): void {
+  for (const key of LOOK_FIELD_KEYS) {
+    const o = LOOK_FIELDS[key].find((x) => x.id === a[key]);
+    assert(!!o && o.available !== false, `${what}: ${key}=${a[key]} is not a selectable option`);
+  }
+}
+
+test('appearance: untrusted looks are cleaned field by field', () => {
+  const junk = sanitizeAppearance({ hair: '<script>', skin: 42, top: { x: 1 }, details: 'freckles' });
+  assert(sameAppearance(junk, DEFAULT_APPEARANCE), `junk not replaced: ${encodeAppearance(junk)}`);
+  const partial = sanitizeAppearance({ hair: 'largeafro', hairColor: 'pink', nose: 'gigantic' });
+  assert(partial.hair === 'largeafro' && partial.hairColor === 'pink', 'valid fields lost');
+  assert(partial.nose === DEFAULT_APPEARANCE.nose, 'invalid field kept');
+  for (const raw of [null, undefined, 'x', 5, [], 'L1zzzzzz']) assertValid(sanitizeAppearance(raw), `raw ${String(raw)}`);
+});
+
+test('appearance: options without art ("coming soon") can never be worn', () => {
+  const soon = TOPS.find((t) => t.available === false)!;
+  const a = sanitizeAppearance({ top: soon.id, tattoos: { larm: 'skull' } });
+  assert(a.top === DEFAULT_APPEARANCE.top, `unavailable top ${soon.id} was accepted`);
+  assert(Object.keys(a.tattoos).length === 0, 'unavailable tattoo was accepted');
+  // the same holds for wire codes: force the "No Shirt" slot (index 0) into a code
+  const code = encodeAppearance(DEFAULT_APPEARANCE);
+  const topAt = 2 + LOOK_FIELD_KEYS.indexOf('top');
+  const forged = code.slice(0, topAt) + '0' + code.slice(topAt + 1);
+  assert(decodeAppearance(forged).top === DEFAULT_APPEARANCE.top, 'forged code put on an unavailable top');
+});
+
+test('appearance: saves from before the creator keep their outfit', () => {
+  const punk = sanitizeAppearance({ body: 'punk', mouth: 'bottle' });
+  assert(punk.bodyType === 'fem' && punk.hair === 'mohawk' && punk.top === 'crop' && punk.shoes === 'boots', 'punk outfit lost');
+  assert(punk.mouthProp === 'bottle', 'mouth prop lost');
+  const casual = sanitizeAppearance({ body: 'casual', mouth: 'none' });
+  assert(casual.top === 'tee' && casual.bottom === 'jeans' && casual.hair === 'ponytail', 'casual outfit lost');
+  assertValid(punk, 'legacy punk');
+  assertValid(casual, 'legacy casual');
+});
+
+test('appearance: wire codes are short and round-trip exactly', () => {
+  const rand = seededRandom(1234);
+  for (let i = 0; i < 300; i++) {
+    const a = randomAppearance(rand);
+    assertValid(a, `random #${i}`);
+    const code = encodeAppearance(a);
+    assert(code.length <= 48, `code too long (${code.length})`);
+    const b = decodeAppearance(code);
+    assert(JSON.stringify(b) === JSON.stringify(a), `round trip changed look #${i}: ${code}`);
+  }
+  // codes and objects both sanitize to the same thing
+  const a = randomAppearance(seededRandom(9));
+  assert(sameAppearance(sanitizeAppearance(encodeAppearance(a)), sanitizeAppearance(a)), 'code and object disagree');
+});
+
+test('appearance: bot looks are stable per name and slot, valid, and varied', () => {
+  const a = botAppearance('Lil Skeet', 3), b = botAppearance('Lil Skeet', 3);
+  assert(sameAppearance(a, b), 'same bot got different looks');
+  const hair = new Set<string>(), tops = new Set<string>(), bodies = new Set<string>();
+  for (let i = 0; i < 60; i++) {
+    const l = botAppearance(`Bot ${i}`, i);
+    assertValid(l, `bot ${i}`);
+    hair.add(l.hair);
+    tops.add(l.top);
+    bodies.add(l.bodyType);
+  }
+  assert(hair.size >= 10 && tops.size >= 3 && bodies.size === 3, `bots barely vary: ${hair.size} hairstyles, ${tops.size} tops`);
+});
+
+test('appearance: the roster carries every look and the sim RNG is untouched by it', async () => {
+  const R = await initRapier();
+  const mine = sanitizeAppearance({ hair: 'cornrows', top: 'tee', topColor: 'yellow', glasses: 'aviators' });
+  const make = () => {
+    const sim = new GameSim(R, { mode: 'tdm', seed: 77, warmup: 0 });
+    sim.addPlayer({ id: 'me', name: 'Me', team: 0, look: mine });
+    for (let i = 0; i < 3; i++) sim.addPlayer({ id: `b${i}`, name: `B${i}`, team: (i % 2) as TeamId, isBot: true });
+    return sim;
+  };
+  const sim = make();
+  const roster = sim.roster();
+  const me = roster.find((r) => !r.bot)!;
+  assert(typeof me.look === 'string' && sameAppearance(decodeAppearance(me.look), mine), 'human look missing from roster');
+  for (const r of roster) assert(typeof r.look === 'string' && r.look.length > 0, `no look for ${r.name}`);
+  // bot looks come from their names, not the match RNG: two sims with the same seed stay in step
+  assert(make().rng.next() === sim.rng.next(), 'rng drifted');
+  sim.dispose();
+});

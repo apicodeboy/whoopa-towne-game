@@ -6,7 +6,8 @@ const MOUSE_RAD_PER_PX = 0.0023;
 /**
  * Desktop controls:
  *   WASD move · mouse aim · LMB fire · RMB aim · R reload · Shift sprint · C crouch (Ctrl = hold)
- *   Space jump · 1-3 weapons · wheel cycle · G throw · Q swap shoulder · Tab scoreboard · Esc pause
+ *   Space jump · 1-3 weapons (1-4 in JUMP OFF THE PORCH) · wheel cycle · G throw · Q swap shoulder · Tab scoreboard · Esc pause
+ *   E search / pick up · H heal · X drop weapon (JUMP OFF THE PORCH)
  */
 export class KeyboardMouseSource implements InputSource {
   readonly kind = 'kbm' as const;
@@ -179,12 +180,16 @@ export class KeyboardMouseSource implements InputSource {
       if (k.has('KeyR') || p.has('KeyR')) frame.reload = true;
       if (k.has('KeyG') || p.has('KeyG') || (btn & 2) !== 0) frame.throwBtn = true;
       if (k.has('Tab')) frame.scoreboard = true;
+      if (k.has('KeyE') || p.has('KeyE') || k.has('KeyF') || p.has('KeyF')) frame.use = true;
+      if (k.has('KeyH') || p.has('KeyH')) frame.heal = true;
+      if (k.has('KeyX') || p.has('KeyX')) frame.drop = true;
 
       if (p.has('KeyC')) frame.crouchPress = true;
       if (p.has('KeyQ') || p.has('KeyV')) frame.swapShoulder = true;
       if (p.has('Digit1')) frame.slotSelect = 0;
       if (p.has('Digit2')) frame.slotSelect = 1;
       if (p.has('Digit3')) frame.slotSelect = 2;
+      if (p.has('Digit4')) frame.slotSelect = 3;
       if (this.wheel !== 0) frame.slotCycle = this.wheel > 0 ? 1 : -1;
     }
 
@@ -209,7 +214,7 @@ export class KeyboardMouseSource implements InputSource {
   }
 }
 
-const PREVENT_DEFAULT = new Set(['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'Digit1', 'Digit2', 'Digit3']);
+const PREVENT_DEFAULT = new Set(['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'Digit1', 'Digit2', 'Digit3', 'Digit4']);
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;

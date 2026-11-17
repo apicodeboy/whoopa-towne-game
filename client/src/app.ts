@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { botAppearance, type Appearance } from '@shared/config/appearance';
 import type { ModeId } from '@shared/config/game';
 import type { Loadout } from '@shared/config/weapons';
 import type { BotDifficulty } from '@shared/protocol';
@@ -10,6 +11,7 @@ import { AudioEngine } from './game/audio';
 import { verticalFov } from './game/camera';
 import type { CharacterVisual } from './game/characters/characterTypes';
 import { ProceduralCharacter } from './game/characters/proceduralCharacter';
+import { LookBuilder } from './game/characters/look/assemble';
 import { SkinnedCharacter } from './game/characters/skinnedCharacter';
 import { Game } from './game/game';
 import { Stage } from './game/stage';
@@ -19,6 +21,7 @@ import { TouchSource } from './input/touch';
 import type { DeviceKind } from './input/types';
 import { LobbyConnection, NetClient, describeJoinError } from './net/online';
 import { LocalSession, type LocalSessionOptions, type Session } from './net/session';
+import { CharacterScreen } from './ui/characterScreen';
 import { LoadoutScreen } from './ui/loadoutScreen';
 import { LobbyScreen } from './ui/lobbyScreen';
 import { MainMenu } from './ui/mainMenu';
@@ -55,6 +58,8 @@ export class App {
   readonly toasts: Toasts;
   /** CC0 models (characters, weapons, vehicles, props). Optional: the game runs without them. */
   readonly assets = new Assets();
+  /** Builds character bodies from looks (cached per look). */
+  readonly looks = new LookBuilder(() => this.assets.characters);
   /** Resolves when the models have loaded (or failed) and the world has been dressed with them. */
   readonly assetsReady: Promise<void>;
   game: Game | null = null;
@@ -70,6 +75,7 @@ export class App {
   private menu: MainMenu;
   private lobbyScreen: LobbyScreen;
   private loadoutScreen: LoadoutScreen;
+  private characterScreen: CharacterScreen;
   private settingsScreen: SettingsScreen;
   private pause: PauseMenu;
   private results: ResultsBar;
@@ -117,6 +123,7 @@ export class App {
       createPrivate: (mode) => void this.connect('create', mode),
       joinWithCode: (code) => void this.connect('join', this.profile.mode, code),
       practice: (mode, difficulty) => this.startPractice(mode, difficulty),
+      openCharacter: () => this.characterScreen.show(true),
       openLoadout: () => this.loadoutScreen.show(true),
       openSettings: () => this.settingsScreen.show(true),
     });
@@ -125,6 +132,7 @@ export class App {
       switchCrew: (t) => this.lobby?.setTeam(t),
       configure: (cfg) => this.lobby?.configure(cfg),
       start: () => this.lobby?.start(),
+      openCharacter: () => this.characterScreen.show(true),
       openLoadout: () => this.loadoutScreen.show(true),
       leave: () => void this.leaveLobby(),
       copy: (text, what) => void this.copy(text, what),
@@ -150,6 +158,15 @@ export class App {
     this.clickToPlay = new ClickToPlay(ui);
     this.loadoutScreen = new LoadoutScreen(ui, this.profile, (l) => this.onLoadoutChanged(l), () => this.loadoutScreen.show(false));
     this.settingsScreen = new SettingsScreen(ui, this.settings, () => this.settingsScreen.show(false));
+    this.characterScreen = new CharacterScreen(ui, {
+      profile: this.profile,
+      build: (look) => this.makeCharacter(0, 0, look),
+      // a kept look goes to the lobby right away (it shows from the next match)
+      onKeep: (look) => this.lobby?.setLook(look),
+      onClose: () => this.characterScreen.show(false),
+    });
+    // the preview starts with the stand-in figure if the models are still downloading
+    void this.assetsReady.then(() => this.characterScreen.rebuild());
 
     // ---- controllers + touch ----
     this.nav = new MenuNav(ui);
@@ -252,11 +269,11 @@ export class App {
     this.menu.setBusy(true, kind === 'join' ? 'Joining lobby…' : 'Finding a lobby…');
     try {
       this.net ??= new NetClient();
-      const loadout = this.profile.loadout;
+      const { loadout, look, squads } = this.profile;
       const conn =
-        kind === 'quick' ? await this.net.quickPlay(mode, name, loadout)
-        : kind === 'create' ? await this.net.createPrivate(mode, name, loadout)
-        : await this.net.joinByCode(code, name, loadout);
+        kind === 'quick' ? await this.net.quickPlay(mode, name, loadout, look, squads)
+        : kind === 'create' ? await this.net.createPrivate(mode, name, loadout, look, squads)
+        : await this.net.joinByCode(code, name, loadout, look);
       this.enterLobby(conn);
     } catch (err) {
       this.toasts.show(describeJoinError(err), 'error', 5000);
@@ -306,6 +323,8 @@ export class App {
       mode,
       name: this.profile.name,
       loadout: this.profile.loadout,
+      look: this.profile.look,
+      squads: this.profile.squads,
       difficulty,
       latencyMs: this.debug.latencyMs,
       seed: this.debug.seed,
@@ -328,12 +347,17 @@ export class App {
       session,
       loadout: this.profile.loadout,
       audio: this.audio,
-      characterFactory: (team, seed) => this.makeCharacter(team, seed),
+      characterFactory: (team, seed, look) => this.makeCharacter(team, seed, look),
+      assets: this.assets,
+      prewarmLooks: (looks) => {
+        for (const l of looks) this.looks.build(l);
+      },
     });
     game.onPause = () => this.togglePause();
     game.onFrame = () => {
       if (!this.input.ctx.gameplay) this.nav.handle(this.input.frame);
     };
+    game.onLeaveRequest = () => void this.leaveMatch();
     game.onMatchOver = () => {
       this.matchOver = true;
       this.setPaused(false);
@@ -349,15 +373,19 @@ export class App {
     this.setState('playing');
     this.loadoutScreen.show(false);
     this.settingsScreen.show(false);
+    this.characterScreen.show(false);
     this.updateClickToPlay();
     game.start();
   }
 
-  /** Rigged CC0 character when the models are available, the procedural one otherwise. */
-  private makeCharacter(team: 0 | 1, seed: number): CharacterVisual {
-    const list = this.assets.characters;
-    if (list.length === 0) return new ProceduralCharacter(team, seed);
-    return new SkinnedCharacter(list[seed % list.length], this.assets, team);
+  /**
+   * A character built from a look (Character Creator) on the rigged CC0 models, or the
+   * procedural stand-in while / if the models are unavailable. Servers that send no look get
+   * a stable random one per slot.
+   */
+  private makeCharacter(team: 0 | 1, seed: number, look?: Appearance): CharacterVisual {
+    const l = look ?? botAppearance('Player', seed);
+    return SkinnedCharacter.create(this.looks, this.assets, team, l) ?? new ProceduralCharacter(team, seed, l);
   }
 
   private endGame(): void {

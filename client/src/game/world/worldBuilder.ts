@@ -367,7 +367,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     group.add(mesh);
     disposables.push(mesh.geometry);
   }
-  if (glows.length > 0) {
+  if (glows.length > 0 && LIGHTING.poolOpacity <= 0) for (const part of glows) part.dispose();
+  else if (glows.length > 0) {
     const g = mergeGeometries(glows, false);
     for (const part of glows) part.dispose();
     const t = glowTexture();
@@ -382,7 +383,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     disposables.push(g, t, mat);
   }
 
-  if (cones.length > 0 && LIGHTING.coneOpacity > 0) {
+  if (cones.length > 0 && LIGHTING.coneOpacity <= 0) for (const part of cones) part.dispose();
+  else if (cones.length > 0) {
     const g = mergeGeometries(cones, false);
     for (const part of cones) part.dispose();
     // additive, so black (the bottom of each cone) adds nothing: the light fades toward the ground
@@ -697,7 +699,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         if (r < 0.12) continue; // a bare stretch of wall here and there
         const lit = r > 1 - LIGHTING.litWindows;
         const boarded = !lit && r < 0.2;
-        pane(f, a, base + fy + wh / 2, ww, wh, boarded ? 0x6b5a45 : lit ? 0xffd592 : 0x1c2530, lit, 0xd2cec4);
+        pane(f, a, base + fy + wh / 2, ww, wh, boarded ? 0x6b5a45 : lit ? 0xffd592 : LIGHTING.windowGlass, lit, 0xd2cec4);
       }
     });
   }
@@ -775,9 +777,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       const w = 10 + hash(i + 130) * 14, d = 10 + hash(i + 170) * 14;
       const h = 16 + hash(i + 210) * 34;
       box('flat').add({ x, y: h / 2, z, sx: w, sy: h, sz: d }, { color: [0x4b5362, 0x565c68, 0x434a57, 0x5e6470][i % 4], skipBottom: true });
-      // a scatter of lit windows on the side facing the map
+      // a scatter of lit windows on the side facing the map (none by day)
       const fx = Math.abs(x) > Math.abs(z);
-      for (let k = 0; k < 9; k++) {
+      for (let k = 0; k < (LIGHTING.skylineWindows > 0 ? 9 : 0); k++) {
         if (hash(i * 13 + k) < 0.45) continue;
         const u = (hash(i * 29 + k) - 0.5) * (fx ? d : w) * 0.8;
         const y = 4 + hash(i * 41 + k) * (h - 7);
@@ -790,9 +792,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   }
 
   /**
-   * Night sky that follows the camera: a gradient dome with a warm city glow low on the
-   * horizon, stars, and the moon. Everything here is drawn first and without depth, so the
-   * town simply paints over it.
+   * Sky that follows the camera: a gradient dome with a haze low on the horizon, and the sun
+   * by day or stars and the moon by night. Everything here is drawn first and without depth,
+   * so the town simply paints over it.
    */
   function makeSky(): THREE.Mesh {
     const g = new THREE.SphereGeometry(100, 48, 24);
@@ -805,8 +807,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       const t = Math.max(0, p.getY(i) / 100);
       if (t < 0.22) c.copy(low).lerp(mid, t / 0.22);
       else c.copy(mid).lerp(top, Math.min(1, (t - 0.22) / 0.6));
-      // light pollution: a warm band hugging the horizon
-      c.lerp(glow, Math.max(0, 1 - t / 0.38) ** 1.6 * 0.85);
+      // haze (city lights at night): a warm band hugging the horizon
+      c.lerp(glow, Math.max(0, 1 - t / 0.38) ** 1.6 * LIGHTING.cityGlowAmount);
       colors.push(c.r, c.g, c.b);
     }
     g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -844,16 +846,16 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       disposables.push(sg, sm);
     }
 
-    // the moon, where the moonlight comes from
-    const moonTex = moonTexture();
+    // the sun or moon, where the shadow-casting light comes from
+    const moonTex = LIGHTING.sun.body === 'sun' ? sunTexture() : moonTexture();
     const moonMat = new THREE.SpriteMaterial({
       map: moonTex, fog: false, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const moon = new THREE.Sprite(moonMat);
-    const [mx, my, mz] = LIGHTING.moon.dir;
+    const [mx, my, mz] = LIGHTING.sun.dir;
     const len = Math.hypot(mx, my, mz);
     moon.position.set((mx / len) * 90, (my / len) * 90, (mz / len) * 90);
-    moon.scale.setScalar(16);
+    moon.scale.setScalar(LIGHTING.sun.body === 'sun' ? 30 : 16);
     moon.renderOrder = -98;
     moon.frustumCulled = false;
     mesh.add(moon);
@@ -909,6 +911,24 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         lights.push({ x, y: ceiling - 0.3, z, kind: 'interior' });
       }
     }
+  }
+
+  function sunTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = s;
+    const g = cv.getContext('2d')!;
+    const halo = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    halo.addColorStop(0, 'rgba(255,255,250,1)');
+    halo.addColorStop(0.09, 'rgba(255,250,232,0.95)');
+    halo.addColorStop(0.13, 'rgba(255,240,205,0.45)');
+    halo.addColorStop(0.35, 'rgba(255,230,190,0.12)');
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = halo;
+    g.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
   }
 
   function moonTexture(): THREE.CanvasTexture {
@@ -1083,7 +1103,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         // the arm reaches toward the middle of the map
         const dir = p.x > 0 ? -1 : 1;
         box('flat').add({ x: p.x + dir * 0.75, y: p.y + 6.1, z: p.z, sx: 1.6, sy: 0.08, sz: 0.08 }, { color: 0x2e3238 });
-        box('lit').add({ x: p.x + dir * 1.35, y: p.y + 6.0, z: p.z, sx: 0.6, sy: 0.1, sz: 0.3 }, { color: 0xffe2a8 });
+        box(LIGHTING.street.intensity > 0 ? 'lit' : 'flat').add({ x: p.x + dir * 1.35, y: p.y + 6.0, z: p.z, sx: 0.6, sy: 0.1, sz: 0.3 }, { color: LIGHTING.lampHead });
         box('flat').add({ x: p.x + dir * 1.35, y: p.y + 6.08, z: p.z, sx: 0.7, sy: 0.08, sz: 0.36 }, { color: 0x2e3238 });
         const glow = new THREE.PlaneGeometry(11, 11);
         glow.rotateX(-Math.PI / 2);

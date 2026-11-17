@@ -16,8 +16,6 @@
         position: fixed;
         inset: 0;
         z-index: 50;
-        display: grid;
-        place-items: center;
         overflow: hidden;
         background: #0d0e12;
         transition: opacity 0.6s ease;
@@ -26,43 +24,70 @@
         opacity: 0;
         pointer-events: none;
       }
-      /* the same art, blurred and dimmed, fills the letterbox around it on any screen shape */
-      #loading .ld-backdrop {
-        position: absolute;
-        inset: -60px;
-        background: url('/assets/ui/loading-screen.jpg') center / cover no-repeat;
-        filter: blur(28px) brightness(0.45);
-      }
+      /* Fills the screen edge to edge (16:9 art, cropped like background-size: cover). It is
+         pinned to the bottom so wide phones crop the top, never the loading bar; narrower
+         screens (16:10, 4:3) lose a little of each side. */
       #loading .ld-art {
-        position: relative;
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        transform: translateX(-50%);
         container-type: inline-size;
-        width: min(100vw, calc(100vh * 1672 / 941));
-        width: min(100vw, calc(100dvh * 1672 / 941));
-        aspect-ratio: 1672 / 941;
+        width: max(100vw, calc(100vh * 16 / 9));
+        width: max(100vw, calc(100dvh * 16 / 9));
+        aspect-ratio: 16 / 9;
       }
       #loading .ld-art img {
         display: block;
         width: 100%;
         height: 100%;
       }
-      /* The live bar sits exactly over the bar painted into the art (image px 475,855 → 1195,883
-         of 1672x941) and hides the painted fill. */
-      #loading .ld-track {
+      /* Portrait or ultra-wide: cropping would cut the title, so show the whole picture and
+         fill the rest with a blurred, dimmed copy of it. */
+      #loading .ld-backdrop {
+        display: none;
         position: absolute;
-        left: 28.409%;
-        top: 90.861%;
-        width: 43.062%;
-        height: 2.976%;
+        inset: -60px;
+        background: url('/assets/ui/loading-screen-1920.jpg') center / cover no-repeat;
+        filter: blur(28px) brightness(0.45);
+      }
+      @media (max-aspect-ratio: 1/1), (min-aspect-ratio: 12/5) {
+        #loading .ld-backdrop {
+          display: block;
+        }
+        #loading .ld-art {
+          top: 50%;
+          bottom: auto;
+          transform: translate(-50%, -50%);
+          width: min(100vw, calc(100vh * 16 / 9));
+          width: min(100vw, calc(100dvh * 16 / 9));
+        }
+      }
+      /* The live bar is drawn exactly over the bar painted into the art, hiding its painted
+         fill: black ring at image px 1080,1948 → 2758,2041 of 3840x2160 (1cqw = 38.4 px), then
+         a grey bevel and the track inside it. */
+      #loading .ld-ring {
+        position: absolute;
+        left: 28.125%;
+        top: 90.185%;
+        width: 43.724%;
+        height: 4.352%;
+        padding: 0.3125cqw;
+        border-radius: 999px;
+        background: #030303;
+      }
+      #loading .ld-track {
+        height: 100%;
         overflow: hidden;
         border-radius: 999px;
-        background: #0a0908;
-        box-shadow: inset 0 0 0 0.2cqw #808081;
+        background: #080707;
+        box-shadow: inset 0 0 0 0.27cqw #8a8a8b;
       }
       #loading .ld-fill {
         width: 0;
         height: 100%;
         border-radius: inherit;
-        background: linear-gradient(#fffbd0 0%, #fff35a 20%, #ffe800 48%, #fde500 82%, #fff36a 100%);
+        background: linear-gradient(#fffc3a 0%, #fdfb2a 18%, #fdfc00 26%, #fef802 74%, #f1cc0b 86%, #c1a63e 100%);
       }
     </style>
   </head>
@@ -74,8 +99,16 @@
       <div id="loading" role="progressbar" aria-label="Loading Whoopa Towne" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div class="ld-backdrop"></div>
         <div class="ld-art">
-          <img src="/assets/ui/loading-screen.jpg" alt="Whoopa-Towne Online" width="1672" height="941" fetchpriority="high" />
-          <div class="ld-track"><div class="ld-fill"></div></div>
+          <img
+            src="/assets/ui/loading-screen-1920.jpg"
+            srcset="/assets/ui/loading-screen-1920.jpg 1920w, /assets/ui/loading-screen-2880.jpg 2880w, /assets/ui/loading-screen-3840.jpg 3840w"
+            sizes="max(100vw, 177.78vh)"
+            alt="Whoopa-Towne Online"
+            width="3840"
+            height="2160"
+            fetchpriority="high"
+          />
+          <div class="ld-ring"><div class="ld-track"><div class="ld-fill"></div></div></div>
         </div>
       </div>
     </div>

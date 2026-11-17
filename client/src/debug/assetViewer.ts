@@ -1,6 +1,8 @@
 import * as THREE from 'three';
+import { LOOK_FIELDS, randomAppearance, sanitizeAppearance, seededRandom, type Appearance, type LookField } from '@shared/config/appearance';
 import { Assets } from '../game/assets';
-import { makePose } from '../game/characters/characterTypes';
+import { makePose, type CharacterVisual } from '../game/characters/characterTypes';
+import { LookBuilder, lookTimings } from '../game/characters/look/assemble';
 import { ProceduralCharacter } from '../game/characters/proceduralCharacter';
 import { SkinnedCharacter } from '../game/characters/skinnedCharacter';
 
@@ -8,6 +10,8 @@ import { SkinnedCharacter } from '../game/characters/skinnedCharacter';
  * Developer page (?debug=assets): lines up every loaded model next to a 1.8m reference
  * so scale, orientation and animation states can be checked by eye.
  *   ?debug=assets&view=characters|guns|props   &pose=idle|run|strafe|back|crouch|aim|sprint|reload|dead
+ * Characters: the three classic outfits, or &looks=random[&n=6&seed=1] for random looks, or
+ * &look=<wire code or JSON> for one look.
  */
 export async function runAssetViewer(container: HTMLElement): Promise<void> {
   const q = new URLSearchParams(location.search);
@@ -61,27 +65,54 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
         default: break;
       }
     };
-    const chars = [
-      ...assets.characters.map((tpl, i) => new SkinnedCharacter(tpl, assets, (i % 2) as 0 | 1)),
-      new ProceduralCharacter(0, 1),
+    const builder = new LookBuilder(() => assets.characters);
+    let looks: Appearance[] = ['hoodie', 'punk', 'casual'].map((body) => sanitizeAppearance({ body }));
+    if (q.get('looks') === 'random') {
+      const rand = seededRandom(Number(q.get('seed') ?? 1));
+      looks = Array.from({ length: Number(q.get('n') ?? 6) }, () => randomAppearance(rand));
+    } else if (q.get('look') || q.get('vary')) {
+      const raw = q.get('look') ?? '{}';
+      looks = [sanitizeAppearance(raw.startsWith('{') ? JSON.parse(raw) : raw)];
+      // one character per option of a field: &vary=hair&from=0&n=6
+      const field = q.get('vary') as LookField | null;
+      if (field && LOOK_FIELDS[field]) {
+        const opts = LOOK_FIELDS[field].filter((o) => o.available !== false).slice(Number(q.get('from') ?? 0), Number(q.get('from') ?? 0) + Number(q.get('n') ?? 6));
+        looks = opts.map((o) => ({ ...looks[0], [field]: o.id }));
+        info.varied = opts.map((o) => o.id);
+      }
+    }
+    const t0 = performance.now();
+    const chars: CharacterVisual[] = [
+      ...looks.map((l, i) => SkinnedCharacter.create(builder, assets, (i % 2) as 0 | 1, l)).filter((c): c is SkinnedCharacter => !!c),
+      ...(q.has('looks') || q.has('look') || q.has('vary') ? [] : [new ProceduralCharacter(0, 1)]),
     ];
+    info.buildMs = Math.round(performance.now() - t0);
+    info.phases = Object.fromEntries(Object.entries(lookTimings()).map(([k, v]) => [k, Math.round(v)]));
     chars.forEach((c, i) => {
       scene.add(c.root);
       const p = makePose();
-      p.x = (i - (chars.length - 1) / 2) * 1.6;
+      p.x = (i - (chars.length - 1) / 2) * Number(q.get('gap') ?? 1.6);
       p.yaw = q.has('yaw') ? Number(q.get('yaw')) : Math.PI * 0.82; // turned mostly toward the camera
+      if (q.has('calm')) c.setMenuIdle?.(true);
+      if (q.has('expr')) setTimeout(() => c.previewExpression?.(q.get('expr')!), 200);
       if (poseName === 'dead') setTimeout(() => c.die(0, 1), 300);
       if (poseName === 'shoot') setInterval(() => c.shot(), 110);
       updaters.push((dt, t) => {
         set(p, t);
         c.update(dt, p);
       });
-      const ref = post.clone();
-      ref.position.set(p.x - 0.55, 0.9, 0.1);
-      scene.add(ref);
+      if (!q.has('noref')) {
+        const ref = post.clone();
+        ref.position.set(p.x - 0.55, 0.9, 0.1);
+        scene.add(ref);
+      }
     });
     camera.position.set(Number(q.get('cx') ?? 0.8), Number(q.get('cy') ?? 1.5), Number(q.get('cz') ?? 6.2));
-    camera.lookAt(0, 0.95, 0);
+    camera.lookAt(Number(q.get('lx') ?? 0), Number(q.get('ly') ?? 0.95), Number(q.get('lz') ?? 0));
+    if (q.has('fov')) {
+      camera.fov = Number(q.get('fov'));
+      camera.updateProjectionMatrix();
+    }
     info.characters = assets.characters.map((c) => ({ name: c.name, clips: [...c.clips.keys()] }));
   } else if (view === 'guns') {
     // stacked vertically and seen side-on: screen-left is +Z (blue axis), up is +Y

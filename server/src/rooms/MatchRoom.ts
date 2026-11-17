@@ -1,9 +1,11 @@
 import { Room, matchMaker, type Client } from '@colyseus/core';
+import { sanitizeAppearance, type Appearance } from '../../../shared/src/config/appearance.ts';
 import type { TeamId } from '../../../shared/src/config/crews.ts';
 import {
   INVITE_CODE_ALPHABET, INVITE_CODE_LENGTH, MAX_PLAYERS, MIN_PLAYERS, MODE_IDS, SNAPSHOT_EVERY, TEAM_SIZE, TICK_MS,
   sanitizeName, type ModeId,
 } from '../../../shared/src/config/game.ts';
+import { PORCH, SQUAD_MODES, sanitizeSquadMode, type SquadMode } from '../../../shared/src/config/porch.ts';
 import { sanitizeLoadout, type Loadout } from '../../../shared/src/config/weapons.ts';
 import {
   MSG, PHASE, decodeInputs, type BotDifficulty, type JoinOptions, type MatchEndMsg, type MatchStartMsg,
@@ -20,6 +22,7 @@ const MAX_CATCHUP_TICKS = 5;
 
 interface Member {
   loadout: Loadout;
+  look: Appearance;
   /** Player index in the running sim (-1 in the lobby). */
   idx: number;
   joinedAt: number;
@@ -38,6 +41,9 @@ function randomCode(): string {
  * then runs the authoritative GameSim at 60 Hz, feeding it client input commands and
  * sending each client a 30 Hz snapshot stream. When the match ends everyone returns
  * to the lobby in the same room.
+ *
+ * JUMP OFF THE PORCH rooms hold a bigger lobby (no crews: squads are formed at launch) and
+ * public ones launch on their own after a countdown once enough players are waiting.
  */
 export class MatchRoom extends Room<{ state: LobbyState }> {
   override maxClients = MAX_PLAYERS;
@@ -50,6 +56,11 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
   private pendingEvents: number[][] = [];
   private endSent = false;
   private joinCounter = 0;
+  private countdownMs = -1;
+
+  private get porch(): boolean {
+    return this.state.mode === 'porch';
+  }
 
   override async onCreate(options: JoinOptions): Promise<void> {
     const state = new LobbyState();
@@ -58,6 +69,9 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     state.phase = 'lobby';
     state.fillBots = true;
     state.botDifficulty = 'normal';
+    state.squads = sanitizeSquadMode(options?.squads);
+    state.capacity = state.mode === 'porch' ? PORCH.lobbySize : MAX_PLAYERS;
+    this.maxClients = state.capacity;
 
     // The 6-character invite code doubles as the room id, so "Join with Code" is a plain joinById.
     let code = randomCode();
@@ -68,7 +82,7 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
 
     await this.setMatchmaking({
       private: state.isPrivate,
-      metadata: { mode: state.mode, code },
+      metadata: { mode: state.mode, squads: state.mode === 'porch' ? state.squads : undefined, code },
     });
 
     this.onMessage(MSG.READY, (client, msg: { ready?: boolean }) => {
@@ -78,7 +92,7 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
 
     this.onMessage(MSG.TEAM, (client, msg: { team?: number }) => {
       const p = this.state.players.get(client.sessionId);
-      if (!p || this.state.phase !== 'lobby') return;
+      if (!p || this.state.phase !== 'lobby' || this.porch) return;
       const team: TeamId = msg?.team === 1 ? 1 : 0;
       if (p.team === team || this.teamSize(team) >= TEAM_SIZE) return;
       p.team = team;
@@ -94,19 +108,38 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
       if (this.sim && m.idx >= 0) this.sim.setLoadout(m.idx, m.loadout);
     });
 
-    this.onMessage(MSG.CONFIG, (client, msg: { mode?: string; fillBots?: boolean; botDifficulty?: string }) => {
+    // cosmetic; stored for the next match (a running match keeps the look it started with)
+    this.onMessage(MSG.LOOK, (client, msg: unknown) => {
+      const m = this.members.get(client.sessionId);
+      if (m) m.look = sanitizeAppearance(msg, m.look);
+    });
+
+    this.onMessage(MSG.CONFIG, (client, msg: { mode?: string; fillBots?: boolean; botDifficulty?: string; squads?: string }) => {
       if (client.sessionId !== this.state.hostId || this.state.phase !== 'lobby' || !msg) return;
       // Public lobbies are matched by mode, so only private lobbies may change it.
       if (this.state.isPrivate && MODE_IDS.includes(msg.mode as ModeId) && msg.mode !== this.state.mode) {
-        this.state.mode = msg.mode as ModeId;
-        void this.setMatchmaking({ metadata: { mode: this.state.mode, code: this.state.code } });
+        const capacity = msg.mode === 'porch' ? PORCH.lobbySize : MAX_PLAYERS;
+        if (this.state.players.size > capacity) {
+          client.send(MSG.NOTICE, { text: `Too many players for that mode (max ${capacity}).` });
+        } else {
+          this.state.mode = msg.mode as ModeId;
+          this.state.capacity = capacity;
+          this.maxClients = capacity;
+          void this.setMatchmaking({ metadata: { mode: this.state.mode, code: this.state.code } });
+        }
       }
+      if (this.state.isPrivate && msg.squads !== undefined) this.state.squads = sanitizeSquadMode(msg.squads);
       if (typeof msg.fillBots === 'boolean') this.state.fillBots = msg.fillBots;
       if (DIFFICULTIES.includes(msg.botDifficulty as BotDifficulty)) this.state.botDifficulty = msg.botDifficulty as BotDifficulty;
     });
 
     this.onMessage(MSG.START, (client) => {
       if (client.sessionId !== this.state.hostId || this.state.phase !== 'lobby') return;
+      if (this.porch && !this.state.isPrivate) {
+        // public battle royale: the host can skip the rest of the countdown
+        if (this.countdownMs > 3000) this.countdownMs = 3000;
+        return;
+      }
       const problem = this.startProblem();
       if (problem) {
         client.send(MSG.NOTICE, { text: problem });
@@ -155,7 +188,7 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     p.primary = loadout.primary;
     p.throwable = loadout.throwable;
     this.state.players.set(client.sessionId, p);
-    this.members.set(client.sessionId, { loadout, idx: -1, joinedAt: this.joinCounter++ });
+    this.members.set(client.sessionId, { loadout, look: sanitizeAppearance(options?.look), idx: -1, joinedAt: this.joinCounter++ });
     if (!this.state.hostId || !this.state.players.has(this.state.hostId)) this.state.hostId = client.sessionId;
   }
 
@@ -186,7 +219,10 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
 
     if (this.sim && m && m.idx >= 0) {
       const anyHumanLeft = this.members.size > 0;
-      if (anyHumanLeft && this.state.fillBots) {
+      if (this.sim.porch) {
+        // a battle royale has no stand-ins: leaving is forfeiting (the gear drops where you stood)
+        this.sim.forfeit(m.idx);
+      } else if (anyHumanLeft && this.state.fillBots) {
         this.sim.convertToBot(m.idx, this.botName(lobbyPlayer?.name));
       } else {
         this.sim.removePlayer(m.idx);
@@ -257,7 +293,13 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
   // ------------------------------------------------------------------ match
   private async startMatch(): Promise<void> {
     this.state.phase = 'playing';
+    this.state.countdown = -1;
+    this.countdownMs = -1;
     await this.lock();
+    if (this.porch) {
+      this.startPorch();
+      return;
+    }
 
     // Even out the crews before spawning (move the most recent joiners).
     const byJoin = [...this.members.entries()].sort((a, b) => b[1].joinedAt - a[1].joinedAt);
@@ -276,7 +318,7 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     });
     for (const [id, m] of this.members) {
       const lp = this.state.players.get(id)!;
-      const sp = sim.addPlayer({ id, name: lp.name, team: lp.team as TeamId, loadout: m.loadout });
+      const sp = sim.addPlayer({ id, name: lp.name, team: lp.team as TeamId, loadout: m.loadout, look: m.look });
       m.idx = sp ? sp.idx : -1;
     }
     if (this.state.fillBots) {
@@ -302,12 +344,70 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     }
   }
 
+  /** JUMP OFF THE PORCH: squads in join order, bots fill the rest of the lobby. */
+  private startPorch(): void {
+    const squads = this.state.squads as SquadMode;
+    const size = SQUAD_MODES[squads].size;
+    const sim = new GameSim(getRapier(), { mode: 'porch', squads, botDifficulty: this.state.botDifficulty as BotDifficulty });
+    const byJoin = [...this.members.entries()].sort((a, b) => a[1].joinedAt - b[1].joinedAt);
+    let k = 0;
+    for (const [id, m] of byJoin) {
+      const lp = this.state.players.get(id)!;
+      const squad = Math.floor(k / size);
+      const sp = sim.addPlayer({ id, name: lp.name, team: (squad % 2) as TeamId, squad, loadout: m.loadout, look: m.look });
+      m.idx = sp ? sp.idx : -1;
+      k++;
+    }
+    if (this.state.fillBots) {
+      const used = new Set<string>();
+      this.state.players.forEach((p) => used.add(p.name));
+      const names = BOT_NAMES.filter((n) => !used.has(n));
+      while (k < sim.players.length) {
+        const squad = Math.floor(k / size);
+        const name = names.splice(Math.floor(Math.random() * names.length), 1)[0] ?? `Bot ${k + 1}`;
+        if (!sim.addPlayer({ id: `bot-${k}`, name, team: (squad % 2) as TeamId, squad, isBot: true })) break;
+        k++;
+      }
+    }
+    sim.start();
+    this.sim = sim;
+    this.accumulator = 0;
+    this.pendingEvents = [];
+    this.endSent = false;
+    for (const client of this.clients) {
+      const m = this.members.get(client.sessionId);
+      if (m && m.idx >= 0) client.send(MSG.MATCH_START, this.matchStartFor(m.idx));
+    }
+  }
+
   private matchStartFor(idx: number): MatchStartMsg {
     const sim = this.sim!;
-    return { mode: sim.mode, you: idx, roster: sim.roster(), t: sim.time };
+    return { mode: sim.mode, you: idx, roster: sim.roster(), t: sim.time, ...(sim.porch ? { porch: sim.porch.init() } : {}) };
+  }
+
+  /** Public battle royale lobbies launch by themselves once enough players are waiting. */
+  private updateCountdown(dtMs: number): void {
+    if (!this.porch || this.state.isPrivate || this.state.phase !== 'lobby') {
+      if (this.state.countdown !== -1) this.state.countdown = -1;
+      this.countdownMs = -1;
+      return;
+    }
+    if (this.state.players.size < PORCH.minHumansToStart) {
+      this.countdownMs = -1;
+      if (this.state.countdown !== -1) this.state.countdown = -1;
+      return;
+    }
+    if (this.countdownMs < 0) this.countdownMs = PORCH.startCountdown * 1000;
+    // a full lobby goes right away
+    if (this.state.players.size >= this.state.capacity) this.countdownMs = Math.min(this.countdownMs, 3000);
+    this.countdownMs -= dtMs;
+    const secs = Math.max(0, Math.ceil(this.countdownMs / 1000));
+    if (this.state.countdown !== secs) this.state.countdown = secs;
+    if (this.countdownMs <= 0) void this.startMatch();
   }
 
   private onTick(dtMs: number): void {
+    this.updateCountdown(dtMs);
     const sim = this.sim;
     if (!sim) return;
     this.accumulator += dtMs;

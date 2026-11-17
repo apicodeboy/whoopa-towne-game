@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { crewColorHex, type TeamId } from '@shared/config/crews';
+import type { Appearance } from '@shared/config/appearance';
+import type { TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp } from '@shared/math';
-import { CHARACTER_MESH, characterGeometry, type Assets, type CharacterTemplate, type ModelTemplate } from '../assets';
+import { CHARACTER_MESH, type Assets, type CharacterTemplate, type ModelTemplate } from '../assets';
 import type { CharacterPose, CharacterVisual, HeldItem } from './characterTypes';
+import { LOOK_MATERIAL, type Assembled, type LookBuilder } from './look/assemble';
+import { paint, paletteFor } from './look/palette';
+import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
 
 /** Target standing height of the model in meters (matches the gameplay capsule). */
 const HEIGHT = 1.8;
@@ -21,6 +25,8 @@ const GUN_FIT: Record<string, { length: number; grip: number; muzzleNegZ: boolea
   smg: { length: 0.62, grip: 0.4, muzzleNegZ: false, up: 0.05 },
   shotgun: { length: 1.0, grip: 0.36, muzzleNegZ: false, up: 0.02 },
   pistol: { length: 0.26, grip: 0.2, muzzleNegZ: false, up: 0.04 },
+  // no sniper model yet: the rifle, longer (placeholder art)
+  sniper: { length: 1.18, grip: 0.38, muzzleNegZ: true, up: 0.035 },
   grenade: { length: 0.11, grip: 0.5, muzzleNegZ: true, up: 0 },
 };
 
@@ -103,6 +109,9 @@ interface Leg {
  * legs and torso are animated separately so the character can run / strafe / backpedal
  * while the upper body keeps the weapon up, with procedural aim pitch, a crouch (hips
  * lowered + two-bone leg IK onto the animated feet), recoil, reload and death.
+ *
+ * The body itself comes from the Character Creator: the player's Appearance is assembled
+ * into one skinned mesh (see look/assemble.ts) and painted with their colors.
  */
 export class SkinnedCharacter implements CharacterVisual {
   readonly root = new THREE.Group();
@@ -110,11 +119,16 @@ export class SkinnedCharacter implements CharacterVisual {
   private mixer: THREE.AnimationMixer;
   private clips: ClipSet;
   private assets: Assets;
-  private template: CharacterTemplate;
-  /** The single merged mesh (when the template could be merged). */
-  private skin: THREE.SkinnedMesh | null = null;
-  private tintMat: THREE.MeshStandardMaterial | null = null;
-  private ownedMats: THREE.Material[] = [];
+  private builder: LookBuilder;
+  private look: Appearance;
+  private built: Assembled;
+  private team: TeamId;
+  /** The character's one mesh, and its own geometry (shared buffers + its own colors). */
+  private skin: THREE.SkinnedMesh;
+  private geometry: THREE.BufferGeometry;
+  private colors: THREE.BufferAttribute;
+  /** Expression preview (Character screen): morph weight now, target, and when it ends. */
+  private expr = { id: 'neutral', w: 0, target: 0, until: 0 };
 
   // locomotion (lower body)
   private loIdle: THREE.AnimationAction;
@@ -129,6 +143,9 @@ export class SkinnedCharacter implements CharacterVisual {
   private upLow: THREE.AnimationAction;
   private upShoot: THREE.AnimationAction;
   private death: THREE.AnimationAction;
+  /** Relaxed full-body idle for menus (Character screen). */
+  private calm: THREE.AnimationAction;
+  private menuIdle = false;
   private all: THREE.AnimationAction[] = [];
 
   private body: THREE.Object3D | null;
@@ -148,6 +165,7 @@ export class SkinnedCharacter implements CharacterVisual {
   private gun: THREE.Object3D | null = null;
   private muzzle = new THREE.Object3D();
   private held: HeldItem = 'none';
+  private mouth: MouthAccessory | null = null;
 
   private phase = Math.random();
   private moveT = 0;
@@ -166,46 +184,35 @@ export class SkinnedCharacter implements CharacterVisual {
   private wL = 0;
   private wR = 0;
 
-  constructor(template: CharacterTemplate, assets: Assets, team: TeamId) {
+  /** Use `SkinnedCharacter.create` (it returns null when the look cannot be built). */
+  private constructor(built: Assembled, builder: LookBuilder, assets: Assets, team: TeamId, look: Appearance) {
+    const template: CharacterTemplate = built.rig.template;
     this.assets = assets;
-    this.template = template;
+    this.builder = builder;
+    this.look = look;
+    this.built = built;
+    this.team = team;
     this.clips = splitClips(template);
     this.model = cloneSkinned(template.scene);
-    this.model.scale.setScalar(this.clips.scale);
+    this.model.scale.setScalar(this.clips.scale * built.heightScale);
     // glTF models face +Z; the game's "forward" at yaw 0 is -Z
     this.model.rotation.y = Math.PI;
     this.root.add(this.model);
     this.root.add(this.gunMount);
     this.gunMount.add(this.muzzle);
 
-    const skin = template.merged ? (this.model.getObjectByName(CHARACTER_MESH) as THREE.SkinnedMesh | undefined) : undefined;
-    if (skin) {
-      // merged character: one mesh, crew color baked into a per-crew copy of the vertex colors
-      this.skin = skin;
-      // skinned bounds are not tracked per pose: cull with a fixed sphere that covers every pose
-      // (standing, crouched, lying dead) around the character's feet instead
-      this.root.updateMatrixWorld(true);
-      const center = skin.worldToLocal(this.root.localToWorld(new THREE.Vector3(0, 0.9, 0)));
-      skin.boundingSphere = new THREE.Sphere(center, 2.1 / skin.matrixWorld.getMaxScaleOnAxis());
-      skin.frustumCulled = true;
-    } else {
-      // unmerged fallback: per-instance copy of the crew-colored material
-      this.model.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (!m.isMesh) return;
-        m.frustumCulled = false;
-        const swap = (mat: THREE.Material): THREE.Material => {
-          if (mat.name !== template.tint) return mat;
-          if (!this.tintMat) {
-            this.tintMat = (mat as THREE.MeshStandardMaterial).clone();
-            this.ownedMats.push(this.tintMat);
-          }
-          return this.tintMat;
-        };
-        m.material = Array.isArray(m.material) ? m.material.map(swap) : swap(m.material);
-      });
-    }
-    this.setTeam(team);
+    this.skin = this.model.getObjectByName(CHARACTER_MESH) as THREE.SkinnedMesh;
+    this.colors = new THREE.BufferAttribute(new Float32Array(built.paint.length / 5 * 3), 3);
+    this.geometry = this.ownGeometry(null);
+    this.skin.geometry = this.geometry;
+    this.skin.material = LOOK_MATERIAL;
+    // skinned bounds are not tracked per pose: cull with a fixed sphere that covers every pose
+    // (standing, crouched, lying dead) around the character's feet instead
+    this.root.updateMatrixWorld(true);
+    const center = this.skin.worldToLocal(this.root.localToWorld(new THREE.Vector3(0, 0.9, 0)));
+    this.skin.boundingSphere = new THREE.Sphere(center, 2.1 / this.skin.matrixWorld.getMaxScaleOnAxis());
+    this.skin.frustumCulled = true;
+    this.repaint();
 
     const bones = new Map<string, THREE.Object3D>();
     this.model.traverse((o) => {
@@ -230,6 +237,24 @@ export class SkinnedCharacter implements CharacterVisual {
     }
     for (const b of adjusted) this.touched.push({ bone: b, q: b.quaternion.clone(), p: b.position.clone() });
 
+    // something held in the mouth rides on the head bone, placed at the lips
+    const accessory = this.head ? createMouthAccessory(look.mouthProp) : null;
+    const headIdx = built.rig.jointIndex.get('Head');
+    if (accessory && headIdx !== undefined) {
+      // where it should be in the bind pose (out of the face = +Z there, -Z in mouth space)...
+      const m = new THREE.Matrix4().compose(
+        built.mouth.clone().add(new THREE.Vector3(0, 0, 0.0015)),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI),
+        new THREE.Vector3().setScalar(MOUTH_SCALE),
+      );
+      // ...expressed in the head bone's own space
+      const local = built.rig.boneInverses[headIdx].clone().multiply(built.rig.Finv).multiply(m);
+      local.decompose(accessory.object.position, accessory.object.quaternion, accessory.object.scale);
+      this.head!.add(accessory.object);
+      accessory.attachSmoke(this.root);
+      this.mouth = accessory;
+    }
+
     this.mixer = new THREE.AnimationMixer(this.model);
     const act = (set: Map<string, THREE.AnimationClip>, name: string, fallback: string): THREE.AnimationAction => {
       const clip = set.get(name) ?? set.get(fallback) ?? set.values().next().value!;
@@ -251,6 +276,7 @@ export class SkinnedCharacter implements CharacterVisual {
     this.upLow = act(upper, 'Idle_Gun', 'Idle');
     this.upShoot = act(upper, 'Idle_Gun_Shoot', 'Idle_Gun_Pointing');
     this.death = act(full, 'Death', 'Idle');
+    this.calm = act(full, 'Idle_Neutral', 'Idle');
     this.death.setLoop(THREE.LoopOnce, 1);
     this.death.clampWhenFinished = true;
     this.death.stop();
@@ -258,17 +284,78 @@ export class SkinnedCharacter implements CharacterVisual {
     for (const a of [this.loRun, this.loBack, this.loLeft, this.loRight, this.upAimRun, this.upSprint, this.upShoot]) a.timeScale = 0;
   }
 
-  setTeam(team: TeamId): void {
-    if (this.skin) {
-      const g = characterGeometry(this.template, team);
-      if (g) this.skin.geometry = g;
-    } else {
-      this.tintMat?.color.setHex(crewColorHex(team));
+  /** Builds a character for a look, or null when the models are not loaded. */
+  static create(builder: LookBuilder, assets: Assets, team: TeamId, look: Appearance): SkinnedCharacter | null {
+    const built = builder.build(look);
+    return built ? new SkinnedCharacter(built, builder, assets, team, look) : null;
+  }
+
+  /** A per-character geometry: the look's shared buffers, this character's colors, an optional expression morph. */
+  private ownGeometry(morph: THREE.BufferAttribute | null): THREE.BufferGeometry {
+    const src = this.built.geometry;
+    const g = new THREE.BufferGeometry();
+    g.setIndex(src.index);
+    for (const [name, attr] of Object.entries(src.attributes)) g.setAttribute(name, attr);
+    g.setAttribute('color', this.colors);
+    if (morph) {
+      g.morphAttributes.position = [morph];
+      g.morphTargetsRelative = true;
     }
+    g.boundingBox = src.boundingBox;
+    g.boundingSphere = src.boundingSphere;
+    return g;
+  }
+
+  private repaint(): void {
+    paint(this.colors.array as Float32Array, this.built.paint, paletteFor(this.look, this.team));
+    this.colors.needsUpdate = true;
+  }
+
+  setTeam(team: TeamId): void {
+    this.team = team;
+    this.repaint();
+  }
+
+  /**
+   * Character screen: shows a facial expression for a few seconds, then eases back to the
+   * normal face. Never used in matches.
+   */
+  previewExpression(id: string, holdMs = 2600): void {
+    if (id === 'neutral') {
+      this.expr.target = 0;
+      return;
+    }
+    if (id !== this.expr.id || !this.geometry.morphAttributes.position) {
+      const face = this.builder.build(this.look, id);
+      const base = this.built.geometry.attributes.position, to = face?.geometry.attributes.position;
+      if (!face || !to || to.count !== base.count) return;
+      const delta = new Float32Array(base.count * 3);
+      for (let i = 0; i < delta.length; i++) delta[i] = (to.array[i] as number) - (base.array[i] as number);
+      const old = this.geometry;
+      this.geometry = this.ownGeometry(new THREE.BufferAttribute(delta, 3));
+      this.skin.geometry = this.geometry;
+      this.skin.updateMorphTargets();
+      old.dispose();
+      this.expr.id = id;
+      this.expr.w = 0;
+    }
+    this.expr.target = 1;
+    this.expr.until = performance.now() + holdMs;
+  }
+
+  /** Bind-pose heights (meters, before the height preset) the Character screen frames on. */
+  get frame(): Assembled['frame'] & { scale: number } {
+    return { ...this.built.frame, scale: this.built.heightScale };
   }
 
   setVisible(v: boolean): void {
     this.root.visible = v;
+  }
+
+  /** Stands in a relaxed idle with no weapon (menus only). */
+  setMenuIdle(on: boolean): void {
+    this.menuIdle = on;
+    this.gunMount.visible = !on;
   }
 
   shot(): void {
@@ -318,7 +405,7 @@ export class SkinnedCharacter implements CharacterVisual {
       this.gun = null;
     }
     const key = item === 'smoke' ? 'grenade' : item;
-    const template: ModelTemplate | null = item === 'none' ? null : this.assets.model(key);
+    const template: ModelTemplate | null = item === 'none' ? null : this.assets.model(key === 'sniper' ? 'ar' : key);
     const fit = GUN_FIT[key];
     if (!template || !fit) {
       this.muzzle.position.set(0, 0, -0.3);
@@ -348,8 +435,19 @@ export class SkinnedCharacter implements CharacterVisual {
     }
     dt += this.skipped;
     this.skipped = 0;
+    this.mouth?.update(dt);
+    if (this.expr.target > 0 || this.expr.w > 0) {
+      if (performance.now() > this.expr.until) this.expr.target = 0;
+      this.expr.w = approach(this.expr.w, this.expr.target, dt * 5);
+      if (this.skin.morphTargetInfluences) this.skin.morphTargetInfluences[0] = this.expr.w;
+    }
 
     if (this.dead) {
+      this.mixer.update(dt);
+      return;
+    }
+    if (this.menuIdle) {
+      for (const a of this.all) a.setEffectiveWeight(a === this.calm ? 1 : 0);
       this.mixer.update(dt);
       return;
     }
@@ -511,7 +609,8 @@ export class SkinnedCharacter implements CharacterVisual {
   dispose(): void {
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.model);
-    for (const m of this.ownedMats) m.dispose();
+    this.geometry.dispose();
+    this.mouth?.dispose();
     this.root.removeFromParent();
   }
 }

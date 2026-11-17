@@ -178,6 +178,7 @@ export class GamepadSource implements InputSource {
       if (pressed(B.LEFT)) frame.slotSelect = 0;
       if (pressed(B.RIGHT)) frame.slotSelect = 1;
       if (pressed(B.UP)) frame.slotSelect = 2;
+      if (btn(B.DOWN)) frame.useOrHeal = true;
     } else {
       // ---- menu navigation: d-pad or left stick, with key-repeat ----
       let nx = 0, ny = 0;

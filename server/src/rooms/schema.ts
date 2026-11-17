@@ -32,6 +32,12 @@ export const LobbyState = schema(
     hostId: t.string().default(''),
     fillBots: t.boolean().default(true),
     botDifficulty: t.string().default('normal'),
+    /** JUMP OFF THE PORCH team size: 'solo' | 'duos' | 'squads'. */
+    squads: t.string().default('solo'),
+    /** Seconds until a public battle royale lobby launches by itself (-1 = not counting). */
+    countdown: t.int16().default(-1),
+    /** Most players the room takes. */
+    capacity: t.uint8().default(8),
     players: t.map(LobbyPlayer),
   },
   'LobbyState',

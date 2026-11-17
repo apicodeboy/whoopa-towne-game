@@ -3,7 +3,7 @@ import { MODES, type ModeId } from '@shared/config/game';
 import { THROWABLES, WEAPONS, WEAPON_IDS, type Loadout } from '@shared/config/weapons';
 import type { MapDef } from '@shared/map/types';
 import { DEG, wrapAngle, yawToward } from '@shared/math';
-import { KILL_GRENADE, KILL_WORLD, PHASE, type Phase, type SnapZone } from '@shared/protocol';
+import { KILL_GRENADE, KILL_RIOT, KILL_WORLD, PHASE, type Phase, type SnapZone } from '@shared/protocol';
 import type { DeviceKind } from '../input/types';
 import { el } from './dom';
 import { Minimap } from './minimap';
@@ -66,6 +66,12 @@ export interface HudState {
   /** Dynamic resolution scale, 1 = full. */
   resScale: number;
   showFps: boolean;
+  /** What is in hand (name), whether it is a gun / melee (else a throwable). */
+  weaponName?: string;
+  gun?: boolean;
+  melee?: boolean;
+  /** JUMP OFF THE PORCH: the safe area and where the riot is heading (minimap). */
+  porch?: { zone: { x: number; z: number; r: number }; next: { x: number; z: number; r: number } } | null;
 }
 
 export function makeHudState(): HudState {
@@ -89,11 +95,15 @@ const WEAPON_ICONS: Record<string, string> = {
   pistol: '<svg viewBox="0 0 48 20"><path d="M12 4h24v5H24l-1 3h-4l-2 7h-5l2-8h-2z"/></svg>',
   grenade: '<svg viewBox="0 0 48 20"><circle cx="24" cy="12" r="7"/><path d="M21 2h7v4h-7z"/></svg>',
   world: '<svg viewBox="0 0 48 20"><path d="M24 2l9 16H15z"/></svg>',
+  sniper: '<svg viewBox="0 0 48 20"><path d="M0 9h12l2-2h22v2h12v2H34v2h-7l-2 6h-4l1-6h-6l-4 5h-5l3-5H0z"/><path d="M16 3h12v3H16z"/></svg>',
+  fists: '<svg viewBox="0 0 48 20"><path d="M16 5h14a4 4 0 014 4v4a4 4 0 01-4 4H18a4 4 0 01-4-4V7a2 2 0 012-2z"/></svg>',
+  riot: '<svg viewBox="0 0 48 20"><circle cx="14" cy="6" r="3"/><circle cx="24" cy="5" r="3"/><circle cx="34" cy="6" r="3"/><path d="M9 19l2-9h6l2 9zM19 19l2-10h6l2 10zM29 19l2-9h6l2 9z"/></svg>',
 };
 
 function weaponIcon(code: number): string {
   if (code === KILL_GRENADE) return WEAPON_ICONS.grenade;
   if (code === KILL_WORLD) return WEAPON_ICONS.world;
+  if (code === KILL_RIOT) return WEAPON_ICONS.riot;
   return WEAPON_ICONS[WEAPON_IDS[code] ?? 'ar'];
 }
 
@@ -381,20 +391,19 @@ export class Hud {
     this.set('flash', fl, () => (this.flashEl.style.opacity = String(fl)));
 
     // ---- ammo ----
-    const gun = s.slot < 2;
+    const gun = s.gun ?? s.slot < 2;
     const w = s.slot === 0 ? WEAPONS[s.loadout.primary] : WEAPONS[s.loadout.secondary];
-    const wname = gun ? w.name : THROWABLES[s.loadout.throwable].name;
+    const wname = s.weaponName ?? (gun ? w.name : THROWABLES[s.loadout.throwable].name);
     this.set('wname', wname, () => (this.ammoName.textContent = wname.toUpperCase()));
-    const magText = gun ? String(s.mag) : String(s.throwables);
-    const resText = gun ? String(s.reserve) : '';
+    const magText = s.melee ? '—' : gun ? String(s.mag) : String(s.throwables);
+    const resText = s.melee ? '' : gun ? String(s.reserve) : '';
     this.set('mag', magText, () => (this.ammoMag.textContent = magText));
-    this.set('res', resText, () => {
+    this.set('res', `${resText}|${s.melee ? 1 : 0}`, () => {
       this.ammoRes.textContent = resText;
-      this.ammoBox.classList.toggle('nores', !gun);
+      this.ammoBox.classList.toggle('nores', !gun || !!s.melee);
     });
-    this.set('lowammo', gun && s.mag <= Math.ceil(s.magSize * 0.25), () => {
-      this.ammoBox.classList.toggle('low', gun && s.mag <= Math.ceil(s.magSize * 0.25));
-    });
+    const low = gun && !s.melee && s.mag <= Math.ceil(s.magSize * 0.25);
+    this.set('lowammo', low, () => this.ammoBox.classList.toggle('low', low));
     this.set('reloading', s.reload >= 0, () => this.reloadBar.classList.toggle('hidden', s.reload < 0));
     if (s.reload >= 0) this.reloadFill.style.width = `${Math.round(s.reload * 100)}%`;
     this.set('slot', s.slot, () => this.slotEls.forEach((n, i) => n.classList.toggle('active', i === s.slot)));
@@ -485,8 +494,8 @@ export class Hud {
     }
     let hint = '';
     if (s.alive && s.phase === PHASE.PLAYING && this.device !== 'touch') {
-      if (gun && s.reload < 0 && s.reserve > 0 && s.mag <= Math.ceil(s.magSize * 0.25)) hint = 'reload';
-      else if (gun && s.mag === 0 && s.reserve === 0) hint = 'swap';
+      if (gun && !s.melee && s.reload < 0 && s.reserve > 0 && s.mag <= Math.ceil(s.magSize * 0.25)) hint = 'reload';
+      else if (gun && !s.melee && s.mag === 0 && s.reserve === 0) hint = 'swap';
     }
     this.set('hint', hint, () => {
       this.hintEl.classList.toggle('hidden', hint === '');

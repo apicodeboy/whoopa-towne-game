@@ -1,10 +1,12 @@
 import { Client, type Room } from '@colyseus/sdk';
 import type { TeamId } from '@shared/config/crews';
 import { ROOM_NAME, type ModeId } from '@shared/config/game';
+import { encodeAppearance, type Appearance } from '@shared/config/appearance';
+import { sanitizeSquadMode, type SquadMode } from '@shared/config/porch';
 import type { Loadout } from '@shared/config/weapons';
 import {
   MSG, decodeSnapshot, encodeInput,
-  type BotDifficulty, type JoinOptions, type MatchEndMsg, type MatchStartMsg, type RosterEntry, type WireSnapshot,
+  type BotDifficulty, type JoinOptions, type MatchEndMsg, type MatchStartMsg, type PorchInit, type RosterEntry, type WireSnapshot,
 } from '@shared/protocol';
 import type { InputCmd } from '@shared/sim/player';
 import type { Session, SessionHandlers } from './session';
@@ -31,6 +33,10 @@ export interface LobbyView {
   botDifficulty: BotDifficulty;
   players: LobbyPlayerView[];
   myId: string;
+  /** JUMP OFF THE PORCH team size, auto-start countdown (-1 = not counting) and room size. */
+  squads: SquadMode;
+  countdown: number;
+  capacity: number;
 }
 
 interface RawLobbyState {
@@ -41,6 +47,9 @@ interface RawLobbyState {
   hostId: string;
   fillBots: boolean;
   botDifficulty: string;
+  squads?: string;
+  countdown?: number;
+  capacity?: number;
   players?: { forEach(cb: (p: Record<string, unknown>, key: string) => void): void };
 }
 
@@ -84,19 +93,19 @@ export class NetClient {
   }
 
   /** Auto-joins an open public lobby for the mode (or creates one). */
-  async quickPlay(mode: ModeId, name: string, loadout: Loadout): Promise<LobbyConnection> {
-    const opts: JoinOptions = { mode, name, loadout };
+  async quickPlay(mode: ModeId, name: string, loadout: Loadout, look?: Appearance, squads?: SquadMode): Promise<LobbyConnection> {
+    const opts: JoinOptions = { mode, name, loadout, look: look && encodeAppearance(look), ...(mode === 'porch' ? { squads: squads ?? 'solo' } : {}) };
     return new LobbyConnection(await this.client.joinOrCreate(ROOM_NAME, opts));
   }
 
   /** Creates an unlisted lobby that friends join with its 6-character code. */
-  async createPrivate(mode: ModeId, name: string, loadout: Loadout): Promise<LobbyConnection> {
-    const opts: JoinOptions = { mode, name, loadout, private: true };
+  async createPrivate(mode: ModeId, name: string, loadout: Loadout, look?: Appearance, squads?: SquadMode): Promise<LobbyConnection> {
+    const opts: JoinOptions = { mode, name, loadout, look: look && encodeAppearance(look), private: true, ...(mode === 'porch' ? { squads: squads ?? 'solo' } : {}) };
     return new LobbyConnection(await this.client.create(ROOM_NAME, opts));
   }
 
-  async joinByCode(code: string, name: string, loadout: Loadout): Promise<LobbyConnection> {
-    const opts: JoinOptions = { name, loadout };
+  async joinByCode(code: string, name: string, loadout: Loadout, look?: Appearance): Promise<LobbyConnection> {
+    const opts: JoinOptions = { name, loadout, look: look && encodeAppearance(look) };
     return new LobbyConnection(await this.client.joinById(code.trim().toUpperCase(), opts));
   }
 }
@@ -168,7 +177,7 @@ export class LobbyConnection {
     });
     return {
       phase: s?.phase === 'playing' ? 'playing' : 'lobby',
-      mode: s?.mode === 'turf' ? 'turf' : 'tdm',
+      mode: s?.mode === 'turf' ? 'turf' : s?.mode === 'porch' ? 'porch' : 'tdm',
       code: s?.code || this.room.roomId,
       isPrivate: !!s?.isPrivate,
       hostId: s?.hostId ?? '',
@@ -176,6 +185,9 @@ export class LobbyConnection {
       botDifficulty: (s?.botDifficulty as BotDifficulty) ?? 'normal',
       players,
       myId: this.room.sessionId,
+      squads: sanitizeSquadMode(s?.squads),
+      countdown: typeof s?.countdown === 'number' ? s.countdown : -1,
+      capacity: Number(s?.capacity) || 8,
     };
   }
 
@@ -191,7 +203,12 @@ export class LobbyConnection {
     this.room.send(MSG.LOADOUT, loadout);
   }
 
-  configure(cfg: { mode?: ModeId; fillBots?: boolean; botDifficulty?: BotDifficulty }): void {
+  /** Character look for the next match. */
+  setLook(look: Appearance): void {
+    this.room.send(MSG.LOOK, encodeAppearance(look));
+  }
+
+  configure(cfg: { mode?: ModeId; fillBots?: boolean; botDifficulty?: BotDifficulty; squads?: SquadMode }): void {
     this.room.send(MSG.CONFIG, cfg);
   }
 
@@ -231,6 +248,7 @@ export class OnlineSession implements Session {
   mode: ModeId;
   myIdx: number;
   roster: RosterEntry[];
+  porch?: PorchInit;
   handlers: SessionHandlers = {};
   ping = 0;
 
@@ -246,6 +264,7 @@ export class OnlineSession implements Session {
     this.mode = start.mode;
     this.myIdx = start.you;
     this.roster = start.roster;
+    this.porch = start.porch;
     this.offset = start.t - performance.now();
     this.synced = false;
   }

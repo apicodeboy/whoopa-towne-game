@@ -21,7 +21,10 @@ const MAX_EXTRAPOLATE_MS = 120;
 const TELEPORT_DIST = 4;
 
 export function heldFromCode(code: number): HeldItem {
-  if (code >= 0 && code < WEAPON_IDS.length) return WEAPON_IDS[code];
+  if (code >= 0 && code < WEAPON_IDS.length) {
+    const id = WEAPON_IDS[code];
+    return id === 'fists' ? 'none' : id;
+  }
   return THROWABLE_IDS[code - HELD_GRENADE] ?? 'none';
 }
 
@@ -63,6 +66,8 @@ export class RemotePlayer {
   readonly idx: number;
   readonly team: TeamId;
   readonly name: string;
+  /** Look code the visual was built with (a roster change to it rebuilds the player). */
+  look: string | undefined;
   readonly isBot: boolean;
   readonly visual: CharacterVisual;
   readonly tag: THREE.Sprite;
@@ -93,6 +98,7 @@ export class RemotePlayer {
   private reloadT = -1;
   private reloadDur = 2;
   private wasAlive = true;
+  private wasRiding = false;
   private friendly: boolean;
 
   constructor(idx: number, name: string, team: TeamId, isBot: boolean, visual: CharacterVisual, friendly: boolean) {
@@ -229,10 +235,17 @@ export class RemotePlayer {
     p.held = heldFromCode(this.held);
     this.visual.update(dt, p, visible);
 
+    // on the transport (JUMP OFF THE PORCH) nobody is in the world yet
+    const riding = (this.flags & PF.RIDING) !== 0;
+    if (riding !== this.wasRiding) {
+      this.wasRiding = riding;
+      this.visual.setVisible(!riding);
+    }
+
     // name tag
     const tag = this.tag;
     const dist = Math.hypot(cameraPos.x - this.x, cameraPos.z - this.z);
-    tag.visible = alive && (this.friendly ? dist < 90 : dist < 28);
+    tag.visible = alive && !riding && (this.friendly ? dist < 90 : dist < 28);
     if (tag.visible) tag.position.set(this.x, this.y + (p.crouching ? 1.5 : 2.08), this.z);
   }
 

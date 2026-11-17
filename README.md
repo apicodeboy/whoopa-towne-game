@@ -1,9 +1,9 @@
 # Whoopa Towne
 
 A browser-based online multiplayer third-person shooter. Two crews, **S-Curve** (blue) and
-**Cross Track** (red), fight over one mid-size city map at night: a winding S-shaped road on
-the west side, a rail yard and crossing on the east, a corner-store strip in the middle, lit
-by street lamps, shop fronts and the moon.
+**Cross Track** (red), fight over one mid-size city map in broad daylight (a night look is one
+switch away): a winding S-shaped road on the west side, a rail yard and crossing on the east,
+and a corner-store strip in the middle.
 
 - 2–8 players (4v4), empty slots can be filled with bots
 - **Team Deathmatch** (first to 50 kills, or most kills after 10 minutes) and
@@ -11,6 +11,10 @@ by street lamps, shop fronts and the moon.
 - Keyboard + mouse, PS5 / Xbox controllers, and phone touch controls
 - Authoritative server with client-side prediction, interpolation and lag-compensated hits
 - No accounts: pick a display name, Quick Play, or share a 6-character invite code
+- **Character Creator**: body type, build, height, skin tone, face, 18 hairstyles, facial
+  hair, mouth, grills and piercings, tops, bottoms, shoes and colors, hats, glasses and
+  jewelry. Everyone in a match sees your character; a crew-colored arm band keeps teams
+  readable.
 
 Built with Three.js + TypeScript + Vite (client), Node.js + Colyseus (server) and Rapier
 (physics, shared by both). Art is original or CC0; all sound is synthesized in code.
@@ -109,10 +113,20 @@ used by the client **and** the server, so after editing, rebuild and redeploy bo
 | `shared/src/config/game.ts` | Score and time limits, team size, movement speeds, health regen, respawn and spawn-protection times, turf capture rules, grenade and smoke values. |
 | `shared/src/config/weapons.ts` | Every weapon's damage, fire rate, magazine, reload time, spread, recoil, headshot multiplier and falloff. |
 
-The night look has its own file, `client/src/game/lighting.ts` (client only, no server
-restart needed): how dark the streets are between lamps (`ambient`), moonlight, street lamp
-color, brightness and reach, shop and warehouse lights, how many lamps cast real light at
-each quality level, the light cones, lit windows, stars and sky colors.
+The lighting has its own file, `client/src/game/lighting.ts` (client only, no server restart
+needed). It holds two presets, `DAY` (used now) and `NIGHT`; set `TIME_OF_DAY` to switch.
+Each preset sets the sky colors, the sun or moon, how bright the shadows are (`ambient`),
+street lamp, shop and warehouse lights (intensity 0 switches a kind off), how many lamps cast
+real light at each quality level, light cones and pools, lit windows and stars.
+
+**Character Creator options** live in `shared/src/config/appearance.ts`: every option's id,
+name and swatch color, which ones are still "coming soon" (shown locked on the menu and
+refused by the server), the defaults, and how bots pick their looks. Looks are saved in the
+browser as JSON and sent to the server as a short code (about 40 characters). The drawing side
+is in `client/src/game/characters/look/` (model pieces, procedural hair, hats, jewelry and
+face). To add an option: append it to its list in `appearance.ts` (never reorder: codes store
+list positions), then teach the matching builder in `look/` to draw it. `?debug=assets&vary=hair`
+(or any other field) lines up one character per option to check them.
 
 The map is `shared/src/map/whoopaTowne.ts` (collision and layout; shop names such as
 "S-Curve Liquor" are place names and live here) and `client/src/game/world/worldBuilder.ts`
@@ -261,9 +275,12 @@ Targets are 60 fps on desktop and 30 fps on phones.
 - The whole town is merged into about 90 draw calls on desktop and about 60 in performance
   mode (each character is a single skinned mesh, all signs share one texture, all parked
   cars and props are baked into a few meshes that are skipped when out of view).
-- Only the lamps nearest to where you are looking cast real light (10 on high quality, down
-  to 3 in performance mode). The rest keep their glowing heads, cones and ground pools, and
-  lights hand over between lamps smoothly as you move.
+- By day the sun does the lighting and street lamps are off; only a few shop interiors get a
+  real light. At night only the lamps nearest to where you are looking cast real light (10 on
+  high quality, down to 3 in performance mode). The rest keep their glowing heads, cones and
+  ground pools, and lights hand over between lamps smoothly as you move.
+- Character looks are built once per look (about 40 ms, at match start) and cached; colors are
+  painted per player, so recoloring is free.
 - **Performance mode** (on by default the first time the game runs on a phone) renders at
   roughly one pixel per CSS pixel, turns off shadows and anti-aliasing, shortens the view
   distance and thins out particles.

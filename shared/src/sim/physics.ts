@@ -53,6 +53,8 @@ export class PhysicsWorld {
   readonly world: World;
   /** Normal of the last successful `raycast(..., wantNormal=true)` / `sphereCast`. */
   readonly hitNormal = { x: 0, y: 1, z: 0 };
+  /** Playable area (players in the air are kept inside it). */
+  readonly bounds: MapDef['bounds'];
 
   private controller: CharacterController;
   private standProbe: Collider;
@@ -65,6 +67,7 @@ export class PhysicsWorld {
 
   constructor(R: Rapier, map: MapDef) {
     this.R = R;
+    this.bounds = { ...map.bounds };
     this.world = new R.World({ x: 0, y: 0, z: 0 });
 
     for (const s of map.solids) {

@@ -31,6 +31,23 @@ export interface ModelTemplate {
   parts: ModelPart[];
 }
 
+/**
+ * One sub-mesh of a character as it came in the file (e.g. the hair, or the skin of the head),
+ * kept as ranges into the merged geometry so the Character Creator can mix pieces.
+ */
+export interface CharacterPiece {
+  /** Body part: 'Head' | 'Body' | 'Legs' | 'Feet'. */
+  part: string;
+  /** Source material name (e.g. 'Skin', 'Hair', 'Purple'). */
+  material: string;
+  /** Linear color of that material (the merged vertex colors are this times any per-vertex tint). */
+  color: [number, number, number];
+  start: number;
+  count: number;
+  indexStart: number;
+  indexCount: number;
+}
+
 /** A rigged, animated character model. */
 export interface CharacterTemplate {
   name: string;
@@ -42,7 +59,7 @@ export interface CharacterTemplate {
    * Set when the character's sub-meshes could be merged into one skinned mesh (one draw call
    * and one skeleton instead of ~10 / 4): the vertices to repaint in the crew color.
    */
-  merged: { tint: VertexRange[]; teamGeometry: Map<TeamId, THREE.BufferGeometry> } | null;
+  merged: { tint: VertexRange[]; teamGeometry: Map<TeamId, THREE.BufferGeometry>; pieces: CharacterPiece[] } | null;
 }
 
 /** Name of the merged skinned mesh inside a character template. */
@@ -163,10 +180,10 @@ export class Assets {
             prepareMeshes(gltf.scene);
             const clips = new Map<string, THREE.AnimationClip>();
             for (const c of gltf.animations) clips.set(clipKey(c.name), c);
-            const tint = mergeSkinnedMeshes(gltf.scene, spec.tint);
+            const merged = mergeSkinnedMeshes(gltf.scene, spec.tint);
             this.characters.push({
               name: spec.name, scene: gltf.scene, clips, tint: spec.tint,
-              merged: tint ? { tint, teamGeometry: new Map() } : null,
+              merged: merged ? { tint: merged.tint, pieces: merged.pieces, teamGeometry: new Map() } : null,
             });
             tick();
           },
@@ -349,7 +366,7 @@ function flattenModel(root: THREE.Object3D, spec: ModelSpec): ModelPart[] {
  * skeleton update per character. Returns the vertex ranges of the crew-tinted material, or
  * null when the model cannot be merged safely (it is then drawn as loaded).
  */
-function mergeSkinnedMeshes(scene: THREE.Object3D, tintName: string): VertexRange[] | null {
+function mergeSkinnedMeshes(scene: THREE.Object3D, tintName: string): { tint: VertexRange[]; pieces: CharacterPiece[] } | null {
   const meshes: THREE.SkinnedMesh[] = [];
   scene.traverse((o) => {
     if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh);
@@ -362,7 +379,9 @@ function mergeSkinnedMeshes(scene: THREE.Object3D, tintName: string): VertexRang
   const T = new THREE.Matrix4();
   const geos: THREE.BufferGeometry[] = [];
   const tint: VertexRange[] = [];
+  const pieces: CharacterPiece[] = [];
   let count = 0;
+  let indexCount = 0;
   for (const m of meshes) {
     const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
     const sk = m.skeleton;
@@ -389,7 +408,11 @@ function mergeSkinnedMeshes(scene: THREE.Object3D, tintName: string): VertexRang
     g.setAttribute('skinIndex', new THREE.BufferAttribute(idx, 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(wgt, 4));
     if (mat.name === tintName) tint.push([count, n]);
+    const part = /(Head|Body|Legs|Feet)/.exec(`${m.name} ${m.parent?.name ?? ''}`)?.[1] ?? 'Other';
+    const ni = g.index!.count;
+    pieces.push({ part, material: mat.name, color: [mat.color.r, mat.color.g, mat.color.b], start: count, count: n, indexStart: indexCount, indexCount: ni });
     count += n;
+    indexCount += ni;
     geos.push(g);
   }
   const geometry = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
@@ -406,7 +429,7 @@ function mergeSkinnedMeshes(scene: THREE.Object3D, tintName: string): VertexRang
     m.removeFromParent();
     m.geometry.dispose();
   }
-  return tint;
+  return { tint, pieces };
 }
 
 /** The merged character geometry with the tinted vertices painted in a crew's color (cached per crew). */

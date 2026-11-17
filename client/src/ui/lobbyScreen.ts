@@ -1,5 +1,6 @@
 import { CREWS, crewLogoSvg, type TeamId } from '@shared/config/crews';
 import { MODES, MODE_IDS, TEAM_SIZE, type ModeId } from '@shared/config/game';
+import { PORCH, SQUAD_MODES, SQUAD_MODE_IDS, type SquadMode } from '@shared/config/porch';
 import { WEAPONS, type WeaponId } from '@shared/config/weapons';
 import type { BotDifficulty } from '@shared/protocol';
 import type { LobbyView } from '../net/online';
@@ -9,8 +10,9 @@ import { escapeHtml } from './hud';
 export interface LobbyActions {
   setReady(ready: boolean): void;
   switchCrew(team: TeamId): void;
-  configure(cfg: { mode?: ModeId; fillBots?: boolean; botDifficulty?: BotDifficulty }): void;
+  configure(cfg: { mode?: ModeId; fillBots?: boolean; botDifficulty?: BotDifficulty; squads?: SquadMode }): void;
   start(): void;
+  openCharacter(): void;
   openLoadout(): void;
   leave(): void;
   copy(text: string, what: string): void;
@@ -24,6 +26,10 @@ export class LobbyScreen {
   private codeEl: HTMLElement;
   private kindEl: HTMLElement;
   private cols: [HTMLElement, HTMLElement];
+  private crewsEl: HTMLElement;
+  private porchList: HTMLElement;
+  private squadSeg: HTMLElement;
+  private squadButtons = new Map<SquadMode, HTMLButtonElement>();
   private readyBtn: HTMLButtonElement;
   private switchBtn: HTMLButtonElement;
   private startBtn: HTMLButtonElement;
@@ -56,6 +62,9 @@ export class LobbyScreen {
 
     this.cols = [el('div', 'crew-col t0'), el('div', 'crew-col t1')];
     const crews = el('div', 'crews', [this.cols[0], el('div', 'vs', 'VS'), this.cols[1]]);
+    this.crewsEl = crews;
+    // JUMP OFF THE PORCH: everybody in one list (squads are formed at launch)
+    this.porchList = el('div', 'porch-list hidden');
 
     this.readyBtn = button('READY UP', 'btn primary', () => {
       const me = this.me();
@@ -65,6 +74,7 @@ export class LobbyScreen {
       const me = this.me();
       if (me) actions.switchCrew(me.team === 0 ? 1 : 0);
     });
+    const characterBtn = button('CHARACTER', 'btn ghost', () => actions.openCharacter());
     const loadoutBtn = button('LOADOUT', 'btn ghost', () => actions.openLoadout());
     const leaveBtn = button('LEAVE', 'btn ghost danger', () => actions.leave());
 
@@ -84,10 +94,16 @@ export class LobbyScreen {
       this.diffButtons.set(d, b);
       this.diffSeg.append(b);
     }
+    this.squadSeg = el('div', 'segmented small');
+    for (const id of SQUAD_MODE_IDS) {
+      const b = button(SQUAD_MODES[id].name.toUpperCase(), 'seg', () => actions.configure({ squads: id }));
+      this.squadButtons.set(id, b);
+      this.squadSeg.append(b);
+    }
     this.startBtn = button('START MATCH', 'btn primary big', () => actions.start());
     this.hostBox = el('div', 'host-box', [
       el('div', 'lbl', 'HOST CONTROLS'),
-      el('div', 'row wrap', [this.modeSeg, this.botsToggle, this.diffSeg]),
+      el('div', 'row wrap', [this.modeSeg, this.squadSeg, this.botsToggle, this.diffSeg]),
       this.startBtn,
     ]);
     this.statusEl = el('div', 'lobby-status', '');
@@ -95,7 +111,8 @@ export class LobbyScreen {
     const panel = el('div', 'lobby-panel', [
       header,
       crews,
-      el('div', 'row wrap center', [this.readyBtn, this.switchBtn, loadoutBtn, leaveBtn]),
+      this.porchList,
+      el('div', 'row wrap center', [this.readyBtn, this.switchBtn, characterBtn, loadoutBtn, leaveBtn]),
       this.hostBox,
       this.statusEl,
     ]);
@@ -110,8 +127,24 @@ export class LobbyScreen {
   update(v: LobbyView): void {
     this.view = v;
     const mode = MODES[v.mode];
-    this.titleEl.textContent = mode.name.toUpperCase();
-    this.blurbEl.textContent = mode.blurb;
+    const porch = v.mode === 'porch';
+    this.titleEl.textContent = porch ? `${PORCH.name} · ${SQUAD_MODES[v.squads].name.toUpperCase()}` : mode.name.toUpperCase();
+    this.blurbEl.textContent = porch ? `“${PORCH.tagline}”` : mode.blurb;
+    this.crewsEl.classList.toggle('hidden', porch);
+    this.porchList.classList.toggle('hidden', !porch);
+    this.switchBtn.classList.toggle('hidden', porch);
+    this.squadSeg.classList.toggle('hidden', !porch || !v.isPrivate);
+    for (const [id, b] of this.squadButtons) b.classList.toggle('on', id === v.squads);
+    if (porch) {
+      const rows = v.players.map((p) => {
+        const host = p.id === v.hostId;
+        const status = !p.connected ? 'RECONNECTING' : host ? 'HOST' : v.isPrivate ? (p.ready ? 'READY' : 'NOT READY') : 'ON THE PORCH';
+        const cls = !p.connected ? 'off' : host ? 'host' : p.ready || !v.isPrivate ? 'ready' : 'wait';
+        return `<div class="prow ${p.id === v.myId ? 'me' : ''}"><span class="pn">${escapeHtml(p.name)}</span><span class="ps ${cls}">${status}</span></div>`;
+      });
+      const bots = v.fillBots ? Math.max(0, v.capacity - v.players.length) : 0;
+      this.porchList.innerHTML = `<div class="crew-head porch"><div><div class="cn">ON THE PORCH</div><div class="cm">${v.players.length} player${v.players.length === 1 ? '' : 's'}${bots ? ` + ${bots} bots` : ''} · up to ${v.capacity}</div></div><span class="cc">${v.players.length}/${v.capacity}</span></div><div class="porch-rows">${rows.join('')}</div>`;
+    }
     this.codeEl.textContent = v.code;
     this.kindEl.textContent = v.isPrivate ? 'PRIVATE LOBBY · share the code to invite' : 'PUBLIC LOBBY · open to Quick Play';
 
@@ -154,11 +187,14 @@ export class LobbyScreen {
     this.diffSeg.classList.toggle('hidden', !v.fillBots);
     for (const [id, b] of this.diffButtons) b.classList.toggle('on', id === v.botDifficulty);
 
-    const waiting = v.players.filter((p) => p.id !== v.hostId && !p.ready).length;
+    const waiting = porch && !v.isPrivate ? 0 : v.players.filter((p) => p.id !== v.hostId && !p.ready).length;
     const tooFew = !v.fillBots && v.players.length < 2;
     this.startBtn.disabled = waiting > 0 || tooFew;
+    this.startBtn.textContent = porch && !v.isPrivate ? 'START NOW' : 'START MATCH';
+    this.readyBtn.classList.toggle('hidden', porch && !v.isPrivate);
     let status: string;
     if (v.phase === 'playing') status = 'Match in progress…';
+    else if (porch && !v.isPrivate && v.countdown >= 0) status = `Jumping off the porch in ${v.countdown}s · bots fill the empty spots`;
     else if (tooFew) status = 'Need at least 2 players, or turn on "Fill with bots".';
     else if (waiting > 0) status = `Waiting for ${waiting} player${waiting === 1 ? '' : 's'} to ready up.`;
     else status = isHost ? 'Everyone is ready. Start when you are.' : 'Waiting for the host to start the match.';

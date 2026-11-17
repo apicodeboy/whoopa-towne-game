@@ -1,5 +1,7 @@
+import type { Appearance } from './config/appearance';
 import type { TeamId } from './config/crews';
 import type { ModeId } from './config/game';
+import type { SquadMode } from './config/porch';
 import type { Loadout } from './config/weapons';
 import { PSTATE_KEYS, makeInputCmd, type InputCmd } from './sim/player';
 
@@ -26,11 +28,31 @@ export const EV = {
   PHASE: 8,
   /** [RELOAD, idx] */
   RELOAD: 9,
+  // ---- JUMP OFF THE PORCH ----
+  /** [BAG_OPEN, bagId, idx] */
+  BAG_OPEN: 20,
+  /** [PICKUP_ADD, id, kind, code, count, x,y,z] (cm) */
+  PICKUP_ADD: 21,
+  /** [PICKUP_GONE, id, takenBy] */
+  PICKUP_GONE: 22,
+  /** [LOOT, idx, kind, code, count] something went into a player's inventory */
+  LOOT: 23,
+  /** [JUMP_OUT, idx] left the transport */
+  JUMP_OUT: 24,
+  /** [TOUCHDOWN, idx] balloon popped on landing */
+  TOUCHDOWN: 25,
+  /** [STAGE, stageIdx] the match moved to a new stage (see PorchSnap.stage) */
+  STAGE: 26,
+  /** [ELIM, victimIdx, place, squadEliminated(0/1)] knocked off the porch for good */
+  ELIM: 27,
+  /** [HEALED, idx, healKind] */
+  HEALED: 28,
 } as const;
 
-/** Kill-feed weapon codes: 0..3 are WEAPON_IDS, then these. */
+/** Kill-feed weapon codes: 0..5 are WEAPON_IDS, then these. */
 export const KILL_GRENADE = 10;
 export const KILL_WORLD = 11;
+export const KILL_RIOT = 12;
 
 export const PHASE = { WARMUP: 0, PLAYING: 1, ENDED: 2 } as const;
 export type Phase = (typeof PHASE)[keyof typeof PHASE];
@@ -44,17 +66,28 @@ export const PF = {
   AIM: 16,
   RELOAD: 32,
   PROTECTED: 64,
+  /** On the transport (not in the world yet). */
+  RIDING: 128,
+  /** Hanging from a balloon. */
+  BALLOON: 256,
+  /** Using a healing item. */
+  HEALING: 512,
 } as const;
 
-/** Held-item codes in snapshots: 0..3 = WEAPON_IDS, 4 = grenade, 5 = smoke. */
-export const HELD_GRENADE = 4;
-export const HELD_SMOKE = 5;
+/** Held-item codes in snapshots: WEAPON_IDS indices, then these. */
+export const HELD_NONE = 15;
+export const HELD_GRENADE = 16;
+export const HELD_SMOKE = 17;
 
 export interface RosterEntry {
   idx: number;
   name: string;
   team: TeamId;
+  /** Who you fight alongside (JUMP OFF THE PORCH squads; the crew in other modes). */
+  squad?: number;
   bot: boolean;
+  /** Cosmetic look as a compact code (see encodeAppearance; absent from older servers). */
+  look?: string;
 }
 
 export interface SnapPlayer {
@@ -101,6 +134,29 @@ export interface Snapshot {
   /** Milliseconds until the receiving player respawns (0 if alive). */
   respawnIn: number;
   events: number[][];
+  /** JUMP OFF THE PORCH state (null in other modes). */
+  porch: PorchSnap | null;
+}
+
+/** Battle royale match state carried by every snapshot. */
+export interface PorchSnap {
+  /** 0 pregame, 1 deployment, 2 early game, 3.. riot phases, then the ended stage. */
+  stage: number;
+  /** Seconds until the stage changes. */
+  stageLeft: number;
+  /** 1 while the riot is spreading (safe area shrinking), 0 while it gathers. */
+  shrinking: boolean;
+  /** Current safe area and the one the riot is heading for. */
+  zone: { x: number; z: number; r: number };
+  next: { x: number; z: number; r: number };
+  alive: number;
+  squadsAlive: number;
+  /** Your final place once eliminated (0 while alive). */
+  place: number;
+  /** Damage you have dealt. */
+  damage: number;
+  /** Server time (ms) the transport took off. */
+  takeoff: number;
 }
 
 /** Compact wire form of a snapshot. */
@@ -117,6 +173,18 @@ export interface WireSnapshot {
   l: number;
   r: number;
   e: number[][];
+  /** JUMP OFF THE PORCH: [stage, stageLeft*10, shrinking, zx*10, zz*10, zr*10, nx*10, nz*10, nr*10, alive, squadsAlive, place, damage, takeoff] */
+  b?: number[];
+}
+
+function decodePorch(b: number[] | undefined): PorchSnap | null {
+  if (!b || b.length < 14) return null;
+  return {
+    stage: b[0], stageLeft: b[1] / 10, shrinking: b[2] === 1,
+    zone: { x: b[3] / 10, z: b[4] / 10, r: b[5] / 10 },
+    next: { x: b[6] / 10, z: b[7] / 10, r: b[8] / 10 },
+    alive: b[9], squadsAlive: b[10], place: b[11], damage: b[12], takeoff: b[13],
+  };
 }
 
 export function decodeSnapshot(w: WireSnapshot): Snapshot {
@@ -156,6 +224,7 @@ export function decodeSnapshot(w: WireSnapshot): Snapshot {
     life: w.l,
     respawnIn: w.r,
     events: w.e ?? [],
+    porch: decodePorch(w.b),
   };
 }
 
@@ -217,8 +286,8 @@ export function decodeInputs(raw: unknown, max = 8): InputCmd[] {
     c.mz = int(raw[i + 2], -AXIS_Q, AXIS_Q) / AXIS_Q;
     c.yaw = int(raw[i + 3], -40000, 40000) / ANGLE_Q;
     c.pitch = int(raw[i + 4], -16000, 16000) / ANGLE_Q;
-    c.buttons = int(raw[i + 5], 0, 255);
-    c.slot = int(raw[i + 6], 0, 2);
+    c.buttons = int(raw[i + 5], 0, 1023);
+    c.slot = int(raw[i + 6], 0, 3);
     c.ox = int(raw[i + 7], -100000, 100000) / POS_Q;
     c.oy = int(raw[i + 8], -100000, 100000) / POS_Q;
     c.oz = int(raw[i + 9], -100000, 100000) / POS_Q;
@@ -237,6 +306,8 @@ export const MSG = {
   READY: 'ready',
   TEAM: 'team',
   LOADOUT: 'loadout',
+  /** Character appearance (lobby only; it applies from the next match). */
+  LOOK: 'look',
   START: 'start',
   /** Host of a private lobby ends the running match early. */
   END: 'endmatch',
@@ -259,13 +330,45 @@ export interface MatchStartMsg {
   roster: RosterEntry[];
   /** Server time (ms) when this message was sent. */
   t: number;
+  /** JUMP OFF THE PORCH: the static layout of this match (bags, transport route) and its current state. */
+  porch?: PorchInit;
+}
+
+/** What a client needs to draw a battle royale match it is joining (or rejoining). */
+export interface PorchInit {
+  squads: SquadMode;
+  /** Transport route (meters), altitude, speed (m/s). Take-off time comes with snapshots. */
+  route: [number, number, number, number];
+  altitude: number;
+  speed: number;
+  /** Bookbags: [id, x*100, y*100, z*100, yaw*1000, variant, opened] per bag. */
+  bags: number[];
+  /** Items on the ground: [id, kind, code, count, x*100, y*100, z*100] per item. */
+  pickups: number[];
+}
+
+export interface StandingRow {
+  idx: number;
+  name: string;
+  team: TeamId;
+  bot: boolean;
+  kills: number;
+  deaths: number;
+  score: number;
+  /** JUMP OFF THE PORCH extras. */
+  squad?: number;
+  place?: number;
+  damage?: number;
+  /** Seconds survived. */
+  survived?: number;
 }
 
 export interface MatchEndMsg {
+  /** Winning crew, or (JUMP OFF THE PORCH) winning squad. -1 = draw. */
   winner: number;
   scores: [number, number];
   /** Final stats per player. */
-  players: Array<{ idx: number; name: string; team: TeamId; bot: boolean; kills: number; deaths: number; score: number }>;
+  players: StandingRow[];
 }
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
@@ -276,4 +379,8 @@ export interface JoinOptions {
   mode?: ModeId;
   private?: boolean;
   loadout?: Loadout;
+  /** Character look: a wire code (or, from older clients, an appearance object). */
+  look?: string | Appearance;
+  /** JUMP OFF THE PORCH team size. */
+  squads?: SquadMode;
 }

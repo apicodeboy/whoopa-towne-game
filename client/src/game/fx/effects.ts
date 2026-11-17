@@ -159,7 +159,7 @@ class ParticlePool {
   }
 }
 
-/** Smoke and dust are unlit sprites: dim them to match the night (see lighting.ts). */
+/** Smoke and dust are unlit sprites: dimmed to match the scene's light (see lighting.ts). */
 const DIM = LIGHTING.unlitEffects;
 const SMOKE_COLOR = new THREE.Color(0xb9bcc2).multiplyScalar(Math.min(1, LIGHTING.unlitEffects * 1.3)).getHex();
 

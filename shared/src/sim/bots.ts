@@ -1,9 +1,11 @@
 import { HITBOX, PLAYER, THROW, TICK_DT } from '../config/game';
-import { weaponForSlot, type Loadout, type WeaponId } from '../config/weapons';
+import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, type Loadout, type WeaponId } from '../config/weapons';
 import { DEG, Rng, clamp, hash32, wrapAngle, yawToward } from '../math';
 import { PHASE, type BotDifficulty } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
-import { BTN, eyeHeight, type InputCmd } from './player';
+import {
+  AIR_BALLOON, AIR_RIDING, BTN, eyeHeight, magOf, pickHeal, reserveOf, weaponInSlot, type InputCmd,
+} from './player';
 
 interface BotSkill {
   /** Seconds between spotting an enemy and opening fire. */
@@ -37,6 +39,8 @@ const RANGE_BAND: Record<WeaponId, [number, number]> = {
   smg: [5, 15],
   ar: [9, 30],
   pistol: [5, 16],
+  sniper: [18, 70],
+  fists: [0.6, 1.5],
 };
 
 /** Throw distance for a handful of pitch angles (flat ground), computed once. */
@@ -125,6 +129,13 @@ export class BotBrain {
   private throwPlanned = false;
   private throwAt = 0;
   private scanYaw = 0;
+  // JUMP OFF THE PORCH
+  private jumpAt = 0;
+  private landX = 0;
+  private landZ = 0;
+  private useAt = 0;
+  private healAt = 0;
+  private lootGoal = false;
 
   constructor(sim: GameSim, me: SimPlayer) {
     this.sim = sim;
@@ -149,6 +160,80 @@ export class BotBrain {
     this.stuckCheckAt = 0;
     this.idleUntil = 0;
     this.throwPlanned = false;
+    if (this.sim.porch) {
+      // where to land: a random bookbag, or anywhere people can stand
+      const bags = this.sim.porch.bags;
+      if (bags.length && this.rng.chance(0.75)) {
+        const b = this.rng.pick(bags);
+        this.landX = b.x;
+        this.landZ = b.z;
+      } else {
+        const idx = this.sim.nav.randomWalkable(this.rng);
+        this.landX = this.sim.nav.cellX(idx);
+        this.landZ = this.sim.nav.cellZ(idx);
+      }
+      this.jumpAt = 0;
+    }
+  }
+
+  /** On the transport or hanging from a balloon. Returns true when it handled the command. */
+  private thinkAir(cmd: InputCmd): boolean {
+    const sim = this.sim, porch = sim.porch!, s = this.me.state, now = sim.time;
+    if (s.air === AIR_RIDING) {
+      if (sim.phase !== PHASE.PLAYING) return true;
+      // jump when the transport passes closest to the landing spot (or on a whim)
+      const d = Math.hypot(s.x - this.landX, s.z - this.landZ);
+      if (this.jumpAt === 0) this.jumpAt = now + this.rng.range(2500, 22000);
+      if ((now > porch.takeoff + 3000 && d < 40) || now >= this.jumpAt) cmd.buttons = (sim.tickCount & 1) ? BTN.JUMP : 0;
+      return true;
+    }
+    if (s.air === AIR_BALLOON) {
+      const dx = this.landX - s.x, dz = this.landZ - s.z;
+      const d = Math.hypot(dx, dz);
+      this.yaw = Math.atan2(-dx, -dz);
+      cmd.yaw = this.yaw;
+      cmd.pitch = -0.6;
+      cmd.mz = clamp(d / 6, 0, 1);
+      cmd.mx = 0;
+      cmd.buttons = d < 8 ? BTN.CROUCH : 0;
+      return true;
+    }
+    return false;
+  }
+
+  /** Best weapon slot to hold (a gun with ammo beats a handgun beats fists). */
+  private bestSlot(): number {
+    const s = this.me.state;
+    let best = SLOT_PRIMARY, bestScore = -1;
+    for (const slot of [SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY]) {
+      const w = weaponInSlot(s, slot);
+      if (!w || w.id === 'fists') continue;
+      if (magOf(s, slot) + reserveOf(s, slot) <= 0) continue;
+      const score = slot === SLOT_SECONDARY ? 1 : w.id === 'sniper' ? 1.5 : 2;
+      if (score > bestScore) {
+        bestScore = score;
+        best = slot;
+      }
+    }
+    return best;
+  }
+
+  /** Has a usable gun with a reasonable amount of ammo. */
+  private armed(): boolean {
+    const s = this.me.state;
+    for (const slot of [SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY]) {
+      const w = weaponInSlot(s, slot);
+      if (w && w.id !== 'fists' && magOf(s, slot) + reserveOf(s, slot) > w.magSize) return true;
+    }
+    return false;
+  }
+
+  /** Outside the safe area the riot is heading for (or already caught in it). */
+  private zoneUrgent(): boolean {
+    const porch = this.sim.porch!, s = this.me.state;
+    if (s.riot) return true;
+    const n = porch.next;
+    return porch.stage >= 3 && (s.x - n.x) ** 2 + (s.z - n.z) ** 2 > (n.r * 0.9) ** 2;
   }
 
   think(cmd: InputCmd): void {
@@ -163,7 +248,9 @@ export class BotBrain {
     cmd.rt = now;
     cmd.yaw = this.yaw;
     cmd.pitch = this.pitch;
-    if (!me.alive || sim.phase !== PHASE.PLAYING) return;
+    if (!me.alive) return;
+    if (sim.porch && this.thinkAir(cmd)) return;
+    if (sim.phase !== PHASE.PLAYING) return;
 
     if ((sim.tickCount + me.idx * 3) % 6 === 0) this.perceive();
     if (this.target && !this.target.alive) {
@@ -171,14 +258,24 @@ export class BotBrain {
       this.visible = false;
       this.hasGoal = false;
     }
+    const porch = sim.porch;
+    let urgent = false;
+    if (porch) {
+      urgent = this.zoneUrgent();
+      if (s.reloadT <= 0 && s.healT <= 0) this.wantSlot = this.bestSlot();
+      // run from the riot rather than trade shots in it
+      if (urgent && this.target && !this.lootGoal) {
+        this.hasGoal = this.hasGoal && !this.lootGoal;
+      }
+    }
 
-    const weapon = weaponForSlot(me.loadout, s.slot);
+    const weapon = weaponInSlot(s, s.slot);
     let moveX = 0, moveZ = 0;
     let lookX = 0, lookY = 0, lookZ = 0;
     let haveLook = false;
     let buttons = 0;
     let wantMove = false;
-    const tgt = this.target;
+    const tgt = urgent || (porch && !this.armed() && this.target && Math.hypot(this.target.state.x - s.x, this.target.state.z - s.z) > 6) ? null : this.target;
 
     if (tgt) {
       // ------------------------------------------------------------ fight
@@ -196,7 +293,7 @@ export class BotBrain {
       lookZ = tz;
       haveLook = true;
 
-      const band = RANGE_BAND[weapon ? weapon.id : me.loadout.primary];
+      const band = RANGE_BAND[weapon ? weapon.id : 'fists'];
       if (d > band[1]) {
         // close the distance along a path (straight lines get hung up on cars and barriers)
         if (!this.hasGoal || now >= this.repathAt) this.setGoal(tx, tz, 700);
@@ -261,14 +358,25 @@ export class BotBrain {
       if (now < this.crouchUntil) buttons |= BTN.CROUCH;
 
       // sidearm when the primary runs dry up close
-      if (s.slot === 0 && s.mag0 === 0 && (s.res0 === 0 || d < 10) && s.mag1 > 0) this.wantSlot = 1;
+      if (!porch && s.slot === 0 && s.mag0 === 0 && (s.res0 === 0 || d < 10) && s.mag1 > 0) this.wantSlot = 1;
     } else {
       // ------------------------------------------------------------ travel
-      if (this.wantSlot === 1 && (s.mag0 > 0 || s.res0 > 0)) this.wantSlot = 0;
-      if (weapon) {
-        const mag = s.slot === 0 ? s.mag0 : s.mag1;
-        const res = s.slot === 0 ? s.res0 : s.res1;
+      if (!porch && this.wantSlot === 1 && (s.mag0 > 0 || s.res0 > 0)) this.wantSlot = 0;
+      if (weapon && weapon.magSize > 0) {
+        const mag = magOf(s, s.slot);
+        const res = reserveOf(s, s.slot);
         if (mag < weapon.magSize * 0.5 && res > 0 && s.reloadT <= 0) buttons |= BTN.RELOAD;
+      }
+      if (porch) {
+        // patch up between fights
+        if (s.hp < 65 && s.healT <= 0 && pickHeal(s) >= 0 && now >= this.healAt && !urgent) {
+          buttons |= BTN.HEAL;
+          this.healAt = now + 400;
+        }
+        if (urgent && !this.lootGoal && (!this.hasGoal || now >= this.repathAt)) {
+          this.hasGoal = false;
+          this.pickGoal();
+        }
       }
 
       if (this.hunting && (now >= this.huntUntil || !this.hasGoal)) this.hunting = false;
@@ -327,6 +435,19 @@ export class BotBrain {
         } else {
           this.throwPlanned = false;
         }
+      }
+    }
+
+    // ---------------------------------------------------------------- loot
+    if (porch && s.healT <= 0) {
+      const { bag, pickup } = porch.reachable(s);
+      const want = bag || (pickup && (pickup.kind !== 1 || !this.armed() || weaponInSlot(s, SLOT_PRIMARY_B)?.id === 'fists'));
+      if (want && now >= this.useAt) {
+        buttons |= BTN.USE;
+        this.useAt = now + 350;
+        this.lootGoal = false;
+        this.hasGoal = false;
+        this.idleUntil = now + 200;
       }
     }
 
@@ -411,10 +532,12 @@ export class BotBrain {
     let best: SimPlayer | null = null;
     let bestScore = Infinity;
     for (const e of sim.players) {
-      if (!e || e.team === me.team || !e.alive) continue;
+      if (!e || sim.allies(e, me) || !e.alive || e.state.air === AIR_RIDING) continue;
       const es = e.state;
       const d = Math.hypot(es.x - ex, es.z - ez);
-      if (d > 85) continue;
+      // battle royale: early on everyone is busy looting, and you only notice people nearby
+      const sight = sim.porch ? (sim.porch.stage <= 2 ? 30 : 55) : 85;
+      if (d > sight) continue;
       const attackedMe = e.idx === me.lastAttacker && now - me.lastAttackedAt < 2500;
       if (d > 6 && !attackedMe) {
         const ang = Math.abs(wrapAngle(yawToward(ex, ez, es.x, es.z) - this.yaw));
@@ -504,6 +627,50 @@ export class BotBrain {
     const sim = this.sim, me = this.me, s = me.state, now = sim.time;
     const rng = this.rng;
     let gx = 0, gz = 0;
+    this.lootGoal = false;
+    if (sim.porch) {
+      const porch = sim.porch;
+      const n = this.zoneUrgent() ? porch.next : porch.zone;
+      const inSafe = (x: number, z: number) => (x - n.x) ** 2 + (z - n.z) ** 2 < (n.r * 0.85) ** 2;
+      // gear up first: the nearest unsearched bag (or loose gun) that is not in the riot
+      let best = Infinity;
+      if (!this.armed() || rng.chance(0.5)) {
+        for (const b of porch.bags) {
+          if (b.opened || !inSafe(b.x, b.z)) continue;
+          const d = Math.hypot(b.x - s.x, b.z - s.z);
+          if (d < best && d < 90) {
+            best = d;
+            gx = b.x;
+            gz = b.z;
+          }
+        }
+        for (const it of porch.pickups.values()) {
+          if (it.kind !== 1 || !inSafe(it.x, it.z)) continue;
+          const d = Math.hypot(it.x - s.x, it.z - s.z) * 1.2;
+          if (d < best && d < 60) {
+            best = d;
+            gx = it.x;
+            gz = it.z;
+          }
+        }
+      }
+      if (best < Infinity) {
+        this.lootGoal = true;
+      } else {
+        // roam somewhere safe (toward the middle of the safe area)
+        for (let k = 0; k < 12; k++) {
+          const a = rng.range(0, Math.PI * 2), r = Math.sqrt(rng.next()) * n.r * 0.7;
+          gx = n.x + Math.cos(a) * r;
+          gz = n.z + Math.sin(a) * r;
+          if (sim.nav.isWalkable(gx, gz)) break;
+        }
+      }
+      this.goalUntil = now + rng.range(8000, 14000);
+      this.hunting = false;
+      this.setGoal(gx, gz, 2500);
+      if (!this.hasGoal) this.idleUntil = now + 400;
+      return;
+    }
     if (sim.mode === 'turf' && sim.zones.length > 0) {
       let best = 0, bestScore = -1;
       for (let i = 0; i < sim.zones.length; i++) {
@@ -541,7 +708,7 @@ export class BotBrain {
       let nearest: SimPlayer | null = null;
       let nd = Infinity;
       for (const e of sim.players) {
-        if (!e || e.team === me.team || !e.alive) continue;
+        if (!e || sim.allies(e, me) || !e.alive) continue;
         const d = Math.hypot(e.state.x - s.x, e.state.z - s.z);
         if (d < nd) {
           nd = d;
