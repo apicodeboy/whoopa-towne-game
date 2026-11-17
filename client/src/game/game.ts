@@ -9,7 +9,7 @@ import { DEG, Rng, clamp, wrapAngle, type Vec3 } from '@shared/math';
 import {
   EV, PF, PHASE, quantizeInput, type MatchEndMsg, type RosterEntry, type SnapPlayer, type Snapshot,
 } from '@shared/protocol';
-import { transportAt } from '@shared/sim/porch';
+import { STAGE_RIOT, transportAt } from '@shared/sim/porch';
 import {
   HIT_PLAYER, HIT_WORLD, makeShotResult, shotSeed, spreadDirection, traceShot, type ShotTarget,
 } from '@shared/sim/combat';
@@ -29,7 +29,8 @@ import { CameraRig } from './camera';
 import { makePose, type CharacterPose, type CharacterVisual } from './characters/characterTypes';
 import { ProceduralCharacter } from './characters/proceduralCharacter';
 import { Effects } from './fx/effects';
-import { PorchWorld, makeBalloon } from './porch/porchWorld';
+import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
+import { RiotCrowd } from './porch/riotCrowd';
 import { Predictor } from './predictor';
 import { RemotePlayer } from './remotePlayer';
 import type { GameRenderer } from './renderer';
@@ -60,6 +61,7 @@ export interface GameAudio {
   pop?(pos: THREE.Vector3 | null): void;
   loot?(): void;
   riot?(): void;
+  crowd?(level: number): void;
 }
 
 export interface GameDeps {
@@ -144,6 +146,8 @@ export class Game {
   paused = false;
   /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
   readonly porchWorld: PorchWorld | null = null;
+  /** JUMP OFF THE PORCH: the riot crowd along the edge of the safe area. */
+  private crowd: RiotCrowd | null = null;
   readonly porchHud: PorchHud | null = null;
   private mySquad = 0;
   private spectateIdx = -1;
@@ -241,6 +245,8 @@ export class Game {
     if (this.session.mode === 'porch' && this.session.porch) {
       this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
       this.gfx.scene.add(this.porchWorld.group);
+      this.crowd = new RiotCrowd(this.phys, this.map);
+      this.gfx.scene.add(this.crowd.group);
       this.porchHud = new PorchHud(deps.uiRoot, {
         spectate: () => this.nextSpectate(),
         leave: () => this.onLeaveRequest?.(),
@@ -575,6 +581,11 @@ export class Game {
           audio?.pop?.(e[1] === myIdx ? null : _v2);
         }
         this.dropBalloon(e[1]);
+        // everybody lands empty-handed: point them at the bookbags
+        if (e[1] === myIdx && this.porchHud) {
+          const st = this.predictor.state;
+          if (!st.wA && !st.wB && !st.wH) this.porchHud.banner('NO WEAPON — SEARCH BOOKBAGS', 'info', 'landed', 4);
+        }
         break;
       }
       case EV.STAGE:
@@ -697,6 +708,7 @@ export class Game {
     p.reload = weapon && st.reloadT > 0 ? 1 - st.reloadT / weapon.reloadTime : -1;
     p.alive = this.alive;
     p.held = st.slot === 2 ? (THROWABLE_IDS[st.thr - 1] ?? 'none') : !weapon || weapon.id === 'fists' ? 'none' : weapon.id;
+    p.hanging = !!this.porchWorld && this.alive && st.air === AIR_BALLOON;
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
       this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding && !spectating);
@@ -742,10 +754,10 @@ export class Game {
           this.balloons.set(rp.idx, b);
         } else if (!ballooning && has) this.dropBalloon(rp.idx);
         const b = this.balloons.get(rp.idx);
-        if (b) b.rotation.z = Math.sin(this.time * 1.7 + rp.idx) * 0.12;
+        if (b) swayBalloon(b, this.time + rp.idx * 1.3);
       }
     }
-    if (this.myBalloon) this.myBalloon.rotation.z = Math.sin(this.time * 1.7) * 0.12;
+    if (this.myBalloon) swayBalloon(this.myBalloon, this.time);
 
     // ---- projectiles, effects, world ----
     for (const vp of this.projectiles.values()) {
@@ -761,6 +773,17 @@ export class Game {
       this.porchWorld.next = snap.porch.next;
     }
     this.porchWorld?.update(dt, this.session.serverTime(), snap?.porch ? snap.porch.takeoff : -1);
+    if (this.crowd && snap?.porch) {
+      // the crowd gathers through the first warning, then it is out in force
+      const pz = snap.porch;
+      const first = PORCH.riotPhases[0];
+      const intensity = pz.stage < STAGE_RIOT ? 0
+        : pz.stage === STAGE_RIOT && !pz.shrinking ? 0.3 + 0.7 * (1 - Math.min(1, pz.stageLeft / first.warn))
+        : 1;
+      const me = this.predictor.state;
+      this.crowd.update(dt, this.time, pz.zone, camPos, { x: me.x, z: me.z }, intensity);
+      audio?.crowd?.(this.crowd.nearness);
+    }
     audio?.setListener(camPos, aimYaw);
 
     this.gfx.followShadow(this.renderPos.x, this.renderPos.z);
@@ -1196,6 +1219,8 @@ export class Game {
     this.hud.dispose();
     this.porchHud?.dispose();
     this.porchWorld?.dispose();
+    this.crowd?.dispose();
+    this.deps.audio?.crowd?.(0);
     this.deps.input.porchSlots = false;
     this.effects.dispose();
     this.localChar.dispose();

@@ -23,7 +23,15 @@ export interface CharacterPose {
   reload: number;
   alive: boolean;
   held: HeldItem;
+  /** JUMP OFF THE PORCH: hanging from a bunch of balloons (both hands up on the strings, legs dangling). */
+  hanging?: boolean;
 }
+
+/**
+ * Where the balloon strings meet, in the character's own space (x = right, y = up, -z = forward).
+ * The hanging pose puts the hands here and the balloons swing around it.
+ */
+export const BALLOON_GRIP = { x: 0.22, y: 1.98, z: -0.04 } as const;
 
 export function makePose(): CharacterPose {
   return {

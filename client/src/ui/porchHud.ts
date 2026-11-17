@@ -53,6 +53,7 @@ const VOICE: Record<string, string> = {
   closer: 'That riot getting closer!',
   few: 'Only a few left standing!',
   final: 'Who really run this Towne?',
+  landed: 'You landed with nothing. Go find something.',
 };
 
 function fmt(sec: number): string {

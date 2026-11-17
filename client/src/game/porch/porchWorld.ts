@@ -4,6 +4,7 @@ import { WEAPONS, WEAPON_IDS } from '@shared/config/weapons';
 import type { PorchInit } from '@shared/protocol';
 import { transportAt } from '@shared/sim/porch';
 import type { Assets } from '../assets';
+import { BALLOON_GRIP } from '../characters/characterTypes';
 
 /**
  * JUMP OFF THE PORCH, on screen: the party blimp, balloons, bookbags, loose items on the
@@ -144,30 +145,44 @@ function makeBlimp(): { group: THREE.Group; props: THREE.Object3D[] } {
   return { group: g, props };
 }
 
-/** A bunch of three balloons on strings, to hang over a character's head. */
+/**
+ * A bunch of three balloons on strings, to hang over a character's head. The strings meet at
+ * the character's grip (BALLOON_GRIP); `userData.pivot` is a group at that point to swing.
+ */
 export function makeBalloon(): THREE.Group {
   const g = new THREE.Group();
+  const pivot = new THREE.Group();
+  pivot.position.set(BALLOON_GRIP.x, BALLOON_GRIP.y, BALLOON_GRIP.z);
+  g.add(pivot);
+  g.userData.pivot = pivot;
   const colors = [0xff4f6d, 0xffd23f, 0x3aa0ff];
-  const offs = [[0, 3.9, 0], [-0.55, 3.55, 0.2], [0.55, 3.6, -0.15]];
+  // balloon centers relative to the grip
+  const offs = [[-0.2, 2.05, 0.05], [-0.75, 1.7, 0.25], [0.35, 1.75, -0.2]];
   colors.forEach((c, i) => {
     const b = new THREE.Mesh(new THREE.SphereGeometry(0.62, 16, 12), mat(c, { roughness: 0.3, emissive: c, emissiveIntensity: 0.12 }));
     b.scale.set(1, 1.18, 1);
     b.position.set(offs[i][0], offs[i][1], offs[i][2]);
-    g.add(b);
+    pivot.add(b);
     const knot = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.14, 6), b.material);
     knot.position.set(offs[i][0], offs[i][1] - 0.78, offs[i][2]);
     knot.rotation.x = Math.PI;
-    g.add(knot);
-    // string down to the raised hand
+    pivot.add(knot);
+    // string down to the hands
     const a = new THREE.Vector3(offs[i][0], offs[i][1] - 0.84, offs[i][2]);
-    const h = new THREE.Vector3(0.25, 1.95, 0);
+    const h = new THREE.Vector3(0, 0, 0);
     const len = a.distanceTo(h);
     const s = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, len, 4), mat(0xf5f5f5));
     s.position.copy(a).add(h).multiplyScalar(0.5);
     s.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a.clone().sub(h).normalize());
-    g.add(s);
+    pivot.add(s);
   });
   return g;
+}
+
+/** Balloons bob and swing about the grip (the strings stay in the hands). */
+export function swayBalloon(b: THREE.Group, t: number): void {
+  const pivot = b.userData.pivot as THREE.Object3D | undefined;
+  if (pivot) pivot.rotation.set(Math.sin(t * 1.3) * 0.08, Math.sin(t * 0.7) * 0.2, Math.sin(t * 1.7) * 0.14);
 }
 
 export class PorchWorld {
@@ -268,8 +283,9 @@ export class PorchWorld {
     this.wallTex.wrapS = THREE.RepeatWrapping;
     this.wallTex.repeat.set(24, 1);
     this.wallTex.colorSpace = THREE.SRGBColorSpace;
-    const wallGeo = new THREE.CylinderGeometry(1, 1, 9, 128, 1, true).translate(0, 4.5, 0);
-    const wallMat = new THREE.MeshBasicMaterial({ map: this.wallTex, transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false });
+    // (the crowd is the riot up close; this haze marks its edge from afar)
+    const wallGeo = new THREE.CylinderGeometry(1, 1, 7, 128, 1, true).translate(0, 3.5, 0);
+    const wallMat = new THREE.MeshBasicMaterial({ map: this.wallTex, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, fog: false });
     this.wall = new THREE.Mesh(wallGeo, wallMat);
     this.wall.renderOrder = 7;
     this.wall.frustumCulled = false;

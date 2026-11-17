@@ -233,6 +233,7 @@ export class RemotePlayer {
     p.reload = this.reloadT;
     p.alive = alive;
     p.held = heldFromCode(this.held);
+    p.hanging = alive && (this.flags & PF.BALLOON) !== 0;
     this.visual.update(dt, p, visible);
 
     // on the transport (JUMP OFF THE PORCH) nobody is in the world yet

@@ -281,7 +281,14 @@ test('porch: 20 bots play a whole match to a single winner', async () => {
       if (e[0] === EV.JUMP_OUT) jumped++;
       if (e[0] === EV.BAG_OPEN) opened++;
       if (e[0] === EV.KILL) kills++;
-      if (e[0] === EV.TOUCHDOWN) landed++;
+      if (e[0] === EV.TOUCHDOWN) {
+        landed++;
+        // nobody brings anything down with them: weapons only come from bookbags and drops on the ground
+        const ls = sim.players[e[1]]!.state;
+        assert(!ls.wA && !ls.wB && !ls.wH && !ls.thr && !(ls.ammoL + ls.ammoM + ls.ammoS + ls.ammoH) && !ls.bandages && !ls.medkits && !ls.drinks, `${sim.players[e[1]]!.name} landed carrying something`);
+        // (health can be lower: whoever landed first and found a gun may shoot people still in the air)
+        assert(sim.players[e[1]]!.armor === 0, 'landed with no armor');
+      }
       if (e[0] === EV.KILL && e[3] === 12) riot++;
     }
   }

@@ -167,6 +167,8 @@ test('quick play joins an open public lobby of the same mode and skips private o
   assert(a.code === b.code, 'same mode => same lobby');
   assert(c.code !== a.code, 'different mode => different lobby');
   await until(() => a.view().players.length === 2, 'two players');
+  // (each lobby's state arrives on its own connection: wait for C's before reading it)
+  await until(() => c.view().mode === 'turf', "C's lobby state");
   assert(!a.view().isPrivate && a.view().mode === 'tdm' && c.view().mode === 'turf', 'modes');
   // host leaves: the other player inherits host
   await a.leave();

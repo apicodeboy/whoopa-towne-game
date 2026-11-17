@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BOTTOM_COLORS, SHOE_COLORS, SKIN_TONES, type Appearance } from '@shared/config/appearance';
 import { crewColorHex, type TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp, lerpAngle, wrapAngle } from '@shared/math';
-import type { CharacterPose, CharacterVisual, HeldItem } from './characterTypes';
+import { BALLOON_GRIP, type CharacterPose, type CharacterVisual, type HeldItem } from './characterTypes';
 import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
 
 const DOWN = new THREE.Vector3(0, -1, 0);
@@ -18,6 +18,8 @@ const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _grip = new THREE.Vector3(BALLOON_GRIP.x, BALLOON_GRIP.y, BALLOON_GRIP.z);
 
 /** A box "bone" that hangs down from its origin. */
 function bone(len: number, w: number, d: number, mat: THREE.Material): THREE.Mesh {
@@ -330,6 +332,17 @@ export class ProceduralCharacter implements CharacterVisual {
       return;
     }
 
+    if (pose.hanging) {
+      this.hangFrom(dt);
+      return;
+    }
+    if (this.hanging) {
+      this.hanging = false;
+      this.body.quaternion.identity();
+      this.body.position.set(0, 0, 0);
+      this.weaponPivot.visible = true;
+    }
+
     const speed = Math.hypot(pose.vx, pose.vz);
     const sinY = Math.sin(pose.yaw), cosY = Math.cos(pose.yaw);
     const mvF = -pose.vx * sinY - pose.vz * cosY;
@@ -408,6 +421,35 @@ export class ProceduralCharacter implements CharacterVisual {
 
     const reloadHand = pose.reload >= 0 && wm.twoHanded ? Math.sin(Math.PI * clamp(pose.reload * 1.15, 0, 1)) : 0;
     this.solveArms(reloadHand);
+  }
+
+  private hanging = false;
+
+  /** Hanging from balloons: hands up on the strings, legs dangling, swinging under the grip. */
+  private hangFrom(dt: number): void {
+    this.hanging = true;
+    this.idleT += dt;
+    const t = this.idleT;
+    _q.setFromEuler(_e.set(Math.sin(t * 1.3 + 1) * 0.05, 0, Math.sin(t * 1.7) * 0.09));
+    this.body.quaternion.copy(_q);
+    this.body.position.copy(_grip).sub(_a.copy(_grip).applyQuaternion(_q));
+    this.hips.position.y = HIP_STAND;
+    this.legs.rotation.y = 0;
+    this.spine.rotation.set(0, 0, 0);
+    this.head.rotation.x = -0.25;
+    this.weaponPivot.visible = false;
+    for (const [leg, k] of [[this.legL, Math.sin(t * 2.2)], [this.legR, Math.sin(t * 2.2 + Math.PI)]] as const) {
+      leg.upper.rotation.x = 0.12 + 0.16 * k;
+      leg.lower.rotation.x = -(0.3 + 0.18 * Math.max(0, -k));
+    }
+    // hand targets from the character's space into the spine's
+    this.root.updateMatrixWorld(true);
+    _b.set(BALLOON_GRIP.x - 0.02, BALLOON_GRIP.y - 0.1, BALLOON_GRIP.z);
+    this.spine.worldToLocal(this.root.localToWorld(_b));
+    this.solveArm(this.shoulderR, _b, this.armRU, this.armRF, 1);
+    _b.set(BALLOON_GRIP.x - 0.16, BALLOON_GRIP.y - 0.24, BALLOON_GRIP.z - 0.02);
+    this.spine.worldToLocal(this.root.localToWorld(_b));
+    this.solveArm(this.shoulderL, _b, this.armLU, this.armLF, -1);
   }
 
   private poseLeg(leg: Leg, phase: number, amp: number, kneeBase: number): void {

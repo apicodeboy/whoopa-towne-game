@@ -28,6 +28,10 @@ export class AudioEngine implements GameAudio {
   private lz = 0;
   private lyaw = 0;
   private ambienceTimer: ReturnType<typeof setTimeout> | null = null;
+  private crowdSrc: AudioBufferSourceNode | null = null;
+  private crowdGain: GainNode | null = null;
+  private crowdFilter: BiquadFilterNode | null = null;
+  private crowdLevel = 0;
   private unsub: () => void;
   private lastStep = 0;
   /** Synthesis jobs still to run (spread over a few frames so the first click never hitches). */
@@ -211,7 +215,7 @@ export class AudioEngine implements GameAudio {
     this.make(ctx, 'loot', 0.22, (t) => Math.sin(TAU * (700 + 900 * Math.min(1, t / 0.1)) * t) * expDecay(t, 0.07) * 0.7);
     const pn = lpNoise(600);
     this.make(ctx, 'punch', 0.16, (t) => pn() * expDecay(t, 0.02) + Math.sin(TAU * 90 * t) * expDecay(t, 0.04) * 0.9);
-    this.make(ctx, 'siren', 1.6, (t) => {
+    this.make(ctx, 'riot_siren', 1.6, (t) => {
       const f = 620 + 260 * Math.sin(TAU * 1.4 * t);
       return (Math.sin(TAU * f * t) * 0.6 + Math.sin(TAU * f * 2 * t) * 0.15) * Math.min(1, t / 0.2) * Math.min(1, (1.6 - t) / 0.3);
     });
@@ -236,6 +240,24 @@ export class AudioEngine implements GameAudio {
     this.make(ctx, 'win', 1.2, (t) => tone(t, 0, 523, 0.12) + tone(t, 0.15, 659, 0.12) + tone(t, 0.3, 784, 0.12) + tone(t, 0.45, 1047, 0.4));
     this.make(ctx, 'lose', 1.2, (t) => tone(t, 0, 392, 0.16) + tone(t, 0.2, 330, 0.16) + tone(t, 0.4, 262, 0.45));
     this.make(ctx, 'ui', 0.05, (t) => Math.sin(TAU * 1200 * t) * expDecay(t, 0.008) * 0.7);
+
+    // --- the riot: a crowd roaring and chanting (looped; volume follows how close it is) ---
+    {
+      const lo = lpNoise(380), hi = lpNoise(1500), rumble = lpNoise(120);
+      const len = 6;
+      const voices = Array.from({ length: 7 }, (_, i) => ({ f: 150 + i * 37 + Math.random() * 20, ph: Math.random() * TAU, at: Math.random() }));
+      this.make(ctx, 'crowd', len, (t) => {
+        // a chant on the beat ("HEY! ... HEY!") over a constant roar of many voices
+        const beat = (t * 1.6) % 1;
+        const chant = Math.max(0, 1 - beat * 3.2) ** 1.5;
+        const band = hi() - lo(); // voices live in the mids
+        let v = 0;
+        for (const vo of voices) v += Math.sin(TAU * vo.f * t * (1 + 0.04 * Math.sin(TAU * 0.3 * t + vo.ph))) * (0.5 + 0.5 * Math.sin(TAU * (0.2 + vo.at) * t + vo.ph));
+        const roar = band * 2.2 * (0.75 + 0.25 * Math.sin(TAU * t / len * 2)) + rumble() * 1.4;
+        const edge = Math.min(1, t / 0.4, (len - t) / 0.4);
+        return (roar + band * chant * 3.2 + v * 0.05 * (0.4 + chant)) * edge;
+      });
+    }
 
     // --- ambience bed: low city rumble with slow swells (looped) ---
     const r1 = lpNoise(110), r2 = lpNoise(700);
@@ -366,9 +388,47 @@ export class AudioEngine implements GameAudio {
     this.play('loot', 0.3);
   }
 
+  /** The riot crowd's roar: 0 = silent, 1 = right in the middle of it. */
+  crowd(level: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    if (level > 0.01 && !this.crowdSrc) {
+      const buf = this.buffers.get('crowd');
+      if (!buf) return;
+      this.crowdGain = ctx.createGain();
+      this.crowdGain.gain.value = 0;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 2400;
+      this.crowdFilter = lp;
+      this.crowdSrc = ctx.createBufferSource();
+      this.crowdSrc.buffer = buf;
+      this.crowdSrc.loop = true;
+      this.crowdSrc.connect(lp).connect(this.crowdGain).connect(this.master);
+      this.crowdSrc.start();
+    }
+    if (!this.crowdGain || !this.crowdFilter) return;
+    if (Math.abs(level - this.crowdLevel) < 0.01 && level > 0) return;
+    this.crowdLevel = level;
+    // far away it is a muffled rumble; up close it is loud and bright
+    this.crowdGain.gain.setTargetAtTime(level * 0.55, ctx.currentTime, 0.25);
+    this.crowdFilter.frequency.setTargetAtTime(500 + 2400 * level, ctx.currentTime, 0.25);
+    if (level <= 0.001 && this.crowdSrc) {
+      const src = this.crowdSrc;
+      this.crowdSrc = null;
+      this.crowdGain = null;
+      this.crowdFilter = null;
+      try {
+        src.stop(ctx.currentTime + 0.5);
+      } catch {
+        // already stopped
+      }
+    }
+  }
+
   /** The riot is coming (stage changes). */
   riot(): void {
-    this.play('siren', 0.32);
+    this.play('riot_siren', 0.32);
   }
 
   impact(pos: THREE.Vector3): void {

@@ -4,7 +4,7 @@ import type { Appearance } from '@shared/config/appearance';
 import type { TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp } from '@shared/math';
 import { CHARACTER_MESH, type Assets, type CharacterTemplate, type ModelTemplate } from '../assets';
-import type { CharacterPose, CharacterVisual, HeldItem } from './characterTypes';
+import { BALLOON_GRIP, type CharacterPose, type CharacterVisual, type HeldItem } from './characterTypes';
 import { LOOK_MATERIAL, type Assembled, type LookBuilder } from './look/assemble';
 import { paint, paletteFor } from './look/palette';
 import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
@@ -88,6 +88,13 @@ const _v5 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
+const _e1 = new THREE.Euler();
+const _grip = new THREE.Vector3(BALLOON_GRIP.x, BALLOON_GRIP.y, BALLOON_GRIP.z);
+const _flip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+const _s = new THREE.Vector3();
+const _el = new THREE.Vector3();
+const _wr = new THREE.Vector3();
+const _t = new THREE.Vector3();
 
 /** Rotates a bone by a world-space rotation (keeps its children attached). */
 function rotateBoneWorld(bone: THREE.Object3D, worldDelta: THREE.Quaternion): void {
@@ -102,6 +109,41 @@ interface Leg {
   upper: THREE.Object3D;
   lower: THREE.Object3D;
   foot: THREE.Object3D;
+}
+
+interface Arm {
+  upper: THREE.Object3D;
+  lower: THREE.Object3D;
+  wrist: THREE.Object3D;
+}
+
+/**
+ * Two-bone IK: turns an arm (shoulder -> elbow -> wrist) so the wrist reaches `target`, the
+ * elbow bending toward `pole`. All in world space.
+ */
+function reach(arm: Arm, target: THREE.Vector3, pole: THREE.Vector3): void {
+  arm.upper.getWorldPosition(_s);
+  arm.lower.getWorldPosition(_el);
+  arm.wrist.getWorldPosition(_wr);
+  const l1 = _s.distanceTo(_el), l2 = _el.distanceTo(_wr);
+  const dir = _t.copy(target).sub(_s);
+  const d = clamp(dir.length(), Math.abs(l1 - l2) + 0.01, l1 + l2 - 0.005);
+  dir.normalize();
+  const along = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
+  const out = Math.sqrt(Math.max(0, l1 * l1 - along * along));
+  const bend = _v3.copy(pole).addScaledVector(dir, -pole.dot(dir));
+  if (bend.lengthSq() < 1e-6) bend.set(0, -1, 0);
+  bend.normalize();
+  const elbow = _v4.copy(_s).addScaledVector(dir, along).addScaledVector(bend, out);
+  // upper arm: from where the elbow is to where it should be
+  _q1.setFromUnitVectors(_v1.copy(_el).sub(_s).normalize(), _v2.copy(elbow).sub(_s).normalize());
+  rotateBoneWorld(arm.upper, _q1);
+  // forearm: point it at the (reachable) target
+  arm.lower.getWorldPosition(_el);
+  arm.wrist.getWorldPosition(_wr);
+  const end = _v2.copy(_s).addScaledVector(dir, d);
+  _q1.setFromUnitVectors(_v1.copy(_wr).sub(_el).normalize(), end.sub(_el).normalize());
+  rotateBoneWorld(arm.lower, _q1);
 }
 
 /**
@@ -154,6 +196,9 @@ export class SkinnedCharacter implements CharacterVisual {
   private head: THREE.Object3D | null;
   private handR: THREE.Object3D | null;
   private legs: Leg[] = [];
+  private arms: { L: Arm | null; R: Arm | null } = { L: null, R: null };
+  /** Seconds spent hanging from balloons (drives the swing); -1 = not hanging. */
+  private hangT = -1;
   /**
    * Bones we adjust procedurally after the mixer runs, with the clean animated values.
    * The mixer only writes a property when its animated value changes, so without restoring
@@ -227,6 +272,8 @@ export class SkinnedCharacter implements CharacterVisual {
     for (const side of ['L', 'R']) {
       const upper = bone(`UpperLeg${side}`), lower = bone(`LowerLeg${side}`), foot = bone(`Foot${side}`);
       if (upper && lower && foot) this.legs.push({ upper, lower, foot });
+      const au = bone(`UpperArm${side}`), al = bone(`LowerArm${side}`), aw = bone(`Wrist${side}`);
+      if (au && al && aw) this.arms[side as 'L' | 'R'] = { upper: au, lower: al, wrist: aw };
     }
 
     const adjusted = new Set<THREE.Object3D>();
@@ -234,6 +281,11 @@ export class SkinnedCharacter implements CharacterVisual {
     for (const leg of this.legs) {
       adjusted.add(leg.upper);
       adjusted.add(leg.lower);
+    }
+    for (const arm of [this.arms.L, this.arms.R]) {
+      if (!arm) continue;
+      adjusted.add(arm.upper);
+      adjusted.add(arm.lower);
     }
     for (const b of adjusted) this.touched.push({ bone: b, q: b.quaternion.clone(), p: b.position.clone() });
 
@@ -451,6 +503,18 @@ export class SkinnedCharacter implements CharacterVisual {
       this.mixer.update(dt);
       return;
     }
+    if (pose.hanging) {
+      this.hangFrom(dt, pose);
+      return;
+    }
+    if (this.hangT >= 0) {
+      // let go of the balloon: back to the normal stance
+      this.hangT = -1;
+      this.model.position.set(0, 0, 0);
+      this.model.quaternion.copy(_flip);
+      this.calm.setEffectiveWeight(0);
+      this.gunMount.visible = true;
+    }
 
     const speed = Math.hypot(pose.vx, pose.vz);
     const sinY = Math.sin(pose.yaw), cosY = Math.cos(pose.yaw);
@@ -604,6 +668,57 @@ export class SkinnedCharacter implements CharacterVisual {
       this.gunMount.position.set(_v1.x, _v1.y, _v1.z - 0.04 + this.recoil * 0.04);
       this.gunMount.rotation.set(pitch, yaw, roll, 'YXZ');
     }
+  }
+
+  /**
+   * Hanging from balloons: both hands up on the strings, legs dangling, the whole body
+   * swinging gently under the grip like a pendulum.
+   */
+  private hangFrom(dt: number, pose: CharacterPose): void {
+    if (this.hangT < 0) this.hangT = 0;
+    this.hangT += dt;
+    const t = this.hangT + this.phase * 10;
+    for (const a of this.all) a.setEffectiveWeight(a === this.calm ? 1 : 0);
+    for (const tb of this.touched) {
+      tb.bone.quaternion.copy(tb.q);
+      tb.bone.position.copy(tb.p);
+    }
+    this.mixer.update(dt);
+    for (const tb of this.touched) {
+      tb.q.copy(tb.bone.quaternion);
+      tb.p.copy(tb.bone.position);
+    }
+    this.gunMount.visible = false;
+
+    // swing about the grip: roll side to side, a little fore and aft, leaning into the steering
+    const sinY = Math.sin(pose.yaw), cosY = Math.cos(pose.yaw);
+    const fwd = -pose.vx * sinY - pose.vz * cosY, right = pose.vx * cosY - pose.vz * sinY;
+    const roll = Math.sin(t * 1.7) * 0.09 - clamp(right * 0.03, -0.18, 0.18);
+    const pitch = Math.sin(t * 1.3 + 1) * 0.05 - clamp(fwd * 0.03, -0.2, 0.2);
+    _q1.setFromEuler(_e1.set(pitch, 0, roll));
+    this.model.quaternion.copy(_q1).multiply(_flip);
+    this.model.position.copy(_grip).sub(_v1.copy(_grip).applyQuaternion(_q1));
+
+    // hands up on the strings (right a little higher), elbows out to the sides
+    const up = _v5.set(cosY, 0, -sinY); // character's right in world space
+    const back = new THREE.Vector3(sinY, 0, cosY);
+    if (this.arms.R) {
+      const target = this.root.localToWorld(new THREE.Vector3(BALLOON_GRIP.x - 0.02, BALLOON_GRIP.y - 0.1, BALLOON_GRIP.z));
+      reach(this.arms.R, target, new THREE.Vector3().copy(up).addScaledVector(back, 0.4));
+    }
+    if (this.arms.L) {
+      const target = this.root.localToWorld(new THREE.Vector3(BALLOON_GRIP.x - 0.16, BALLOON_GRIP.y - 0.24, BALLOON_GRIP.z - 0.02));
+      reach(this.arms.L, target, new THREE.Vector3().copy(up).multiplyScalar(-1).addScaledVector(back, 0.4));
+    }
+
+    // legs dangle and kick a little
+    this.legs.forEach((leg, i) => {
+      const k = Math.sin(t * 2.2 + i * Math.PI);
+      _q1.setFromAxisAngle(up, 0.12 + 0.16 * k);
+      rotateBoneWorld(leg.upper, _q1);
+      _q1.setFromAxisAngle(up, -(0.3 + 0.18 * Math.max(0, -k)));
+      rotateBoneWorld(leg.lower, _q1);
+    });
   }
 
   dispose(): void {
