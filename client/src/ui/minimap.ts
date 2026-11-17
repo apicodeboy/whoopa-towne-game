@@ -6,6 +6,7 @@ const W = 232;
 const AREA_FILL: Record<string, string> = {
   grass: '#2f4a2d', path: '#5c5647', sidewalk: '#3b3e44', alley: '#26282c', lot: '#2c2e33', court: '#6a3d2c',
   gravel: '#3a362f', crossing: '#4c4233', floor: '#3a332b', base0: '#16264a', base1: '#4a1616',
+  jungle: '#25391f', dirt: '#4a3b28', sand: '#8c7b55', surf: '#9cc4c8', ocean: '#1c4a66', plaza: '#47484c', towel: '#8c7b55',
 };
 
 /**
@@ -18,16 +19,29 @@ export class Minimap {
   private bg: HTMLCanvasElement;
   private map: MapDef;
   private scale: number;
+  /** Visible size (CSS px). */
   private h: number;
+  private viewW = W;
+  /** Size of the whole map at this scale; larger than the view when following the player. */
+  private fullW: number;
+  private fullH: number;
+  private offX = 0;
+  private offY = 0;
   private dpr: number;
   private timer = 0;
   private lastT = 0;
 
-  constructor(map: MapDef) {
+  /**
+   * `follow` = a big map: draw it at `pxPerM` and scroll a `height`-tall window that keeps
+   * the player in the middle. Otherwise the whole map fits the box.
+   */
+  constructor(map: MapDef, follow?: { pxPerM: number; height: number }) {
     this.map = map;
     const b = map.bounds;
-    this.scale = W / (b.maxX - b.minX);
-    this.h = Math.round((b.maxZ - b.minZ) * this.scale);
+    this.scale = follow ? follow.pxPerM : W / (b.maxX - b.minX);
+    this.fullW = Math.round((b.maxX - b.minX) * this.scale);
+    this.fullH = Math.round((b.maxZ - b.minZ) * this.scale);
+    this.h = follow ? follow.height : this.fullH;
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'minimap';
@@ -37,8 +51,8 @@ export class Minimap {
     this.canvas.style.height = `${this.h}px`;
     this.ctx = this.canvas.getContext('2d')!;
     this.bg = document.createElement('canvas');
-    this.bg.width = this.canvas.width;
-    this.bg.height = this.canvas.height;
+    this.bg.width = this.fullW * this.dpr;
+    this.bg.height = this.fullH * this.dpr;
     this.renderBackground();
   }
 
@@ -55,7 +69,7 @@ export class Minimap {
     const s = this.scale;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.fillStyle = '#1d1f24';
-    g.fillRect(0, 0, W, this.h);
+    g.fillRect(0, 0, this.fullW, this.fullH);
     for (const a of [...this.map.areas].sort((p, q) => (p.layer ?? 1) - (q.layer ?? 1))) {
       g.fillStyle = AREA_FILL[a.kind] ?? '#2a2c31';
       g.fillRect(this.X(a.x0), this.Z(a.z0), (a.x1 - a.x0) * s, (a.z1 - a.z0) * s);
@@ -66,6 +80,10 @@ export class Minimap {
       g.lineJoin = 'round';
       if (r.kind === 'road') {
         g.strokeStyle = '#15161a';
+        g.lineWidth = r.width * s;
+        g.stroke();
+      } else if (r.kind === 'trail' || r.kind === 'creek') {
+        g.strokeStyle = r.kind === 'trail' ? '#5b4a32' : '#2f6f86';
         g.lineWidth = r.width * s;
         g.stroke();
       } else {
@@ -81,7 +99,7 @@ export class Minimap {
     }
     // solids, low to high so roofs end up on top
     const solids = this.map.solids
-      .filter((x) => x.kind !== 'ground' && x.kind !== 'perimeter' && (x.col ?? 'solid') !== 'none')
+      .filter((x) => x.kind !== 'ground' && x.kind !== 'perimeter' && x.kind !== 'bound' && (x.col ?? 'solid') !== 'none')
       .sort((p, q) => p.y + p.sy / 2 - (q.y + q.sy / 2));
     for (const x of solids) {
       const fence = (x.col ?? 'solid') === 'fence';
@@ -92,7 +110,20 @@ export class Minimap {
       else if (x.kind === 'deck') fill = '#6f7680';
       else if (x.kind === 'stairs' || x.kind === 'fireescape' || x.kind === 'ramp') fill = '#c9a04a';
       else if (x.kind === 'stairfill') continue;
-      else if (x.prop !== undefined) fill = top > 2 ? '#5b7f9a' : '#4a6478';
+      else if (x.kind === 'cliff') fill = '#4d4740';
+      else if (x.kind === 'ruin') fill = '#7a7864';
+      else if (x.prop !== undefined) {
+        const t = this.map.props[x.prop]?.type;
+        if (t === 'tree' || t === 'palm') {
+          // canopy, not trunk
+          g.fillStyle = '#3d6a34';
+          g.beginPath();
+          g.arc(this.X(x.x), this.Z(x.z), Math.max(1, 2 * s), 0, Math.PI * 2);
+          g.fill();
+          continue;
+        }
+        fill = top > 2 ? '#5b7f9a' : '#4a6478';
+      }
       else if (top < 1.4) fill = '#565a62';
       g.save();
       g.translate(this.X(x.x), this.Z(x.z));
@@ -107,6 +138,20 @@ export class Minimap {
       }
       g.restore();
     }
+    // district names on big maps
+    if (this.fullW > W) {
+      g.font = 'bold 9px Helvetica, Arial, sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineWidth = 3;
+      g.strokeStyle = 'rgba(0,0,0,0.7)';
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      for (const l of this.map.labels) {
+        if (l.text.endsWith(' BASE')) continue;
+        g.strokeText(l.text, this.X(l.x), this.Z(l.z));
+        g.fillText(l.text, this.X(l.x), this.Z(l.z));
+      }
+    }
   }
 
   draw(st: HudState): void {
@@ -118,9 +163,14 @@ export class Minimap {
     this.timer = 0;
 
     const g = this.ctx;
+    // scroll so the player stays in the middle (clamped to the map's edges)
+    const clampOff = (v: number, max: number) => Math.max(0, Math.min(max, v));
+    this.offX = clampOff(this.X(st.myX) - this.viewW / 2, this.fullW - this.viewW);
+    this.offY = clampOff(this.Z(st.myZ) - this.h / 2, this.fullH - this.h);
+    const d = this.dpr;
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.drawImage(this.bg, 0, 0);
-    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.drawImage(this.bg, this.offX * d, this.offY * d, this.viewW * d, this.h * d, 0, 0, this.viewW * d, this.h * d);
+    g.setTransform(d, 0, 0, d, -this.offX * d, -this.offY * d);
 
     // zones
     if (st.mode === 'turf') {
@@ -156,7 +206,7 @@ export class Minimap {
       const z = st.porch.zone, n = st.porch.next;
       g.save();
       g.beginPath();
-      g.rect(0, 0, this.canvas.width, this.canvas.height);
+      g.rect(this.offX, this.offY, this.viewW, this.h);
       g.arc(this.X(z.x), this.Z(z.z), z.r * this.scale, 0, Math.PI * 2, true);
       g.fillStyle = 'rgba(230, 40, 30, 0.32)';
       g.fill('evenodd');

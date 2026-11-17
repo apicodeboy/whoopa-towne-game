@@ -63,13 +63,13 @@ export const PORCH = {
    * (`shrink`) until the safe area has `radius` (fraction of the starting area) left.
    * `dps` is the damage per second for anyone caught in the riot during that phase.
    */
-  deploySeconds: 45,
-  earlySeconds: 45,
+  deploySeconds: 60,
+  earlySeconds: 60,
   riotPhases: [
-    { name: 'RIOT PHASE 1', warn: 25, shrink: 45, radius: 0.62, dps: 2 },
-    { name: 'RIOT PHASE 2', warn: 25, shrink: 40, radius: 0.38, dps: 4 },
-    { name: 'RIOT PHASE 3', warn: 20, shrink: 35, radius: 0.2, dps: 7 },
-    { name: 'FINAL RIOT', warn: 15, shrink: 45, radius: 0, dps: 12 },
+    { name: 'RIOT PHASE 1', warn: 40, shrink: 60, radius: 0.6, dps: 2 },
+    { name: 'RIOT PHASE 2', warn: 35, shrink: 50, radius: 0.36, dps: 4 },
+    { name: 'RIOT PHASE 3', warn: 30, shrink: 45, radius: 0.18, dps: 7 },
+    { name: 'FINAL RIOT', warn: 20, shrink: 50, radius: 0, dps: 12 },
   ],
   /** Movement speed multiplier while caught in the riot. */
   riotSlow: 0.62,
@@ -98,9 +98,12 @@ export const PORCH = {
   reach: 2.3,
 
   // ---- bookbags --------------------------------------------------------------------
-  /** Bookbags per player in the match (rounded), plus a fixed minimum. */
+  /** Bookbags: whichever is most of per player, per hectare of map, or a fixed minimum. */
   bagsPerPlayer: 3.2,
+  bagsPerHectare: 9,
   minBags: 24,
+  /** Share of the bags that go to the map's loot spots (inside shops and houses, on roofs). */
+  bagsAtLootSpots: 0.45,
 } as const;
 
 export type HealKind = keyof typeof PORCH.heals;

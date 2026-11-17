@@ -48,6 +48,8 @@ const STYLES: Record<string, { tex: string; color: number; tile: number }> = {
   metal: { tex: 'metal', color: 0x8f9aa3, tile: 2.2 },
   concrete: { tex: 'concrete', color: 0xc4c4be, tile: 4 },
   wood: { tex: 'wood', color: 0x9a7a55, tile: 1.4 },
+  glass: { tex: 'metal', color: 0x6f8fa8, tile: 3 },
+  ruin: { tex: 'concrete', color: 0x9b9a86, tile: 2 },
 };
 const FACADES = ['brickdark', 'brick', 'apartment', 'stucco', 'concrete', 'metal', 'brickdark', 'brick'];
 const CAR_COLORS = [0xb33a3a, 0x2f5f9e, 0xd9d9d9, 0x26282c, 0x3d7a4a, 0xc9a227, 0x7a4fa3, 0x8a8a8a];
@@ -67,6 +69,14 @@ const AREA_STYLE: Record<string, { tex: string; color: number; tile: number }> =
   floor: { tex: 'concrete', color: 0x9c9488, tile: 3 },
   base0: { tex: 'asphalt', color: 0xffffff, tile: 6 },
   base1: { tex: 'asphalt', color: 0xffffff, tile: 6 },
+  // the outer districts
+  jungle: { tex: 'grass', color: 0x86a873, tile: 5 },
+  dirt: { tex: 'gravel', color: 0xa88a64, tile: 3 },
+  sand: { tex: 'gravel', color: 0xf0dfb4, tile: 5 },
+  surf: { tex: 'water', color: 0xd8f1f2, tile: 1 },
+  ocean: { tex: 'water', color: 0x2a86b0, tile: 1 },
+  plaza: { tex: 'concrete', color: 0xd9d6cf, tile: 3 },
+  towel: { tex: 'paint', color: 0xffffff, tile: 1 },
 };
 
 /** Deterministic pseudo-random in [0,1) from an integer (same world every load). */
@@ -176,6 +186,11 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         box('paint').addStrip(pts, 0.12, 0.02, { color: 0xc8c8c0 });
       }
       if (r.centerLine) dashed(r.points, 2.4, 2.4, 0.15, 0xd6b84a, 0.021);
+    } else if (r.kind === 'trail') {
+      box('ground:gravel').addStrip(r.points, r.width, 0.014, { color: 0x9a7b55, tile: 3 });
+    } else if (r.kind === 'creek') {
+      box('ground:gravel').addStrip(r.points, r.width + 1.6, 0.013, { color: 0x8a7a5e, tile: 2 });
+      box('ground:water').addStrip(r.points, r.width, 0.017, { color: 0x3f8a9a });
     } else {
       box('ground:gravel').addStrip(r.points, r.width + 0.5, 0.014, { color: 0xb9b0a2, tile: 2.5 });
       const p0 = r.points[0], p1 = r.points[r.points.length - 1];
@@ -193,13 +208,13 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       }
     }
   }
-  if (map.id === 'whoopa-towne') paintStreetMarkings();
+  if (map.id === 'whoopa-towne' || map.id === 'greater-towne') paintStreetMarkings();
 
   // ================================================================== solids
   let solidIndex = 0;
   for (const s of map.solids) {
     solidIndex++;
-    if (s.kind === 'ground' || s.kind === 'perimeter') continue;
+    if (s.kind === 'ground' || s.kind === 'perimeter' || s.kind === 'bound') continue;
     if (s.prop !== undefined) continue; // props are painted below
     const spec = { x: s.x, y: s.y, z: s.z, sx: s.sx, sy: s.sy, sz: s.sz, q: solidQuat(s) };
     const onGround = !s.rx && s.y - s.sy / 2 <= 0.02;
@@ -211,7 +226,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         const pitched = s.meta?.roof === 'pitched';
         if (pitched) pitchedRoof(s, color, solidIndex);
         else flatRoof(s);
-        dressFacades(s, solidIndex, pitched);
+        // towers get glazing bands per floor instead of hundreds of separate windows
+        if (s.sy > 16) windowBands(s, solidIndex);
+        else dressFacades(s, solidIndex, pitched);
         break;
       }
       case 'wall': {
@@ -278,6 +295,22 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         box('wood').add(spec, { color: 0x8a6f52, tile: 1.3, skipBottom: true, skipTop: true });
         box('metal').add({ ...spec, y: s.y + s.sy / 2 + 0.06, sx: s.sx + 0.3, sy: 0.12, sz: s.sz + 0.3 }, { color: 0x6d7379, tile: 1.5 });
         break;
+      case 'cliff':
+        box('concrete').add(spec, { color: [0x7d7466, 0x8a8172, 0x6f685c][solidIndex % 3], tile: 5, skipBottom: true });
+        break;
+      case 'ruin':
+        box('concrete').add(spec, { color: [0x9b9a86, 0x8f8e78, 0xa3a08a][solidIndex % 3], tile: 2, skipBottom: onGround });
+        break;
+      case 'stoop':
+        box('concrete').add(spec, { color: s.color ?? 0xb9b4a8, tile: 2, skipBottom: true });
+        break;
+      case 'post':
+      case 'woodplat':
+        box('wood').add(spec, { color: s.color ?? 0x8f6d48, tile: 1.3, skipBottom: onGround });
+        break;
+      case 'wreck':
+        box('metal').add(spec, { color: s.color ?? 0xd5d9de, tile: 2, skipBottom: onGround });
+        break;
       case 'counter':
         box('wood').add(spec, { color: 0x6f4f33, tile: 1.3, skipBottom: true });
         box('flat').add({ ...spec, y: s.y + s.sy / 2 + 0.02, sx: s.sx + 0.08, sy: 0.05, sz: s.sz + 0.08 }, { color: 0x2f3338 });
@@ -288,12 +321,15 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   }
 
   // storefront awnings on the enterable shops
-  awning('cornerstore', 0x1d6b3a);
-  awning('liquor', 0x7a1f1f);
-  awning('yardoffice', 0x22384f);
+  awning('cornerstore', 0x1d6b3a, 's');
+  awning('liquor', 0x7a1f1f, 'n');
+  awning('yardoffice', 0x22384f, 'n');
+  for (const r of map.solids) {
+    if (r.kind === 'roof' && r.group && typeof r.meta?.awning === 'number') awning(r.group, r.meta.awning, String(r.meta.front ?? 's') as 'n' | 's' | 'e' | 'w');
+  }
 
-  // ceiling lights in the buildings you can walk into
-  for (const id of ['cornerstore', 'liquor', 'yardoffice', 'warehouse']) ceilingLights(id);
+  // ceiling lights in the buildings you can walk into (every shell has a roof)
+  for (const r of map.solids) if (r.kind === 'roof' && r.group) ceilingLights(r.group);
 
   // ================================================================== perimeter facades + skyline
   perimeterFacades();
@@ -322,6 +358,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     'ground:gravel': std({ map: tex.gravel, ...groundOffset }),
     'ground:concrete': std({ map: tex.concrete, ...groundOffset }),
     'ground:wood': std({ map: tex.wood, ...groundOffset }),
+    'ground:water': std({ roughness: 0.16, metalness: 0.2, ...groundOffset }),
     'ground:paint': std({ ...groundOffset }),
     paint: std({ polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, roughness: 0.8 }),
     brick: std({ map: tex.brick }),
@@ -396,7 +433,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     disposables.push(g, mat);
   }
 
-  // ================================================================== sky
+  // ================================================================== sky (+ the sea, where there is one)
   const sky = makeSky();
   group.add(sky);
 
@@ -672,7 +709,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     });
     faces.forEach((f, fi) => {
       // faces buried in the perimeter are never seen
-      if ((f.ax === 'z' && Math.abs(f.at) >= b.maxZ - 0.01) || (f.ax === 'x' && Math.abs(f.at) >= b.maxX - 0.01)) return;
+      if ((f.ax === 'z' && (f.at <= b.minZ + 0.01 || f.at >= b.maxZ - 0.01)) || (f.ax === 'x' && (f.at <= b.minX + 0.01 || f.at >= b.maxX - 0.01))) return;
       windowsOn(f, s.y - h / 2, h, seed * 7 + fi, house && fi === longest);
     });
   }
@@ -721,34 +758,62 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     box(lit ? 'lit' : 'glassDark').add(inner, { color });
   }
 
-  function awning(groupId: string, color: number): void {
-    // find the door-side wall pieces of this shell and hang a strip above the entrance
+  function awning(groupId: string, color: number, side: 'n' | 's' | 'e' | 'w'): void {
+    // find the wall pieces of this shell and hang a strip above the entrance side
     const walls = map.solids.filter((s) => s.group === groupId && s.kind === 'wall');
     if (walls.length === 0) return;
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, y0 = Infinity;
     for (const w of walls) {
       x0 = Math.min(x0, w.x - w.sx / 2); x1 = Math.max(x1, w.x + w.sx / 2);
       z0 = Math.min(z0, w.z - w.sz / 2); z1 = Math.max(z1, w.z + w.sz / 2);
+      y0 = Math.min(y0, w.y - w.sy / 2);
     }
-    // the store faces Main St (south side for the corner store, north for the other two)
-    const south = groupId === 'cornerstore';
-    const z = south ? z1 + 0.55 : z0 - 0.55;
-    box('flat').add({ x: (x0 + x1) / 2, y: 2.78, z, sx: (x1 - x0) * 0.8, sy: 0.14, sz: 1.1 }, { color });
-    box('flat').add({ x: (x0 + x1) / 2, y: 2.6, z: z + (south ? 0.52 : -0.52), sx: (x1 - x0) * 0.8, sy: 0.32, sz: 0.06 }, { color: shade(color, 1.25) });
+    const alongX = side === 'n' || side === 's';
+    const out = side === 's' || side === 'e' ? 1 : -1;
+    const len = (alongX ? x1 - x0 : z1 - z0) * 0.8;
+    const mid = alongX ? (x0 + x1) / 2 : (z0 + z1) / 2;
+    const at = side === 's' ? z1 + 0.55 : side === 'n' ? z0 - 0.55 : side === 'e' ? x1 + 0.55 : x0 - 0.55;
+    const put = (key: string, y: number, off: number, w: number, h: number, d: number, c: number) => {
+      box(key).add(alongX
+        ? { x: mid, y: y0 + y, z: at + off * out, sx: w, sy: h, sz: d }
+        : { x: at + off * out, y: y0 + y, z: mid, sx: d, sy: h, sz: w }, { color: c });
+    };
+    put('flat', 2.78, 0, len, 0.14, 1.1, color);
+    put('flat', 2.6, 0.52, len, 0.32, 0.06, shade(color, 1.25));
     // a light under the awning washing the sidewalk out front
-    box('lit').add({ x: (x0 + x1) / 2, y: 2.69, z, sx: (x1 - x0) * 0.5, sy: 0.03, sz: 0.18 }, { color: 0xffe9c4 });
-    lights.push({ x: (x0 + x1) / 2, y: 2.55, z: z + (south ? 0.6 : -0.6), kind: 'shop' });
+    put('lit', 2.69, 0, len * 0.62, 0.03, 0.18, 0xffe9c4);
+    lights.push(alongX ? { x: mid, y: y0 + 2.55, z: at + 0.6 * out, kind: 'shop' } : { x: at + 0.6 * out, y: y0 + 2.55, z: mid, kind: 'shop' });
+  }
+
+  /** Floor-by-floor glazing on the faces of a tall building. */
+  function windowBands(s: Solid, seed: number): void {
+    const h = s.sy, base = s.y - h / 2;
+    const x0 = s.x - s.sx / 2, x1 = s.x + s.sx / 2, z0 = s.z - s.sz / 2, z1 = s.z + s.sz / 2;
+    const glass = s.style === 'glass';
+    for (let y = 1.2, fl = 0; y + 1.6 < h - 0.8; y += 3.4, fl++) {
+      const bh = glass ? 2.5 : 1.5;
+      const lit = hash(seed * 13 + fl) > 1 - LIGHTING.litWindows * 0.6;
+      const key = lit ? 'lit' : 'glassDark';
+      const color = lit ? 0xffd592 : glass ? 0x3d5a73 : LIGHTING.windowGlass;
+      const yc = base + y + bh / 2;
+      const inset = 0.5;
+      if (z0 > b.minZ + 0.01) box(key).add({ x: s.x, y: yc, z: z0 - 0.03, sx: s.sx - inset * 2, sy: bh, sz: 0.06 }, { color });
+      if (z1 < b.maxZ - 0.01) box(key).add({ x: s.x, y: yc, z: z1 + 0.03, sx: s.sx - inset * 2, sy: bh, sz: 0.06 }, { color });
+      if (x0 > b.minX + 0.01) box(key).add({ x: x0 - 0.03, y: yc, z: s.z, sx: 0.06, sy: bh, sz: s.sz - inset * 2 }, { color });
+      if (x1 < b.maxX - 0.01) box(key).add({ x: x1 + 0.03, y: yc, z: s.z, sx: 0.06, sy: bh, sz: s.sz - inset * 2 }, { color });
+    }
   }
 
   /** The solid boundary wall, dressed as the backs of neighbouring buildings of varied height. */
   function perimeterFacades(): void {
     let seed = 900;
+    let tall = 1;
     const run = (ax: 'x' | 'z', at: number, n: number, a0: number, a1: number) => {
       let a = a0;
       while (a < a1 - 0.5) {
         seed++;
         const len = Math.min(a1 - a, 11 + Math.floor(hash(seed) * 12));
-        const hgt = 10.5 + Math.floor(hash(seed + 400) * 5) * 1.4;
+        const hgt = (10.5 + Math.floor(hash(seed + 400) * 5) * 1.4) * tall;
         const style = STYLES[FACADES[Math.floor(hash(seed + 800) * FACADES.length)]];
         const mid = a + len / 2;
         const depth = 3;
@@ -760,20 +825,49 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         a += len;
       }
     };
-    run('z', b.minZ, 1, b.minX, b.maxX);
-    run('z', b.maxZ, -1, b.minX, b.maxX);
-    run('x', b.minX, 1, b.minZ, b.maxZ);
-    run('x', b.maxX, -1, b.minZ, b.maxZ);
+    // dress the inner face of every boundary wall (clipped to the playable area)
+    for (const p of map.solids) {
+      if (p.kind !== 'perimeter') continue;
+      const side = p.meta?.side;
+      tall = Number(p.meta?.tall ?? 1);
+      const ax0 = Math.max(b.minX, p.x - p.sx / 2), ax1 = Math.min(b.maxX, p.x + p.sx / 2);
+      const az0 = Math.max(b.minZ, p.z - p.sz / 2), az1 = Math.min(b.maxZ, p.z + p.sz / 2);
+      if (side === 'n') run('z', p.z + p.sz / 2, 1, ax0, ax1);
+      else if (side === 's') run('z', p.z - p.sz / 2, -1, ax0, ax1);
+      else if (side === 'w') run('x', p.x + p.sx / 2, 1, az0, az1);
+      else if (side === 'e') run('x', p.x - p.sx / 2, -1, az0, az1);
+    }
   }
 
   /** Distant towers beyond the map edge, for depth. */
   function skyline(): void {
+    const ccx = (b.minX + b.maxX) / 2, ccz = (b.minZ + b.maxZ) / 2;
+    const backdrop = map.backdrop ?? {};
+    const sideOf = (dx: number, dz: number, rx: number, rz: number): 'n' | 's' | 'e' | 'w' =>
+      Math.abs(dx / rx) > Math.abs(dz / rz) ? (dx > 0 ? 'e' : 'w') : dz > 0 ? 's' : 'n';
+    // rolling hills behind wherever the map ends in rock (the jungle, the headlands by the beach)
+    const cliffs = map.solids.filter((c) => c.kind === 'cliff');
+    cliffs.forEach((c, i) => {
+      if (i % 3) return;
+      let ox = c.x - ccx, oz = c.z - ccz;
+      // push straight out from the edge the cliff sits on
+      if (c.x < b.minX + 0.01) { ox = -1; oz = 0; } else if (c.x > b.maxX - 0.01) { ox = 1; oz = 0; } else { ox = 0; oz = c.z < ccz ? -1 : 1; }
+      const out = 70 + hash(i + 700) * 70;
+      const r = 32 + hash(i + 800) * 30;
+      const hill = new THREE.IcosahedronGeometry(1, 2);
+      geo('faceted').add(hill, trs(c.x + ox * out, -r * 0.4, c.z + oz * out, hash(i) * 6, r, r * (0.5 + hash(i + 820) * 0.3), r), [0x3f6a38, 0x4a7a40, 0x36603a][i % 3]);
+      hill.dispose();
+    });
+    const nearCliff = (x: number, z: number) => cliffs.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < 130 * 130);
     for (let i = 0; i < 54; i++) {
       const t = i / 54;
       const ang = t * Math.PI * 2 + hash(i) * 0.1;
       const rx = (b.maxX - b.minX) / 2 + 16 + hash(i + 50) * 46;
       const rz = (b.maxZ - b.minZ) / 2 + 16 + hash(i + 90) * 46;
-      const x = Math.cos(ang) * rx, z = Math.sin(ang) * rz;
+      const side = sideOf(Math.cos(ang) * rx, Math.sin(ang) * rz, rx, rz);
+      if (backdrop[side] && backdrop[side] !== 'city') continue;
+      const x = ccx + Math.cos(ang) * rx, z = ccz + Math.sin(ang) * rz;
+      if (nearCliff(x, z)) continue;
       const w = 10 + hash(i + 130) * 14, d = 10 + hash(i + 170) * 14;
       const h = 16 + hash(i + 210) * 34;
       box('flat').add({ x, y: h / 2, z, sx: w, sy: h, sz: d }, { color: [0x4b5362, 0x565c68, 0x434a57, 0x5e6470][i % 4], skipBottom: true });
@@ -1208,6 +1302,75 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         part(p, 'flat', 0, 2.0, 0.05, 5.4, 5.4, 0.06, crewColorHex(team, 'dark'));
         part(p, 'flat', 0, 7.4, 0.06, 5.8, 0.14, 0.14, 0x2e3238);
         disposables.push(t, mat, m.geometry);
+        break;
+      }
+      case 'palm': {
+        // a leaning, slightly curved trunk and a crown of drooping fronds
+        const h = 6.2 + (p.variant % 3) * 0.6;
+        const lean = 0.12 + hash(i + 3) * 0.12;
+        const seg = new THREE.CylinderGeometry(0.16, 0.22, h / 3, 7);
+        let tx = p.x, ty = p.y, tz = p.z;
+        for (let k = 0; k < 3; k++) {
+          const tilt = lean * (k + 1) * 0.6;
+          const dx = Math.sin(p.ry) * Math.sin(tilt) * (h / 3), dz = Math.cos(p.ry) * Math.sin(tilt) * (h / 3);
+          geo('faceted').add(seg, trs(tx + dx / 2, ty + (h / 3) / 2, tz + dz / 2, p.ry, 1 - k * 0.12, 1, 1 - k * 0.12, tilt), 0x7a6247);
+          tx += dx; ty += (h / 3) * Math.cos(tilt); tz += dz;
+        }
+        seg.dispose();
+        const frond = new THREE.ConeGeometry(0.55, 3.4, 4, 1);
+        frond.translate(0, 1.7, 0);
+        for (let k = 0; k < 7; k++) {
+          const a = (k / 7) * Math.PI * 2 + hash(i + k) * 0.4;
+          geo('faceted').add(frond, trs(tx, ty - 0.1, tz, a, 1, 1, 0.35, 1.9 + hash(i * 3 + k) * 0.35), [0x4f8a3c, 0x5c9a44, 0x447a34][k % 3]);
+        }
+        frond.dispose();
+        const nut = new THREE.IcosahedronGeometry(0.22, 0);
+        for (let k = 0; k < 3; k++) geo('faceted').add(nut, trs(tx + Math.cos(k * 2.1) * 0.3, ty - 0.35, tz + Math.sin(k * 2.1) * 0.3), 0x5a4a2a);
+        nut.dispose();
+        break;
+      }
+      case 'bush': {
+        const blob = new THREE.IcosahedronGeometry(1, 0);
+        const greens = [0x3f6b34, 0x4b7d3d, 0x36602f];
+        const r = 0.9 + (p.variant % 3) * 0.25;
+        for (let k = 0; k < 3; k++) {
+          const a = p.ry + k * 2.1;
+          geo('faceted').add(blob, trs(p.x + Math.cos(a) * r * 0.5, p.y + r * 0.55, p.z + Math.sin(a) * r * 0.5, hash(i + k) * 6, r, r * 0.75, r), greens[(p.variant + k) % 3]);
+        }
+        blob.dispose();
+        break;
+      }
+      case 'rock':
+      case 'boulder': {
+        const big = p.type === 'boulder';
+        const g = new THREE.DodecahedronGeometry(1, 0);
+        const sx = big ? 2.0 : 0.95, sy = big ? 1.45 : 0.75;
+        geo('faceted').add(g, trs(p.x, p.y + sy * 0.62, p.z, p.ry, sx, sy, sx * (0.85 + hash(i) * 0.3)), [0x8a857a, 0x7a766c, 0x969083][p.variant % 3]);
+        g.dispose();
+        break;
+      }
+      case 'log': {
+        const g = new THREE.CylinderGeometry(0.4, 0.45, 6, 9);
+        geo('faceted').add(g, trs(p.x, p.y + 0.4, p.z, p.ry, 1, 1, 1, Math.PI / 2), 0x5e4a36);
+        g.dispose();
+        break;
+      }
+      case 'umbrella': {
+        const pole = new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6);
+        geo('smooth').add(pole, trs(p.x, p.y + 1.2, p.z), 0xe8e8e8);
+        pole.dispose();
+        const top = new THREE.ConeGeometry(1.5, 0.55, 10, 1, true);
+        const colors = [0xe05a8a, 0x2a9d8f, 0xf4a261, 0x457b9d, 0xe9c46a];
+        geo('faceted').add(top, trs(p.x, p.y + 2.45, p.z, p.ry), colors[p.variant % colors.length]);
+        top.dispose();
+        break;
+      }
+      case 'boat': {
+        const hull = [0xf2f2ee, 0x2f5f9e, 0xc0392b][p.variant % 3];
+        part(p, 'flat', 0, 0, 0, 2.2, 0.7, 5.6, hull, { skipBottom: true });
+        part(p, 'flat', 0, 0, 2.95, 1.2, 0.7, 0.4, hull);
+        part(p, 'flat', 0, 0.7, -0.6, 2.0, 0.08, 3.2, 0x8f6d48);
+        part(p, 'flat', 0, 0.7, -2.4, 0.5, 0.45, 0.5, 0x2e3238);
         break;
       }
       default:

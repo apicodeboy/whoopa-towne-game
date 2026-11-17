@@ -87,7 +87,6 @@ export class PorchHud {
   private bannerEl: HTMLElement;
   private riotEl: HTMLElement;
   private toastsEl: HTMLElement;
-  private keysEl: HTMLElement;
   private outEl: HTMLElement;
   private outTitle: HTMLElement;
   private outPlace: HTMLElement;
@@ -139,8 +138,6 @@ export class PorchHud {
     this.bannerEl = el('div', 'ph-banner hidden');
     this.riotEl = el('div', 'ph-riot hidden', [el('div', 'ph-riot-text', "YOU'RE IN THE RIOT — GET OUT!")]);
     this.toastsEl = el('div', 'ph-toasts');
-    this.keysEl = el('div', 'ph-keys');
-    setTimeout(() => this.keysEl.classList.add('fade'), 14000);
 
     this.outTitle = el('div', 'ph-out-title', 'KNOCKED OFF THE PORCH');
     this.outPlace = el('div', 'ph-out-place', '');
@@ -159,7 +156,7 @@ export class PorchHud {
 
     this.root = el('div', 'porch-hud', [
       top, this.compassEl, this.squadEl, this.armorBox, this.invEl, this.bagEl, this.healBar,
-      this.promptEl, this.bannerEl, this.riotEl, this.toastsEl, this.keysEl, this.specEl, this.outEl, this.winEl, this.boardEl,
+      this.promptEl, this.bannerEl, this.riotEl, this.toastsEl, this.specEl, this.outEl, this.winEl, this.boardEl,
     ]);
     parent.append(this.root);
   }
@@ -302,7 +299,7 @@ export class PorchHud {
     // ---- prompts ----
     let prompt = s.prompt;
     if (s.alive && s.air === 1) {
-      prompt = !Number.isFinite(s.doorsIn) ? 'TAKING OFF…' : s.doorsIn > 0 ? `DOORS OPEN IN ${Math.ceil(s.doorsIn)}` : `[${s.device === 'kbm' ? 'SPACE' : 'A'}] JUMP OFF THE PORCH`;
+      prompt = !Number.isFinite(s.doorsIn) ? '' : s.doorsIn > 0 ? `DOORS OPEN IN ${Math.ceil(s.doorsIn)}` : `[${s.device === 'kbm' ? 'SPACE' : 'A'}] JUMP OFF THE PORCH`;
     }
     else if (s.alive && s.air === 2) prompt = `STEER WITH ${s.device === 'kbm' ? 'WASD' : 'THE STICK'} · HOLD ${s.device === 'kbm' ? 'C' : 'B'} TO DROP FASTER`;
     this.set('prompt', prompt, () => {
@@ -330,11 +327,6 @@ export class PorchHud {
       this.specEl.innerHTML = s.spectating ? `SPECTATING <b>${escapeHtml(s.spectating)}</b><span>${s.device === 'kbm' ? 'CLICK' : 'FIRE'} FOR NEXT</span>` : '';
     });
     this.root.classList.toggle('dead', !s.alive);
-    this.set('keys', s.device, () => {
-      this.keysEl.innerHTML = s.device === 'kbm'
-        ? '<kbd>E</kbd> Search / pick up <kbd>H</kbd> Heal <kbd>X</kbd> Drop <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> Slots'
-        : s.device === 'touch' ? '' : '<kbd>▼</kbd> Search / heal';
-    });
   }
 
   /** Spectating started some other way (fire): put the elimination card away. */

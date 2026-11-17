@@ -76,6 +76,14 @@ export const PROP_BOXES: Record<PropType, LocalBox[]> = {
   cone: [],
   pallet: [lb(0, 0, 0, 1.2, 0.5, 1.2, 'body')],
   banner: [],
+  palm: [lb(0, 0, 0, 0.45, 6.5, 0.45, 'trunk')],
+  // undergrowth hides you but stops nothing
+  bush: [],
+  rock: [lb(0, 0, 0, 1.6, 1.1, 1.6, 'body')],
+  boulder: [lb(0, 0, 0, 3.4, 2.4, 3.4, 'body')],
+  log: [lb(0, 0, 0, 0.8, 0.8, 6.0, 'body')],
+  umbrella: [lb(0, 0, 0, 0.12, 2.4, 0.12, 'pole')],
+  boat: [lb(0, 0, 0, 2.2, 1.0, 5.6, 'hull')],
 };
 
 /** Expands a prop into world-space collision solids. */

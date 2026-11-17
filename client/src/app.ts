@@ -16,6 +16,7 @@ import { SkinnedCharacter } from './game/characters/skinnedCharacter';
 import { Game } from './game/game';
 import { Stage } from './game/stage';
 import { buildWorld } from './game/world/worldBuilder';
+import { mapForMode } from '@shared/map/maps';
 import { InputManager } from './input/inputManager';
 import { TouchSource } from './input/touch';
 import type { DeviceKind } from './input/types';
@@ -337,6 +338,7 @@ export class App {
   private startGame(session: Session): void {
     this.endGame();
     this.audio.unlock();
+    this.stage.useMap(mapForMode(session.mode), this.assets);
     this.session = session;
     this.matchOver = false;
     const game = new Game({

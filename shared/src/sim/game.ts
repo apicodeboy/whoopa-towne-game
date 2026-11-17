@@ -9,7 +9,7 @@ import {
   SLOT_THROWABLE, sanitizeLoadout, throwableIndex, weaponIndex,
   type Loadout,
 } from '../config/weapons';
-import { getWhoopaTowne } from '../map/whoopaTowne';
+import { mapForMode } from '../map/maps';
 import type { MapDef, SpawnPoint } from '../map/types';
 import { Rng, clamp, forwardFromYawPitch, rightFromYaw, type Vec3 } from '../math';
 import {
@@ -245,7 +245,7 @@ export class GameSim {
   private headByTarget: Uint8Array;
 
   constructor(R: Rapier, opts: GameSimOptions) {
-    this.map = opts.map ?? getWhoopaTowne();
+    this.map = opts.map ?? mapForMode(opts.mode);
     this.phys = new PhysicsWorld(R, this.map);
     this.nav = new NavGrid(this.phys, this.map);
     this.mode = opts.mode;

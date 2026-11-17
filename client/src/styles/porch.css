@@ -303,7 +303,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 80px;
+  max-width: 70px;
 }
 .ph-slot em {
   font-style: normal;
@@ -659,34 +659,6 @@
 .porch-hud.dead .ph-inv,
 .porch-hud.dead .ph-bag {
   display: none;
-}
-
-.ph-keys {
-  position: absolute;
-  left: 50%;
-  bottom: calc(96px + var(--safe-bottom));
-  transform: translateX(-50%);
-  padding: 5px 12px;
-  border-radius: 8px;
-  background: rgba(10, 11, 15, 0.6);
-  font-size: 11px;
-  letter-spacing: 0.6px;
-  white-space: nowrap;
-  transition: opacity 1s;
-}
-.ph-keys:empty,
-.ph-keys.fade {
-  opacity: 0;
-}
-.ph-keys kbd {
-  display: inline-block;
-  min-width: 18px;
-  margin: 0 3px 0 8px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  font: 700 10px var(--font);
-  text-align: center;
 }
 
 /* ---------------------------------------------------------------- phones */

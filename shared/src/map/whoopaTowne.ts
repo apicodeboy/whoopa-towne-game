@@ -49,13 +49,26 @@ const STAIR_RUN = 7.6;
 
 export function buildWhoopaTowne(): MapDef {
   const b = new MapBuilder();
+  addWhoopaTowne(b, { perimeter: true });
+  return b.build('whoopa-towne', 'Whoopa Towne', { minX: -HX, maxX: HX, minZ: -HZ, maxZ: HZ });
+}
 
+/** The town's half-extents (it is centered on the origin). */
+export const TOWNE_HALF = { x: HX, z: HZ } as const;
+
+/**
+ * Adds the whole town to a builder. The classic modes play it walled in; JUMP OFF THE PORCH
+ * drops the walls and builds more districts around it (see greaterTowne.ts).
+ */
+export function addWhoopaTowne(b: MapBuilder, opts: { perimeter: boolean }): void {
   // ---------------------------------------------------------------- ground & perimeter
   b.box('ground', -HX - 6, HX + 6, -HZ - 6, HZ + 6, -1, 0);
-  b.box('perimeter', -HX - 3, HX + 3, -HZ - 3, -HZ, 0, 10, { meta: { side: 'n' } });
-  b.box('perimeter', -HX - 3, HX + 3, HZ, HZ + 3, 0, 10, { meta: { side: 's' } });
-  b.box('perimeter', -HX - 3, -HX, -HZ, HZ, 0, 10, { meta: { side: 'w' } });
-  b.box('perimeter', HX, HX + 3, -HZ, HZ, 0, 10, { meta: { side: 'e' } });
+  if (opts.perimeter) {
+    b.box('perimeter', -HX - 3, HX + 3, -HZ - 3, -HZ, 0, 10, { meta: { side: 'n' } });
+    b.box('perimeter', -HX - 3, HX + 3, HZ, HZ + 3, 0, 10, { meta: { side: 's' } });
+    b.box('perimeter', -HX - 3, -HX, -HZ, HZ, 0, 10, { meta: { side: 'w' } });
+    b.box('perimeter', HX, HX + 3, -HZ, HZ, 0, 10, { meta: { side: 'e' } });
+  }
 
   // ---------------------------------------------------------------- roads (visual)
   {
@@ -485,8 +498,6 @@ export function buildWhoopaTowne(): MapDef {
     [-44.5, 0], [-33, -12], [-56, 12], [-40, -24], [-58, -27], [-28, 24], [-60, 37],
     [47, 0], [33, -21], [47, -35], [58, -7], [47, 14], [60, 37], [28, 24], [64, -30],
   ] as const) b.hotspot(x, z);
-
-  return b.build('whoopa-towne', 'Whoopa Towne', { minX: -HX, maxX: HX, minZ: -HZ, maxZ: HZ });
 }
 
 let cached: MapDef | null = null;

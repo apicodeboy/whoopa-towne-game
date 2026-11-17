@@ -3,7 +3,9 @@ import type { DeviceKind } from '../input/types';
 /** Things the player can do that have a button. */
 export type Action =
   | 'move' | 'look' | 'fire' | 'aim' | 'reload' | 'jump' | 'crouch' | 'sprint'
-  | 'swap' | 'throw' | 'shoulder' | 'scores' | 'pause' | 'accept' | 'back';
+  | 'swap' | 'throw' | 'shoulder' | 'scores' | 'pause' | 'accept' | 'back'
+  // JUMP OFF THE PORCH
+  | 'slots' | 'use' | 'heal' | 'drop';
 
 interface Glyph {
   /** Text inside the glyph. */
@@ -30,6 +32,10 @@ const KBM: GlyphSet = {
   pause: { t: 'Esc' },
   accept: { t: 'Enter' },
   back: { t: 'Esc' },
+  slots: { t: '1 2 3 4' },
+  use: { t: 'E' },
+  heal: { t: 'H' },
+  drop: { t: 'X' },
 };
 
 const XBOX: GlyphSet = {
@@ -48,6 +54,10 @@ const XBOX: GlyphSet = {
   pause: { t: 'Menu', c: 'sys' },
   accept: { t: 'A', c: 'face xb-a' },
   back: { t: 'B', c: 'face xb-b' },
+  slots: { t: 'Y', c: 'face xb-y' },
+  use: { t: '▼', c: 'sys' },
+  heal: { t: '' },
+  drop: { t: '' },
 };
 
 const PLAYSTATION: GlyphSet = {
@@ -66,6 +76,10 @@ const PLAYSTATION: GlyphSet = {
   pause: { t: 'Options', c: 'sys' },
   accept: { t: '✕', c: 'face ps-cross' },
   back: { t: '○', c: 'face ps-circle' },
+  slots: { t: '△', c: 'face ps-triangle' },
+  use: { t: '▼', c: 'sys' },
+  heal: { t: '' },
+  drop: { t: '' },
 };
 
 /** Unknown pads: positional names without platform colors. */
@@ -105,6 +119,10 @@ export const ACTION_LABELS: Record<Action, string> = {
   pause: 'Menu',
   accept: 'Select',
   back: 'Back',
+  slots: 'Slots',
+  use: 'Search / pick up',
+  heal: 'Heal',
+  drop: 'Drop',
 };
 
 /** HTML for the button glyph of an action on the given device ('' on touch). */
@@ -118,11 +136,15 @@ export function glyphHtml(device: DeviceKind, action: Action): string {
 
 /** "glyph Label" pairs for a list of actions. */
 export function legendHtml(device: DeviceKind, actions: readonly Action[]): string {
-  if (!SETS[device]) return '';
-  return actions.map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
+  const set = SETS[device];
+  if (!set) return '';
+  // actions without a button on this device are left out
+  return actions.filter((a) => set[a].t).map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
 }
 
 export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'swap', 'throw', 'shoulder', 'scores', 'pause'];
+/** JUMP OFF THE PORCH: inventory slots, searching, healing and dropping instead of the classic swap. */
+export const PORCH_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'slots', 'use', 'heal', 'drop', 'throw', 'scores', 'pause'];
 export const FULL_LEGEND: readonly Action[] = ['move', 'look', ...GAMEPLAY_LEGEND];
 
 export function deviceName(device: DeviceKind): string {

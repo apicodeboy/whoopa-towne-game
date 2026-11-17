@@ -1,4 +1,5 @@
 import { HITBOX, PLAYER, THROW, TICK_DT } from '../config/game';
+import { PORCH, SQUAD_MODES } from '../config/porch';
 import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, type Loadout, type WeaponId } from '../config/weapons';
 import { DEG, Rng, clamp, hash32, wrapAngle, yawToward } from '../math';
 import { PHASE, type BotDifficulty } from '../protocol';
@@ -161,9 +162,14 @@ export class BotBrain {
     this.idleUntil = 0;
     this.throwPlanned = false;
     if (this.sim.porch) {
-      // where to land: a random bookbag, or anywhere people can stand
-      const bags = this.sim.porch.bags;
-      if (bags.length && this.rng.chance(0.75)) {
+      // where to land: a random bookbag (the same one as the rest of the squad), or anywhere people can stand
+      const porch = this.sim.porch, bags = porch.bags;
+      const squadSize = SQUAD_MODES[porch.squadMode].size;
+      if (bags.length && squadSize > 1) {
+        const b = bags[(this.me.squad * 7919 + 13) % bags.length];
+        this.landX = b.x + this.rng.range(-6, 6);
+        this.landZ = b.z + this.rng.range(-6, 6);
+      } else if (bags.length && this.rng.chance(0.75)) {
         const b = this.rng.pick(bags);
         this.landX = b.x;
         this.landZ = b.z;
@@ -181,10 +187,15 @@ export class BotBrain {
     const sim = this.sim, porch = sim.porch!, s = this.me.state, now = sim.time;
     if (s.air === AIR_RIDING) {
       if (sim.phase !== PHASE.PLAYING) return true;
-      // jump when the transport passes closest to the landing spot (or on a whim)
-      const d = Math.hypot(s.x - this.landX, s.z - this.landZ);
-      if (this.jumpAt === 0) this.jumpAt = now + this.rng.range(2500, 22000);
-      if ((now > porch.takeoff + 3000 && d < 40) || now >= this.jumpAt) cmd.buttons = (sim.tickCount & 1) ? BTN.JUMP : 0;
+      // jump when the transport passes closest to the landing spot (a few go on a whim)
+      if (now < porch.takeoff + PORCH.transport.doorsOpen * 1000) return true;
+      const r = porch.route;
+      const len = Math.hypot(r[2] - r[0], r[3] - r[1]) || 1;
+      const dx = (r[2] - r[0]) / len, dz = (r[3] - r[1]) / len;
+      const along = (this.landX - r[0]) * dx + (this.landZ - r[1]) * dz;
+      const here = (s.x - r[0]) * dx + (s.z - r[1]) * dz;
+      if (this.jumpAt === 0) this.jumpAt = this.rng.chance(0.15) ? now + this.rng.range(2500, 40000) : Infinity;
+      if (here >= along - 25 || now >= this.jumpAt) cmd.buttons = (sim.tickCount & 1) ? BTN.JUMP : 0;
       return true;
     }
     if (s.air === AIR_BALLOON) {

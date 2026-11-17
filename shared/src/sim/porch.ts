@@ -151,17 +151,39 @@ export class PorchRules {
   // ------------------------------------------------------------------ setup
   /** Bookbags: by cars, benches, store shelves, dumpsters and anywhere else people drop things. */
   private placeBags(): void {
-    const sim = this.sim, rng = this.rng, nav = sim.nav;
-    const count = Math.max(PORCH.minBags, Math.round(sim.players.length * PORCH.bagsPerPlayer));
-    const props = sim.map.props.filter((p) => ['car', 'van', 'truck', 'dumpster', 'bench', 'busstop', 'hoop', 'shelf', 'trashcan', 'crate', 'pallet'].includes(p.type));
+    const sim = this.sim, rng = this.rng, nav = sim.nav, b = sim.map.bounds;
+    const hectares = ((b.maxX - b.minX) * (b.maxZ - b.minZ)) / 10000;
+    const count = Math.max(PORCH.minBags, Math.round(sim.players.length * PORCH.bagsPerPlayer), Math.round(hectares * PORCH.bagsPerHectare));
+    const props = sim.map.props.filter((p) => p.y < 0.5 && ['car', 'van', 'truck', 'dumpster', 'bench', 'busstop', 'hoop', 'shelf', 'trashcan', 'crate', 'pallet', 'umbrella'].includes(p.type));
     const taken: Array<{ x: number; z: number }> = [];
-    const free = (x: number, z: number) => nav.isWalkable(x, z) && taken.every((t) => (t.x - x) ** 2 + (t.z - z) ** 2 > 16);
+    const free = (x: number, z: number, d2 = 16) => taken.every((t) => (t.x - x) ** 2 + (t.z - z) ** 2 > d2);
     const totalW = BAGS.reduce((a, v) => a + v.weight, 0);
     const variant = () => {
       let r = rng.next() * totalW;
       for (let i = 0; i < BAGS.length; i++) if ((r -= BAGS[i].weight) <= 0) return i;
       return 0;
     };
+    const place = (x: number, floor: number, z: number) => {
+      taken.push({ x, z });
+      // rest on whatever is underneath: cast down from just above the floor so a roof overhead is never hit
+      const from = floor + 1.2;
+      const hit = sim.phys.raycast(x, from, z, 0, -1, 0, 3, Q_PROJECTILE);
+      const y = hit >= 0 ? from - hit : floor;
+      const v = variant();
+      this.bags.push({ id: this.bags.length, x, y, z, yaw: rng.range(0, Math.PI * 2), variant: v, opened: false, loot: this.rollLoot(v) });
+    };
+    // the map's loot spots first (shuffled), a little jitter so they are not in the exact same spot every match
+    const spots = [...(sim.map.lootSpots ?? [])];
+    for (let i = spots.length - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      [spots[i], spots[j]] = [spots[j], spots[i]];
+    }
+    const atSpots = Math.min(spots.length, Math.round(count * PORCH.bagsAtLootSpots));
+    for (let i = 0; i < atSpots; i++) {
+      const sp = spots[i];
+      const x = sp.x + rng.range(-0.6, 0.6), z = sp.z + rng.range(-0.6, 0.6);
+      if (free(x, z, 4)) place(x, sp.y, z);
+    }
     for (let guard = 0; this.bags.length < count && guard < count * 40; guard++) {
       let x: number, z: number;
       if (props.length && rng.chance(0.55)) {
@@ -174,13 +196,8 @@ export class PorchRules {
         x = nav.cellX(idx) + rng.range(-0.3, 0.3);
         z = nav.cellZ(idx) + rng.range(-0.3, 0.3);
       }
-      if (!free(x, z)) continue;
-      taken.push({ x, z });
-      // rest on whatever is underneath (sidewalk, floor, a shop's raised floor)
-      const top = sim.phys.raycast(x, 6, z, 0, -1, 0, 12, Q_PROJECTILE);
-      const y = top >= 0 ? 6 - top : 0;
-      const v = variant();
-      this.bags.push({ id: this.bags.length, x, y, z, yaw: rng.range(0, Math.PI * 2), variant: v, opened: false, loot: this.rollLoot(v) });
+      if (!nav.isWalkable(x, z) || !free(x, z)) continue;
+      place(x, 0, z);
     }
   }
 
@@ -236,6 +253,7 @@ export class PorchRules {
     this.place[p.idx] = 0;
     this.outAt[p.idx] = 0;
     this.damageDealt[p.idx] = 0;
+    this.recount();
   }
 
   /** The match goes live: the transport takes off and the stage timeline is laid out. */

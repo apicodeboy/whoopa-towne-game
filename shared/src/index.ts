@@ -8,6 +8,8 @@ export * from './map/types';
 export * from './map/props';
 export * from './map/builder';
 export * from './map/whoopaTowne';
+export * from './map/greaterTowne';
+export * from './map/maps';
 export * from './sim/physics';
 export * from './sim/player';
 export * from './protocol';

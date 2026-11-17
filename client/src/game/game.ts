@@ -699,7 +699,7 @@ export class Game {
     p.held = st.slot === 2 ? (THROWABLE_IDS[st.thr - 1] ?? 'none') : !weapon || weapon.id === 'fists' ? 'none' : weapon.id;
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
-      this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding);
+      this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding && !spectating);
     }
     // hanging from a balloon
     const wantBalloon = !!this.porchWorld && this.alive && st.air === AIR_BALLOON;

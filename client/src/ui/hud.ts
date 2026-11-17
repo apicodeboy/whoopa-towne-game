@@ -7,7 +7,7 @@ import { KILL_GRENADE, KILL_RIOT, KILL_WORLD, PHASE, type Phase, type SnapZone }
 import type { DeviceKind } from '../input/types';
 import { el } from './dom';
 import { Minimap } from './minimap';
-import { GAMEPLAY_LEGEND, glyphHtml, legendHtml } from './prompts';
+import { GAMEPLAY_LEGEND, PORCH_LEGEND, glyphHtml, legendHtml } from './prompts';
 
 export interface HudPlayerRow {
   idx: number;
@@ -201,7 +201,9 @@ export class Hud {
     ]);
 
     // ---- minimap ----
-    this.minimap = new Minimap(map);
+    // the battle royale map is too big to fit the box: follow the player instead
+    const wide = map.bounds.maxX - map.bounds.minX > 200;
+    this.minimap = new Minimap(map, wide ? { pxPerM: 1.3, height: 170 } : undefined);
     const mapBox = el('div', 'minimap-box', [this.minimap.canvas]);
 
     // ---- feed ----
@@ -296,7 +298,7 @@ export class Hud {
   setDevice(device: DeviceKind, showLegend = true): void {
     this.device = device;
     this.root.dataset.device = device;
-    this.legendEl.innerHTML = legendHtml(device, GAMEPLAY_LEGEND);
+    this.legendEl.innerHTML = legendHtml(device, this.root.dataset.mode === 'porch' ? PORCH_LEGEND : GAMEPLAY_LEGEND);
     this.last.hint = undefined;
     if (showLegend && device !== 'touch') {
       this.legendEl.classList.remove('hidden');
@@ -323,6 +325,7 @@ export class Hud {
       const cfg = MODES[s.mode];
       this.modeEl.textContent = `${cfg.name.toUpperCase()} · FIRST TO ${cfg.scoreLimit}`;
       this.root.dataset.mode = s.mode;
+      if (this.device !== 'touch') this.legendEl.innerHTML = legendHtml(this.device, s.mode === 'porch' ? PORCH_LEGEND : GAMEPLAY_LEGEND);
     });
     this.set('lowtime', s.phase === PHASE.PLAYING && s.timeLeft <= 30, () => {
       this.timeEl.classList.toggle('low', s.phase === PHASE.PLAYING && s.timeLeft <= 30);

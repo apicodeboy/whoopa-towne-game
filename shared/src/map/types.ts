@@ -44,7 +44,9 @@ export type PropType =
   | 'boxcar' | 'boxcar_open' | 'flatcar' | 'container'
   | 'dumpster' | 'barrier' | 'crate' | 'crate_big' | 'tires'
   | 'tree' | 'lamp' | 'bench' | 'hoop' | 'hydrant' | 'busstop'
-  | 'acunit' | 'signal' | 'buffer' | 'shelf' | 'trashcan' | 'cone' | 'pallet' | 'banner';
+  | 'acunit' | 'signal' | 'buffer' | 'shelf' | 'trashcan' | 'cone' | 'pallet' | 'banner'
+  // the outer districts (JUMP OFF THE PORCH)
+  | 'palm' | 'bush' | 'rock' | 'boulder' | 'log' | 'umbrella' | 'boat';
 
 export interface Prop {
   type: PropType;
@@ -89,7 +91,8 @@ export interface AreaDef {
 
 /** Visual-only road strip following a polyline. */
 export interface RoadDef {
-  kind: 'road' | 'rail';
+  /** 'trail' = a dirt path, 'creek' = shallow water you can wade through (both visual only). */
+  kind: 'road' | 'rail' | 'trail' | 'creek';
   points: Array<{ x: number; z: number }>;
   width: number;
   /** Draw dashed center line. */
@@ -133,6 +136,10 @@ export interface MapDef {
   labels: LabelDef[];
   /** Points of interest bots wander between. */
   hotspots: Array<{ x: number; z: number }>;
+  /** Good places for loot (inside shops, houses, up on roofs). JUMP OFF THE PORCH puts bookbags here first. */
+  lootSpots?: Array<{ x: number; y: number; z: number }>;
+  /** What lies beyond each edge, for the backdrop. Unset sides get a hazy skyline. */
+  backdrop?: Partial<Record<'n' | 's' | 'e' | 'w', 'city' | 'hills' | 'ocean'>>;
 }
 
 /** Quaternion (x,y,z,w) for a solid's orientation. */

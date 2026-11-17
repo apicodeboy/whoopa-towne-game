@@ -44,6 +44,8 @@ export interface ShellOpts {
   parapet?: { h?: number; gaps?: Array<{ side: Side; at: number; w: number }> };
   roof?: boolean;
   color?: number;
+  /** A shop awning over the entrance on this side, and ceiling lights inside. */
+  awning?: { side: Side; color: number };
 }
 
 export interface RampOpts {
@@ -73,6 +75,8 @@ export class MapBuilder {
   signs: SignDef[] = [];
   labels: LabelDef[] = [];
   hotspots: Array<{ x: number; z: number }> = [];
+  lootSpots: Array<{ x: number; y: number; z: number }> = [];
+  backdrop: MapDef['backdrop'];
   spawns: [SpawnPoint[], SpawnPoint[]] = [[], []];
   zones: ZoneDef[] = [];
 
@@ -217,7 +221,8 @@ export class MapBuilder {
       this.wallWithOpenings('wall', side, o.x0, o.x1, o.z0, o.z1, y0, wallTop, t, openings, extra);
     }
     if (hasRoof) {
-      this.box('roof', o.x0, o.x1, o.z0, o.z1, wallTop, o.h, { style: o.style ?? 'brick', group: o.id });
+      const meta = o.awning ? { awning: o.awning.color, front: o.awning.side } : undefined;
+      this.box('roof', o.x0, o.x1, o.z0, o.z1, wallTop, o.h, { style: o.style ?? 'brick', group: o.id, meta });
     }
     // interior floor patch (visual)
     this.areas.push({ kind: 'floor', x0: o.x0 + t, x1: o.x1 - t, z0: o.z0 + t, z1: o.z1 - t, layer: 3 });
@@ -284,6 +289,11 @@ export class MapBuilder {
     this.hotspots.push({ x, z });
   }
 
+  /** A good place for loot (y = the floor it rests on). */
+  loot(x: number, z: number, y = 0): void {
+    this.lootSpots.push({ x, y, z });
+  }
+
   build(id: string, name: string, bounds: MapDef['bounds']): MapDef {
     // Expand props into their collision solids (appended after hand-placed solids).
     const solids = this.solids.slice();
@@ -300,6 +310,8 @@ export class MapBuilder {
       signs: this.signs,
       labels: this.labels,
       hotspots: this.hotspots,
+      ...(this.lootSpots.length ? { lootSpots: this.lootSpots } : {}),
+      ...(this.backdrop ? { backdrop: this.backdrop } : {}),
     };
   }
 }
