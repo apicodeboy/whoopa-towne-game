@@ -76,6 +76,7 @@ export class MapBuilder {
   labels: LabelDef[] = [];
   hotspots: Array<{ x: number; z: number }> = [];
   lootSpots: Array<{ x: number; y: number; z: number }> = [];
+  districts: Array<{ name: string; x: number; z: number }> = [];
   backdrop: MapDef['backdrop'];
   spawns: [SpawnPoint[], SpawnPoint[]] = [[], []];
   zones: ZoneDef[] = [];
@@ -311,6 +312,7 @@ export class MapBuilder {
       labels: this.labels,
       hotspots: this.hotspots,
       ...(this.lootSpots.length ? { lootSpots: this.lootSpots } : {}),
+      ...(this.districts.length ? { districts: this.districts } : {}),
       ...(this.backdrop ? { backdrop: this.backdrop } : {}),
     };
   }

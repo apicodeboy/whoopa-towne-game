@@ -8,7 +8,7 @@ import { clamp, type Rng } from '../math';
 import { EV, KILL_RIOT, PHASE, type PorchInit } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
 import { Q_PROJECTILE } from './physics';
-import { AIR_BALLOON, AIR_GROUND, AIR_RIDING, BTN, ammoField, magOf, setMag, type InputCmd, type PlayerState } from './player';
+import { AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, ammoField, magOf, setMag, type InputCmd, type PlayerState } from './player';
 
 /**
  * JUMP OFF THE PORCH — the battle royale rules, plugged into GameSim. Server-authoritative:
@@ -306,7 +306,8 @@ export class PorchRules {
   private jumpOut(p: SimPlayer): void {
     const s = p.state;
     const len = Math.hypot(this.route[2] - this.route[0], this.route[3] - this.route[1]) || 1;
-    s.air = AIR_BALLOON;
+    s.air = AIR_SKYDIVE;
+    s.airT = 0;
     s.y = this.altitude - 3;
     s.vx = ((this.route[2] - this.route[0]) / len) * this.speed * 0.5;
     s.vz = ((this.route[3] - this.route[1]) / len) * this.speed * 0.5;

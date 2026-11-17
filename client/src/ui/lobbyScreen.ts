@@ -184,7 +184,9 @@ export class LobbyScreen {
     for (const [id, b] of this.modeButtons) b.classList.toggle('on', id === v.mode);
     this.botsToggle.textContent = `FILL WITH BOTS: ${v.fillBots ? 'ON' : 'OFF'}`;
     this.botsToggle.classList.toggle('on', v.fillBots);
-    this.diffSeg.classList.toggle('hidden', !v.fillBots);
+    // JUMP OFF THE PORCH has no bot settings (it always fills up, and bot levels vary by themselves)
+    this.botsToggle.classList.toggle('hidden', v.mode === 'porch');
+    this.diffSeg.classList.toggle('hidden', !v.fillBots || v.mode === 'porch');
     for (const [id, b] of this.diffButtons) b.classList.toggle('on', id === v.botDifficulty);
 
     const waiting = porch && !v.isPrivate ? 0 : v.players.filter((p) => p.id !== v.hostId && !p.ready).length;

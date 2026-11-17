@@ -270,6 +270,31 @@ export class GameRenderer {
     this.renderer.render(this.scene, camera);
   }
 
+  /**
+   * A picture of the scene from `camera`, center-cropped to w x h (menu cards). Rendered into
+   * the main canvas and copied out straight away, so it never reaches the screen.
+   */
+  snapshot(camera: THREE.PerspectiveCamera, w: number, h: number): string {
+    const canvas = this.renderer.domElement;
+    camera.aspect = canvas.width / Math.max(1, canvas.height);
+    camera.updateProjectionMatrix();
+    this.updateLights(camera);
+    this.renderer.render(this.scene, camera);
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const g = out.getContext('2d');
+    if (!g) return '';
+    const cw = canvas.width, ch = canvas.height, ta = w / h;
+    let sw = cw, sh = cw / ta;
+    if (sh > ch) {
+      sh = ch;
+      sw = ch * ta;
+    }
+    g.drawImage(canvas, (cw - sw) / 2, (ch - sh) / 2, sw, sh, 0, 0, w, h);
+    return out.toDataURL('image/jpeg', 0.84);
+  }
+
   private applyResolution(): void {
     this.renderer.setPixelRatio(this.profile.pixelRatio * this.governor.scale);
     this.resize();

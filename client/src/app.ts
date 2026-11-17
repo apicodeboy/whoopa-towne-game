@@ -116,6 +116,7 @@ export class App {
       : this.assets.load(debug.onAssetProgress).then(() => {
           // swap the stand-in props for the real models (a running match just keeps going)
           this.stage.setWorld(buildWorld(this.stage.map, this.assets));
+          this.wantThumbs = true;
         }).catch(() => undefined);
 
     this.toasts = new Toasts(ui);
@@ -214,6 +215,7 @@ export class App {
   private onDeviceChange(device: DeviceKind): void {
     document.body.dataset.device = device;
     document.body.classList.toggle('is-touch', device === 'touch');
+    this.menu.setDevice(device);
     this.pause.setLegend(`CONTROLS · ${deviceName(device).toUpperCase()}`, legendHtml(device, FULL_LEGEND));
     if (device !== 'kbm') this.input.kbm.releaseLock();
     // controller buttons fire no DOM events, so this is their chance to start the sound
@@ -246,10 +248,35 @@ export class App {
     this.backdropCam.updateProjectionMatrix();
   }
 
+  /** Pictures of the town for the menu's mode cards (taken once the real art has loaded). */
+  private wantThumbs = false;
+
+  private captureMenuThumbs(): void {
+    this.wantThumbs = false;
+    const cam = new THREE.PerspectiveCamera(55, 1, 0.3, 500);
+    const shoot = (from: [number, number, number], at: [number, number, number], w = 480, h = 400): string => {
+      cam.position.set(...from);
+      cam.lookAt(...at);
+      this.stage.world.update(0, this.backdropT, cam.position);
+      this.stage.gfx.followShadow(at[0], at[2]);
+      return this.stage.gfx.snapshot(cam, w, h);
+    };
+    try {
+      this.menu.setThumbs({
+        tdm: shoot([24, 10, 15], [2, 0.5, -6]),
+        turf: shoot([-29, 7.5, 41], [-46, 0.5, 24]),
+        lobby: shoot([-14, 15, 48], [6, 0, 26]),
+      });
+    } catch {
+      // no pictures: the cards fall back to their drawn art
+    }
+  }
+
   /** Slow fly-around of the map behind the menus. */
   private backdropFrame = (now: number): void => {
     this.raf = requestAnimationFrame(this.backdropFrame);
     if (this.game) return; // the game runs its own loop
+    if (this.wantThumbs) this.captureMenuThumbs();
     const dt = Math.min(0.1, (now - this.lastFrame) / 1000 || 0);
     this.lastFrame = now;
     this.backdropT += dt;

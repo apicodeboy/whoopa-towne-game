@@ -1,5 +1,5 @@
 import {
-  AIR_BALLOON, AIR_GROUND, AIR_RIDING, BTN, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
+  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, Q_PROJECTILE, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
   copyPlayerState, makeInputCmd, makePlayerState, makeStepActions, stepPlayer, weaponInSlot, DEFAULT_LOADOUT,
   type InputCmd, type SimPlayer, type SquadMode,
 } from '../src/index';
@@ -79,7 +79,7 @@ test('porch: 20-player lobby boards the transport; bags are placed with hidden l
   sim.dispose();
 });
 
-test('porch: jump off the transport, steer the balloon, land and pop', async () => {
+test('porch: jump off the transport, skydive, balloons up, steer, land and pop', async () => {
   const { sim, me } = await porchSim();
   sim.tick(); // pregame over (warmup 0): live
   assert(sim.phase === PHASE.PLAYING, 'live');
@@ -88,17 +88,46 @@ test('porch: jump off the transport, steer the balloon, land and pop', async () 
   assert(me.state.air === AIR_RIDING, 'jumped before the doors opened');
   wait(sim, PORCH.transport.doorsOpen, me);
   const evs = step(sim, me, { buttons: BTN.JUMP });
-  assert((me.state.air as number) === AIR_BALLOON && of(evs, EV.JUMP_OUT).length === 1, 'jumped out');
+  assert((me.state.air as number) === AIR_SKYDIVE && of(evs, EV.JUMP_OUT).length === 1, 'jumped out into a skydive');
+  // free fall: picks up speed fast, flies forward with the move keys
   const y0 = me.state.y, x0 = me.state.x, z0 = me.state.z;
+  wait(sim, 1.5, me, { mz: 1 });
+  assert((me.state.air as number) === AIR_SKYDIVE, 'still falling');
+  assert(y0 - me.state.y > 10, `falls fast (${(y0 - me.state.y).toFixed(1)} m in 1.5 s)`);
+  assert(Math.hypot(me.state.x - x0, me.state.z - z0) > 8, 'steering moves you through the air');
+  // a fresh jump press puts the balloons up
+  step(sim, me, { mz: 1 });
+  const up = step(sim, me, { buttons: BTN.JUMP });
+  assert((me.state.air as number) === AIR_BALLOON, 'balloons up on jump');
+  void up;
+  const y1 = me.state.y;
   wait(sim, 2, me, { mz: 1 });
-  const sink = (y0 - me.state.y) / 2;
-  assert(sink > PORCH.balloon.fallSpeed * 0.6 && sink < PORCH.balloon.fallSpeed * 1.2, `sinks slowly (${sink.toFixed(2)} m/s)`);
-  assert(Math.hypot(me.state.x - x0, me.state.z - z0) > 8, 'steering moves the balloon');
+  const sink = (y1 - me.state.y) / 2;
+  assert(sink < PORCH.skydive.fallSpeed * 0.6, `the balloons slow the fall (${sink.toFixed(2)} m/s)`);
+  wait(sim, 2, me, { mz: 1 });
+  assert(Math.abs(me.state.vy + PORCH.balloon.fallSpeed) < 0.5, `then sinks slowly (${(-me.state.vy).toFixed(2)} m/s)`);
   // dive to the ground
   let landed: number[][] = [];
   for (let i = 0; i < 60 * 40 && (me.state.air as number) !== AIR_GROUND; i++) landed = step(sim, me, { buttons: BTN.CROUCH });
   assert((me.state.air as number) === AIR_GROUND && me.state.grounded === 1, 'landed');
   assert(of(landed, EV.TOUCHDOWN).length === 1, 'balloon popped');
+  sim.dispose();
+});
+
+test('porch: the balloons go up by themselves near the ground', async () => {
+  const { sim, me } = await porchSim();
+  sim.tick();
+  wait(sim, PORCH.transport.doorsOpen, me);
+  step(sim, me, { buttons: BTN.JUMP });
+  let deployedAt = -1;
+  for (let i = 0; i < 60 * 20 && (me.state.air as number) === AIR_SKYDIVE; i++) {
+    step(sim, me, { buttons: BTN.CROUCH });
+    if ((me.state.air as number) === AIR_BALLOON) deployedAt = me.state.y;
+  }
+  assert((me.state.air as number) === AIR_BALLOON, 'balloons went up');
+  // whatever is under you is within the deploy height (roofs count)
+  const below = sim.phys.raycast(me.state.x, me.state.y, me.state.z, 0, -1, 0, 200, Q_PROJECTILE);
+  assert(below >= 0 && below <= PORCH.skydive.deployHeight + 1, `deployed ${below.toFixed(1)} m up (y ${deployedAt.toFixed(1)})`);
   sim.dispose();
 });
 

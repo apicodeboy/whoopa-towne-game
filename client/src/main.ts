@@ -5,6 +5,8 @@ import './styles/menu.css';
 import './styles/creator.css';
 import './styles/porch.css';
 import './styles/touch.css';
+import './styles/theme.css';
+import './styles/mainmenu.css';
 import { CREWS } from '@shared/config/crews';
 import type { ModeId } from '@shared/config/game';
 import type { BotDifficulty } from '@shared/protocol';

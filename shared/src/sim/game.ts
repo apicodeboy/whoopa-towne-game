@@ -21,7 +21,7 @@ import { HIT_PLAYER, makeShotResult, pelletDamage, shotSeed, spreadDirection, tr
 import { NavGrid } from './nav';
 import { PhysicsWorld, Q_PROJECTILE, type Rapier } from './physics';
 import {
-  AIR_RIDING, copyInputCmd, eyeHeight, makeInputCmd, makePlayerState, makeStepActions, playerStateToArray, spawnPlayerState,
+  AIR_RIDING, AIR_SKYDIVE, copyInputCmd, eyeHeight, makeInputCmd, makePlayerState, makeStepActions, playerStateToArray, spawnPlayerState,
   stepPlayer, weaponInSlot, type InputCmd, type PlayerState, type StepActions,
 } from './player';
 import { PorchRules } from './porch';
@@ -898,6 +898,8 @@ export class GameSim {
       if (s.reloadT > 0) flags |= PF.RELOAD;
       if (pl.alive && this.time < pl.protectedUntil) flags |= PF.PROTECTED;
       if (s.air === AIR_RIDING) flags |= PF.RIDING;
+      else if (s.air === AIR_SKYDIVE) flags |= PF.SKYDIVE;
+      if (s.air === 0 && s.airJumps > 0 && !s.grounded) flags |= PF.AIRJUMP;
       else if (s.air !== 0) flags |= PF.BALLOON;
       if (s.healT > 0) flags |= PF.HEALING;
       const w = weaponInSlot(s, s.slot);

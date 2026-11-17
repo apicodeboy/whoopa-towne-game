@@ -6,7 +6,7 @@ import {
 } from '../config/weapons';
 import type { SpawnPoint } from '../map/types';
 import { clamp } from '../math';
-import type { MoveResult, PhysicsWorld } from './physics';
+import { Q_PROJECTILE, type MoveResult, type PhysicsWorld } from './physics';
 
 /** Input button bitmask. */
 export const BTN = {
@@ -29,6 +29,8 @@ export const BTN = {
 export const AIR_GROUND = 0;
 export const AIR_RIDING = 1;
 export const AIR_BALLOON = 2;
+/** Free fall straight out of the blimp (the balloons go up later). */
+export const AIR_SKYDIVE = 3;
 
 /** One tick of player intent. The client predicts with it and the server replays it. */
 export interface InputCmd {
@@ -125,7 +127,7 @@ export interface PlayerState {
   healKind: number;
 
   // ---- JUMP OFF THE PORCH ----
-  /** AIR_GROUND / AIR_RIDING / AIR_BALLOON. */
+  /** AIR_GROUND / AIR_RIDING / AIR_BALLOON / AIR_SKYDIVE. */
   air: number;
   /** Wind pushing balloons this match (m/s). */
   windX: number;
@@ -135,6 +137,10 @@ export interface PlayerState {
   /** Mirrors of the server's health and armor (so healing choices predict exactly). */
   hp: number;
   armor: number;
+  /** Seconds spent in free fall (skydiving). */
+  airT: number;
+  /** Jumps used up in the air since leaving the ground (the double jump). */
+  airJumps: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -145,7 +151,7 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'trig', 'jumpHeld', 'throwHeld', 'healHeld',
   'wA', 'wB', 'wH', 'thr', 'magB', 'pool', 'ammoL', 'ammoM', 'ammoS', 'ammoH',
   'bandages', 'medkits', 'drinks', 'healT', 'healKind',
-  'air', 'windX', 'windZ', 'riot', 'hp', 'armor',
+  'air', 'windX', 'windZ', 'riot', 'hp', 'armor', 'airT', 'airJumps',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -295,8 +301,12 @@ export interface StepActions {
   /** Finished using a healing item this step (HEAL_KINDS index, -1 = none). */
   healed: number;
   healStart: boolean;
-  /** Touched down from a balloon this step. */
+  /** Touched down from a balloon (or straight out of a skydive) this step. */
   touchdown: boolean;
+  /** The balloons went up this step (end of the skydive). */
+  deployed: boolean;
+  /** Jumped again in mid-air this step. */
+  doubleJumped: boolean;
 }
 
 export function makeStepActions(): StepActions {
@@ -304,7 +314,7 @@ export function makeStepActions(): StepActions {
     shot: false, shotSeed: 0, shotSpread: 0, shotSlot: 0, threw: false,
     reloadStart: false, reloadDone: false, dryFire: false,
     jumped: false, landed: false, landSpeed: 0, swapped: false,
-    healed: -1, healStart: false, touchdown: false,
+    healed: -1, healStart: false, touchdown: false, deployed: false, doubleJumped: false,
   };
 }
 
@@ -312,7 +322,7 @@ function resetActions(a: StepActions): void {
   a.shot = false; a.shotSeed = 0; a.shotSpread = 0; a.shotSlot = 0; a.threw = false;
   a.reloadStart = false; a.reloadDone = false; a.dryFire = false;
   a.jumped = false; a.landed = false; a.landSpeed = 0; a.swapped = false;
-  a.healed = -1; a.healStart = false; a.touchdown = false;
+  a.healed = -1; a.healStart = false; a.touchdown = false; a.deployed = false; a.doubleJumped = false;
 }
 
 export function eyeHeight(crouching: number | boolean): number {
@@ -382,6 +392,60 @@ function stepBalloon(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWor
   }
 }
 
+/**
+ * Skydiving: fall fast (faster holding crouch), fly over the town with the move keys, and
+ * the balloons go up by themselves near the ground (or sooner on jump). Hitting something
+ * on the way down just lands you.
+ */
+function stepSkydive(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWorld, act: StepActions, frozen: boolean): void {
+  const D = PORCH.skydive;
+  let mx = frozen ? 0 : clamp(cmd.mx, -1, 1);
+  let mz = frozen ? 0 : clamp(cmd.mz, -1, 1);
+  const len = Math.hypot(mx, mz);
+  if (len > 1) {
+    mx /= len;
+    mz /= len;
+  }
+  const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
+  const wishX = (cosY * mx - sinY * mz) * D.steerSpeed + s.windX * 0.5;
+  const wishZ = (-sinY * mx - cosY * mz) * D.steerSpeed + s.windZ * 0.5;
+  const k = Math.min(1, (D.steerAccel * dt) / D.steerSpeed * 2);
+  s.vx += (wishX - s.vx) * k;
+  s.vz += (wishZ - s.vz) * k;
+  const dive = !frozen && (cmd.buttons & BTN.CROUCH) !== 0;
+  const top = dive ? D.diveSpeed : D.fallSpeed;
+  s.vy = Math.max(-top, s.vy - D.gravity * dt);
+  if (s.vy < -top) s.vy = -top;
+  s.crouching = 0;
+  s.sprinting = 0;
+  s.aiming = 0;
+  s.airT += dt;
+  phys.moveCharacter(s.x, s.y, s.z, s.vx * dt, s.vy * dt, s.vz * dt, false, mv);
+  const b = phys.bounds;
+  s.x = clamp(mv.x, b.minX + 1, b.maxX - 1);
+  s.y = mv.y;
+  s.z = clamp(mv.z, b.minZ + 1, b.maxZ - 1);
+  if (mv.grounded) {
+    act.landed = true;
+    act.landSpeed = -s.vy;
+    act.touchdown = true;
+    s.air = AIR_GROUND;
+    s.grounded = 1;
+    s.vy = 0;
+    s.vx *= 0.3;
+    s.vz *= 0.3;
+    return;
+  }
+  s.grounded = 0;
+  // balloons up: near the ground, or on a fresh jump press after a moment of free fall
+  const jump = !frozen && (cmd.buttons & BTN.JUMP) !== 0 && !s.jumpHeld;
+  const below = phys.raycast(s.x, s.y, s.z, 0, -1, 0, D.deployHeight, Q_PROJECTILE);
+  if (below >= 0 || (jump && s.airT >= D.minFreefall)) {
+    s.air = AIR_BALLOON;
+    act.deployed = true;
+  }
+}
+
 const mv: MoveResult = { x: 0, y: 0, z: 0, grounded: false };
 
 /**
@@ -403,6 +467,12 @@ export function stepPlayer(
   // on the transport the server carries you; hanging from a balloon is its own movement
   if (s.air === AIR_RIDING) {
     s.jumpHeld = (cmd.buttons & BTN.JUMP) !== 0 ? 1 : 0;
+    return;
+  }
+  if (s.air === AIR_SKYDIVE) {
+    stepSkydive(s, cmd, dt, phys, act, frozen);
+    s.jumpHeld = (cmd.buttons & BTN.JUMP) !== 0 ? 1 : 0;
+    s.trig = (cmd.buttons & BTN.FIRE) !== 0 ? 1 : 0;
     return;
   }
   if (s.air === AIR_BALLOON) {
@@ -456,7 +526,14 @@ export function stepPlayer(
   if (jumpBtn && !s.jumpHeld && s.grounded) {
     s.vy = PLAYER.jumpVelocity;
     s.grounded = 0;
+    s.airJumps = 0;
     act.jumped = true;
+  } else if (jumpBtn && !s.jumpHeld && !s.grounded && s.airJumps < PLAYER.airJumps) {
+    // double jump: a fresh kick upward whatever you were doing (rising or falling)
+    s.vy = PLAYER.doubleJumpVelocity;
+    s.airJumps++;
+    act.jumped = true;
+    act.doubleJumped = true;
   }
   s.jumpHeld = jumpBtn ? 1 : 0;
   s.vy -= PLAYER.gravity * dt;
@@ -482,6 +559,7 @@ export function stepPlayer(
   s.z = mv.z;
   s.grounded = mv.grounded && s.vy <= 0 ? 1 : 0;
   if (s.grounded) {
+    s.airJumps = 0;
     if (!wasGrounded && !act.jumped) {
       act.landed = true;
       act.landSpeed = fallSpeed;

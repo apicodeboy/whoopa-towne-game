@@ -1,0 +1,378 @@
+/*
+ * WHOOPA TOWNE look: street sketchbook. Black-ink outlines that wobble like a marker line,
+ * neon green and hot magenta on black, marker and spray-paint lettering, sticker shadows,
+ * scribbles and stars. Loaded last, so it restyles the menus and HUD on top of their layouts.
+ */
+
+@font-face {
+  font-family: 'Permanent Marker';
+  src: url('/assets/fonts/permanent-marker.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Rubik Spray Paint';
+  src: url('/assets/fonts/rubik-spray-paint.woff2') format('woff2');
+  font-display: swap;
+}
+
+:root {
+  --accent: #4dff3a;
+  --accent-ink: #041f02;
+  --accent-2: #ff3fd2;
+  --ink: #0a0a0c;
+  --paper: #f3f1ea;
+  --panel: rgba(9, 9, 11, 0.86);
+  --line: rgba(255, 255, 255, 0.16);
+  --good: #4dff3a;
+  --font-display: 'Permanent Marker', 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', sans-serif;
+  --font-graffiti: 'Rubik Spray Paint', 'Permanent Marker', 'Impact', sans-serif;
+  --sticker: 5px 5px 0 rgba(0, 0, 0, 0.85);
+}
+
+/* ---------------------------------------------------------------- hand-inked outlines */
+/* The outline is its own layer (so only the line wobbles, never the text inside). */
+.menu-panel,
+.lobby-panel,
+.overlay-panel,
+.card,
+.btn,
+.ph-count,
+.ph-mid {
+  position: relative;
+}
+.menu-panel::before,
+.lobby-panel::before,
+.overlay-panel::before,
+.card::before,
+.health::before,
+.ammo::before,
+.minimap-box::before,
+.ph-count::before,
+.ph-mid::before,
+.ph-armor::before,
+.ph-out::before,
+.ph-win::before,
+.porch-mode::before,
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 2.5px solid rgba(255, 255, 255, 0.92);
+  border-radius: 7px;
+  filter: url(#ink);
+  pointer-events: none;
+}
+/* a second, looser pass of the pen on the big panels */
+.menu-panel::after,
+.lobby-panel::after,
+.overlay-panel::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px -5px -7px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  filter: url(#ink2);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- buttons: stickers */
+.btn {
+  background: var(--ink);
+  border: none;
+  border-radius: 7px;
+  box-shadow: var(--sticker);
+  font-family: var(--font-display);
+  letter-spacing: 1px;
+}
+.btn:hover:not(:disabled),
+.btn:focus-visible {
+  background: #1b1b20;
+  box-shadow: 5px 5px 0 var(--accent-2);
+}
+.btn:active:not(:disabled) {
+  transform: translate(3px, 3px);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.85);
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--ink);
+  border: none;
+  transform: rotate(-1.2deg);
+  box-shadow: 6px 6px 0 var(--ink);
+  text-shadow: none;
+}
+.btn.primary::before {
+  border-color: var(--ink);
+  border-width: 3px;
+}
+.btn.primary:hover:not(:disabled),
+.btn.primary:focus-visible {
+  background: #7dff6c;
+  box-shadow: 6px 6px 0 var(--accent-2);
+}
+.btn.primary:active:not(:disabled) {
+  transform: rotate(-1.2deg) translate(3px, 3px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.btn.ghost {
+  background: rgba(10, 10, 12, 0.7);
+}
+.btn.ghost.on {
+  color: var(--accent);
+}
+.seg.on,
+.segmented .seg.on {
+  background: var(--accent);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- main menu */
+.screen.menu {
+  background:
+    linear-gradient(100deg, rgba(8, 8, 10, 0.9) 0%, rgba(8, 8, 10, 0.62) 42%, rgba(8, 8, 10, 0.08) 100%);
+}
+/* marker smudges in the corners and a few hot pink stars, like a sketchbook page */
+.screen.menu::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23fff' stop-opacity='.9'/%3E%3Cstop offset='.45' stop-color='%23ff3fd2'/%3E%3Cstop offset='1' stop-color='%23c41fa0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpath d='M50 4l12 32 34 2-27 20 10 34-29-20-29 20 10-34L4 38l34-2z' fill='url(%23g)' stroke='%23801069' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 4l12 32 34 2-27 20 10 34-29-20-29 20 10-34L4 38l34-2z' fill='%23ff3fd2' stroke='%23801069' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 4l12 32 34 2-27 20 10 34-29-20-29 20 10-34L4 38l34-2z' fill='%234dff3a' stroke='%23145a0c' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 200'%3E%3Cg fill='none' stroke='%23fff' stroke-linecap='round' opacity='.5'%3E%3Cpath d='M10 40 L90 10 M5 70 L120 20 M15 100 L140 35 M30 120 L130 70' stroke-width='14' opacity='.55'/%3E%3Cpath d='M20 150 L110 110' stroke-width='9' opacity='.35'/%3E%3C/g%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 200'%3E%3Cg fill='none' stroke='%23000' stroke-linecap='round' opacity='.55'%3E%3Cpath d='M290 160 L190 190 M295 120 L170 180 M280 90 L200 130' stroke-width='16'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: 74px, 52px, 40px, 300px 200px, 300px 200px;
+  background-position: 92% 68%, 79% 86%, 88% 18%, 0 0, 100% 100%;
+  filter: drop-shadow(0 0 10px rgba(255, 63, 210, 0.35));
+}
+.menu-panel {
+  z-index: 1;
+  background: var(--panel);
+  border-radius: 7px;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.7);
+  transform: rotate(-0.4deg);
+}
+.menu-panel .lbl,
+.menu-panel .divider {
+  font-family: var(--font-display);
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.72);
+}
+.wordmark {
+  transform: rotate(-1.5deg);
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.8));
+}
+.field {
+  font-family: var(--font-display);
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.field:focus {
+  border-color: var(--accent);
+}
+
+/* the battle royale card: graffiti title on black, neon on hover */
+.porch-mode {
+  background: var(--ink);
+  border: none;
+  border-radius: 7px;
+  box-shadow: var(--sticker);
+}
+.porch-mode.on {
+  box-shadow: 6px 6px 0 var(--accent);
+}
+.porch-mode.on::before {
+  border-color: var(--accent);
+}
+.porch-mode .pm-name {
+  font-family: var(--font-graffiti);
+  font-size: 25px;
+  letter-spacing: 0.5px;
+  color: #fff;
+  text-shadow: 3px 3px 0 #000;
+}
+.porch-mode.on .pm-name {
+  color: var(--accent);
+}
+.porch-mode .pm-tag {
+  background: var(--accent-2);
+  color: #fff;
+  transform: rotate(6deg);
+  font-family: var(--font-display);
+  font-weight: normal;
+  box-shadow: 2px 2px 0 #000;
+}
+
+/* tighter rows (the marker font runs wider than the old one) */
+.menu-panel {
+  padding-top: 14px;
+}
+.menu-panel .row .btn {
+  font-size: 15px;
+  padding: 9px 11px;
+}
+.menu-panel .segmented.small .seg {
+  font-size: 11px;
+  padding: 6px 7px;
+}
+.menu-panel .btn.big {
+  font-size: 22px;
+  padding: 11px 18px;
+}
+
+.pad-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  background: rgba(255, 63, 210, 0.12);
+  border: 2px dashed rgba(255, 63, 210, 0.75);
+  font-size: 12px;
+  line-height: 1.35;
+  color: #ffe9fb;
+}
+.pad-note b {
+  font-family: var(--font-display);
+  font-weight: normal;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+}
+.pad-note .pad-ico {
+  flex: none;
+  color: var(--accent-2);
+  display: inline-flex;
+}
+
+/* ---------------------------------------------------------------- lobby, overlays, cards */
+.lobby-panel,
+.overlay-panel {
+  border: none;
+  border-radius: 7px;
+  background: var(--panel);
+  box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.7);
+}
+.panel-title,
+.lobby-title {
+  font-family: var(--font-graffiti);
+  letter-spacing: 1px;
+  color: var(--accent);
+  text-shadow: 3px 3px 0 #000;
+}
+.card {
+  border: none;
+  border-radius: 7px;
+  box-shadow: var(--sticker);
+}
+
+/* ---------------------------------------------------------------- in-game HUD */
+.health,
+.ammo,
+.minimap-box {
+  border: none;
+  border-radius: 7px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.75);
+}
+.health .fill {
+  background: var(--accent);
+}
+.health.low .fill {
+  background: var(--accent-2);
+}
+.health .num,
+.ammo .mag {
+  text-shadow: 3px 3px 0 #000;
+}
+
+/* JUMP OFF THE PORCH */
+.ph-count,
+.ph-mid,
+.ph-armor,
+.ph-slot {
+  border: none;
+  border-radius: 7px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.75);
+}
+.ph-slot.active {
+  box-shadow: 4px 4px 0 var(--accent);
+}
+.ph-banner {
+  font-family: var(--font-graffiti);
+  letter-spacing: 1px;
+  color: #fff;
+  text-shadow: 4px 4px 0 #000, 0 0 22px rgba(77, 255, 58, 0.55);
+}
+.ph-banner[data-tone='warn'] {
+  color: #ff5a5a;
+  text-shadow: 4px 4px 0 #000, 0 0 22px rgba(255, 63, 210, 0.6);
+}
+.ph-banner[data-tone='good'] {
+  color: var(--accent);
+}
+.ph-out,
+.ph-win {
+  border: none;
+  border-radius: 7px;
+  box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.7);
+}
+.ph-win h1,
+.ph-out h1,
+.ph-win .title,
+.ph-out .title {
+  font-family: var(--font-graffiti);
+  color: var(--accent);
+  text-shadow: 4px 4px 0 #000;
+}
+
+/* ---------------------------------------------------------------- area names over the map */
+.air-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.air-labels.on {
+  opacity: 1;
+}
+.air-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+  opacity: 0;
+}
+.air-label span {
+  font-family: var(--font-graffiti);
+  font-size: 40px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--accent);
+  -webkit-text-stroke: 2px #000;
+  text-shadow: 4px 4px 0 #000, 0 0 18px rgba(77, 255, 58, 0.45);
+  transform: rotate(-3deg);
+}
+.air-label i {
+  width: 0;
+  height: 0;
+  margin-top: 4px;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 13px solid var(--accent-2);
+  filter: drop-shadow(2px 2px 0 #000);
+}
+@media (max-width: 760px) {
+  .air-label span {
+    font-size: 26px;
+  }
+}

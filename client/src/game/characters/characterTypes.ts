@@ -25,6 +25,10 @@ export interface CharacterPose {
   held: HeldItem;
   /** JUMP OFF THE PORCH: hanging from a bunch of balloons (both hands up on the strings, legs dangling). */
   hanging?: boolean;
+  /** JUMP OFF THE PORCH: free fall out of the blimp (belly down, arms and legs spread). */
+  skydive?: boolean;
+  /** Double jump: 0..1 through the front flip (undefined / < 0 = not flipping). */
+  flip?: number;
 }
 
 /**

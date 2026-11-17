@@ -303,6 +303,7 @@ export class PorchHud {
       prompt = !Number.isFinite(s.doorsIn) ? '' : s.doorsIn > 0 ? `DOORS OPEN IN ${Math.ceil(s.doorsIn)}` : `[${s.device === 'kbm' ? 'SPACE' : 'A'}] JUMP OFF THE PORCH`;
     }
     else if (s.alive && s.air === 2) prompt = `STEER WITH ${s.device === 'kbm' ? 'WASD' : 'THE STICK'} · HOLD ${s.device === 'kbm' ? 'C' : 'B'} TO DROP FASTER`;
+    else if (s.alive && s.air === 3) prompt = `FLY WITH ${s.device === 'kbm' ? 'WASD' : 'THE STICK'} · HOLD ${s.device === 'kbm' ? 'C' : 'B'} TO DIVE · [${s.device === 'kbm' ? 'SPACE' : 'A'}] BALLOONS UP`;
     this.set('prompt', prompt, () => {
       this.promptEl.classList.toggle('hidden', !prompt);
       this.promptEl.textContent = prompt;

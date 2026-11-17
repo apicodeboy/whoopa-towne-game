@@ -179,10 +179,16 @@ export function makeBalloon(): THREE.Group {
   return g;
 }
 
-/** Balloons bob and swing about the grip (the strings stay in the hands). */
-export function swayBalloon(b: THREE.Group, t: number): void {
+/** Balloons pop up out of nowhere when they go up, then bob and swing about the grip (the strings stay in the hands). */
+export function swayBalloon(b: THREE.Group, t: number, dt = 0): void {
   const pivot = b.userData.pivot as THREE.Object3D | undefined;
-  if (pivot) pivot.rotation.set(Math.sin(t * 1.3) * 0.08, Math.sin(t * 0.7) * 0.2, Math.sin(t * 1.7) * 0.14);
+  if (!pivot) return;
+  pivot.rotation.set(Math.sin(t * 1.3) * 0.08, Math.sin(t * 0.7) * 0.2, Math.sin(t * 1.7) * 0.14);
+  const g = Math.min(1, ((b.userData.grow as number | undefined) ?? 0) + dt / 0.35);
+  b.userData.grow = g;
+  // ease out with a little overshoot
+  const s = g >= 1 ? 1 : 1 + 2.2 * (g - 1) ** 3 + 1.2 * (g - 1) ** 2;
+  pivot.scale.setScalar(Math.max(0.05, s));
 }
 
 export class PorchWorld {

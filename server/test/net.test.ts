@@ -132,7 +132,7 @@ test('create private lobby: 6-character invite code, creator is host', async () 
   assert(lobby.code === v.code, 'room id is the invite code');
   assert(v.isPrivate && v.mode === 'turf' && v.phase === 'lobby', 'private turf lobby');
   assert(v.hostId === lobby.myId, 'creator is host');
-  assert(v.players[0].name === 'Big Mike', `name sanitized: "${v.players[0].name}"`);
+  assert(v.players[0].name === 'BigMike', `name sanitized to letters and numbers: "${v.players[0].name}"`);
   await leaveAll();
 });
 
@@ -142,7 +142,7 @@ test('join with code: crews auto-balance, duplicate names get a suffix, bad code
   await until(() => host.view().players.length === 2 && guest.view().players.length === 2, 'both see both');
   const v = guest.view();
   const names = v.players.map((p) => p.name).sort();
-  assert(names[0] === 'Ace' && names[1] === 'Ace 2', `names: ${names.join(', ')}`);
+  assert(names[0] === 'Ace' && names[1] === 'Ace2', `names: ${names.join(', ')}`);
   assert(v.players[0].team !== v.players[1].team, 'second player lands on the other crew');
   assert(v.hostId === host.myId, 'host unchanged');
   let err = '';

@@ -62,6 +62,13 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
         case 'shotgun': p.held = 'shotgun'; break;
         case 'smg': p.held = 'smg'; break;
         case 'grenade': p.held = 'grenade'; break;
+        case 'sniper': p.held = 'sniper'; break;
+        case 'unarmed': p.held = 'none'; break;
+        case 'unarmedrun': p.held = 'none'; p.vz = -5; break;
+        case 'walk': p.vz = -2.6; break;
+        case 'flip': p.flip = (t * 0.8) % 1; break;
+        case 'flip50': p.flip = 0.5; break;
+        case 'flip25': p.flip = 0.25; break;
         default: break;
       }
     };
@@ -101,6 +108,23 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
         set(p, t);
         c.update(dt, p);
       });
+      ((window as unknown as { __chars?: CharacterVisual[] }).__chars ??= []).push(c);
+      // &ikdots: markers on the IK wrists (red/blue) and the gun mount (green) of each character
+      if (q.has('ikdots')) {
+        const dot = (color: number) => {
+          const m = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+          m.renderOrder = 50;
+          scene.add(m);
+          return m;
+        };
+        const dr = dot(0xff2020), dl = dot(0x2060ff), dg = dot(0x20ff40);
+        const sc = c as unknown as { arms: { R: { wrist: THREE.Object3D } | null; L: { wrist: THREE.Object3D } | null }; gunMount: THREE.Object3D };
+        updaters.push(() => {
+          sc.arms.R?.wrist.getWorldPosition(dr.position);
+          sc.arms.L?.wrist.getWorldPosition(dl.position);
+          sc.gunMount.getWorldPosition(dg.position);
+        });
+      }
       if (!q.has('noref')) {
         const ref = post.clone();
         ref.position.set(p.x - 0.55, 0.9, 0.1);

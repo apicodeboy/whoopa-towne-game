@@ -123,6 +123,37 @@ test('jump apex and landing', async () => {
   approx(s.y, 0, 0.06, 'back on the ground while still holding jump');
 });
 
+test('double jump: one more jump in mid-air, reset on landing', async () => {
+  const { phys } = await makeWorld();
+  const s = makePlayerState();
+  place(s, -18, 20, NORTH);
+  run(phys, s, 10, {});
+  const single = (PLAYER.jumpVelocity * PLAYER.jumpVelocity) / (2 * PLAYER.gravity);
+  const tap = () => {
+    const c = makeInputCmd();
+    c.yaw = s.yaw;
+    c.buttons = BTN.JUMP;
+    stepPlayer(s, c, TICK_DT, phys, DEFAULT_LOADOUT, act);
+    return { jumped: act.jumped, double: act.doubleJumped };
+  };
+  for (let round = 0; round < 2; round++) {
+    assert(tap().jumped, 'first jump');
+    run(phys, s, 14, {}); // let go, still rising
+    const mid = tap();
+    assert(mid.double && s.vy > 0, 'second jump in the air');
+    run(phys, s, 2, {});
+    assert(!tap().jumped, 'no third jump');
+    let apex = 0;
+    for (let i = 0; i < 120 && !s.grounded; i++) {
+      run(phys, s, 1, {});
+      apex = Math.max(apex, s.y);
+    }
+    assert(apex > single + 0.6, `goes higher than one jump (${apex.toFixed(2)} vs ${single.toFixed(2)})`);
+    assert(s.grounded === 1 && s.airJumps === 0, 'landed with the double jump back');
+    run(phys, s, 3, {});
+  }
+});
+
 test('can hop onto a 1.1m crate but not a boxcar', async () => {
   const { map, phys } = await makeWorld();
   const crate = map.props.find((p) => p.type === 'crate' && p.y === 0 && Math.abs(p.x - 2.3) < 0.01)!;

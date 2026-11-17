@@ -250,11 +250,13 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     const taken = new Set<string>();
     this.state.players.forEach((p) => taken.add(p.name.toLowerCase()));
     if (!taken.has(base.toLowerCase())) return base;
+    // same rules as every name: letters and numbers, 12 at most
     for (let i = 2; i < 20; i++) {
-      const candidate = `${base.slice(0, 13)} ${i}`;
+      const tail = String(i);
+      const candidate = `${base.slice(0, 12 - tail.length)}${tail}`;
       if (!taken.has(candidate.toLowerCase())) return candidate;
     }
-    return `${base.slice(0, 10)} ${Math.floor(Math.random() * 900 + 100)}`;
+    return `${base.slice(0, 9)}${Math.floor(Math.random() * 900 + 100)}`;
   }
 
   private nextHost(): string {
@@ -274,7 +276,7 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     if (this.sim) for (const p of this.sim.players) if (p) used.add(p.name);
     this.state.players.forEach((p) => used.add(p.name));
     const free = BOT_NAMES.filter((n) => !used.has(n) && n !== avoid);
-    return free.length ? free[Math.floor(Math.random() * free.length)] : `Bot ${Math.floor(Math.random() * 90 + 10)}`;
+    return free.length ? free[Math.floor(Math.random() * free.length)] : `Bot${Math.floor(Math.random() * 90 + 10)}`;
   }
 
   /** Why the match cannot start yet (empty string when it can). */
@@ -327,7 +329,7 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
       const names = BOT_NAMES.filter((n) => !used.has(n));
       for (const team of [0, 1] as const) {
         while (sim.teamCount(team) < TEAM_SIZE) {
-          const name = names.splice(Math.floor(Math.random() * names.length), 1)[0] ?? `Bot ${sim.roster().length + 1}`;
+          const name = names.splice(Math.floor(Math.random() * names.length), 1)[0] ?? `Bot${sim.roster().length + 1}`;
           if (!sim.addPlayer({ id: `bot-${team}-${sim.teamCount(team)}`, name, team, isBot: true })) break;
         }
       }
@@ -358,13 +360,14 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
       m.idx = sp ? sp.idx : -1;
       k++;
     }
-    if (this.state.fillBots) {
+    // JUMP OFF THE PORCH always fills up with bots (no bot settings: each bot's level varies on its own)
+    {
       const used = new Set<string>();
       this.state.players.forEach((p) => used.add(p.name));
       const names = BOT_NAMES.filter((n) => !used.has(n));
       while (k < sim.players.length) {
         const squad = Math.floor(k / size);
-        const name = names.splice(Math.floor(Math.random() * names.length), 1)[0] ?? `Bot ${k + 1}`;
+        const name = names.splice(Math.floor(Math.random() * names.length), 1)[0] ?? `Bot${k + 1}`;
         if (!sim.addPlayer({ id: `bot-${k}`, name, team: (squad % 2) as TeamId, squad, isBot: true })) break;
         k++;
       }

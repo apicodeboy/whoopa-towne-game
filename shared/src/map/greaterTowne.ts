@@ -68,6 +68,15 @@ export function buildGreaterTowne(): MapDef {
   b.label('DOWNTOWN', 150, -75);
   b.label('WHOOPA BEACH', 0, 100);
   b.label('OCEAN DRIVE', -120, 66);
+  // the names people call out from the blimp
+  b.districts.push(
+    { name: 'THE HOOD', x: 0, z: -105 },
+    { name: 'JUNGLE', x: -145, z: -45 },
+    { name: 'DOWNTOWN', x: 148, z: -50 },
+    { name: 'WHOOPA BEACH', x: 30, z: 97 },
+    { name: 'OCEAN DRIVE', x: -105, z: 66 },
+    { name: 'WHOOPA TOWNE', x: 0, z: 0 },
+  );
 
   b.backdrop = { n: 'city', e: 'city', w: 'hills', s: 'ocean' };
   return b.build('greater-towne', 'Greater Whoopa Towne', { ...GREATER });

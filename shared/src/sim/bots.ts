@@ -5,7 +5,7 @@ import { DEG, Rng, clamp, hash32, wrapAngle, yawToward } from '../math';
 import { PHASE, type BotDifficulty } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
 import {
-  AIR_BALLOON, AIR_RIDING, BTN, eyeHeight, magOf, pickHeal, reserveOf, weaponInSlot, type InputCmd,
+  AIR_BALLOON, AIR_RIDING, AIR_SKYDIVE, BTN, eyeHeight, magOf, pickHeal, reserveOf, weaponInSlot, type InputCmd,
 } from './player';
 
 interface BotSkill {
@@ -29,9 +29,12 @@ export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
   hard: { reaction: 0.22, aimError: 1.5, turnRate: 8.0, fov: 130, headBias: 0.3, tapInterval: 0.22 },
 };
 
+/** Bot names follow the same rules as people's: letters and numbers, no spaces, 12 at most. */
 export const BOT_NAMES = [
-  'Lil Ricky', 'Big Tone', 'Dre', 'Peanut', 'Scoop', 'Juice', 'Kilo', 'Tiny', 'Ghost', 'Boogie',
-  'Slim', 'Tank', 'Flaco', 'Mouse', 'Nickel', 'Lefty', 'Smoke', 'Rook', 'Dice', 'Pops',
+  'LilRicky', 'BigTone44', 'Dre3x', 'Peanut', 'ScoopDaddy', 'JuiceBox', 'Kilo23', 'TinyTim2', 'Ghost', 'Boogie',
+  'SlimJim', 'Tank', 'Flaco', 'Mouse', 'Nickel5', 'Lefty', 'SmokeyO', 'Rook', 'Dice7', 'Pops',
+  'Bando', 'YungStax', 'Lo9', 'CashOut', 'Tre4', 'Nova', 'BlockBoy', 'Sauce', 'Kash', 'Zay10',
+  'Bubba', 'Q2Times', 'Reek', 'Flex', 'Munch', 'Spook', 'DTrain', 'Biscuit', 'Wavy', 'Rello',
 ];
 
 /** Preferred fighting distance per weapon [min, max]. */
@@ -78,6 +81,9 @@ export class BotBrain {
   private sim: GameSim;
   private me: SimPlayer;
   private skill: BotSkill;
+  /** JUMP OFF THE PORCH: this bot's current level and when it changes next. */
+  level: BotDifficulty = 'normal';
+  private skillAt = 0;
   private rng: Rng;
 
   target: SimPlayer | null = null;
@@ -142,7 +148,9 @@ export class BotBrain {
     this.sim = sim;
     this.me = me;
     this.skill = BOT_SKILLS[sim.botDifficulty];
+    this.level = sim.botDifficulty;
     this.rng = new Rng(hash32(me.idx + 1, sim.rng.int(0x7fffffff)));
+    if (sim.porch) this.rollSkill();
     this.favZone = (me.idx + me.team) % Math.max(1, sim.map.zones.length);
     this.yaw = me.state.yaw;
   }
@@ -198,7 +206,7 @@ export class BotBrain {
       if (here >= along - 25 || now >= this.jumpAt) cmd.buttons = (sim.tickCount & 1) ? BTN.JUMP : 0;
       return true;
     }
-    if (s.air === AIR_BALLOON) {
+    if (s.air === AIR_BALLOON || s.air === AIR_SKYDIVE) {
       const dx = this.landX - s.x, dz = this.landZ - s.z;
       const d = Math.hypot(dx, dz);
       this.yaw = Math.atan2(-dx, -dz);
@@ -247,7 +255,22 @@ export class BotBrain {
     return porch.stage >= 3 && (s.x - n.x) ** 2 + (s.z - n.z) ** 2 > (n.r * 0.9) ** 2;
   }
 
+  /**
+   * JUMP OFF THE PORCH has no difficulty setting: every bot is normal or hard, re-rolled every
+   * minute or so, and hard gets more likely as the riot closes in.
+   */
+  private rollSkill(): void {
+    const porch = this.sim.porch;
+    if (!porch) return;
+    const phase = Math.max(0, porch.stage - 2); // 0 before the riot, then 1, 2, ...
+    const pHard = Math.min(0.8, 0.3 + phase * 0.12);
+    this.level = this.rng.chance(pHard) ? 'hard' : 'normal';
+    this.skill = BOT_SKILLS[this.level];
+    this.skillAt = this.sim.time + this.rng.range(40000, 80000);
+  }
+
   think(cmd: InputCmd): void {
+    if (this.sim.porch && this.sim.time >= this.skillAt) this.rollSkill();
     const sim = this.sim, me = this.me, s = me.state, now = sim.time;
     cmd.mx = 0;
     cmd.mz = 0;

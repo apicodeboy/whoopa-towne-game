@@ -8,7 +8,7 @@ import { HeadRig, shapeHead, type HeadSurface } from './headRig';
 import { buildHat } from './headwear';
 import { buildCrewBands, buildNecklace, buildWrist, type BodyQuery } from './jewelry';
 import { PartLibrary, centroid, components, type Piece, type Rig } from './library';
-import { ProcMesh, SLOT, smoothstep, v3, type V3 } from './meshKit';
+import { ProcMesh, SLOT, smoothstep, style, v3, type V3 } from './meshKit';
 import { EXPRESSION_PRESETS, PAINT_STRIDE, pack, type Expression } from './palette';
 
 /**
@@ -607,6 +607,8 @@ export class LookBuilder {
     }
     switch (look.bottom) {
       case 'jeans':
+      case 'baggyjeans':
+      case 'cargo':
         add('casual', 'Legs', 'LightBlue', { slot: SLOT.BOTTOM }, 'bottom');
         break;
       case 'slimjeans':
@@ -636,13 +638,23 @@ export class LookBuilder {
     const legs = body.filter((w) => w.tag.startsWith('bottom'));
     const feet = body.filter((w) => w.tag === 'shoes' || w.tag === 'soles');
     if (look.shoes !== 'boots' && (look.bottom === 'slimjeans' || look.bottom === 'leggings')) lowerHems(legs, rig, 0.13);
+    const baggy = look.bottom === 'baggyjeans' || look.bottom === 'cargo';
     if (look.shoes === 'boots' && look.bottom === 'jeans') tuckIntoBoots(legs, feet, rig);
 
     // build and body type: the head's own skin takes part too (its neck)
     let girth = BUILDS[look.build] ?? {};
     if (look.bodyType === 'neutral') girth = combine(girth, NEUTRAL);
     shapeBody([...body, skin], rig, girth);
+    // streetwear cuts on top of the body shape
+    if (look.top === 'puffer') makePuffer(body, rig);
+    if (baggy) makeBaggy(legs, rig);
+    if (look.shoes === 'chunky') makeChunky(feet, rig);
     works.push(...body);
+    if (look.bottom === 'cargo') {
+      const pockets = new ProcMesh({ nearest: true, fallback: 'Hips' });
+      cargoPockets(pockets, rig);
+      pushProc(works, pockets, rig, 'pockets', legs);
+    }
 
     mark('outfit + shape');
     // ---------------- pieces fitted to the body
@@ -959,3 +971,155 @@ function makeTank(body: Work[], rig: Rig): void {
     }
   }
 }
+
+// ------------------------------------------------------------------ streetwear cuts
+/** Hoodie -> puffer jacket: puffed out everywhere it covers, quilted into baffles, with a sheen. */
+function makePuffer(body: Work[], rig: Rig): void {
+  const top = body.find((w) => w.tag === 'top');
+  if (!top) return;
+  const torso = jointSet(rig, (k) => /^(Hips|Body|Abdomen|Torso|Chest|Shoulder[LR])$/.test(k));
+  const upper = jointSet(rig, (k) => /^UpperArm[LR]$/.test(k));
+  const lower = jointSet(rig, (k) => /^LowerArm[LR]$/.test(k));
+  const neck = jointSet(rig, (k) => k === 'Neck' || k === 'Head');
+  const wrist = jointSet(rig, (k) => /^Wrist[LR]$/.test(k));
+  const shL = rig.at.get('UpperArmL'), shR = rig.at.get('UpperArmR');
+  // the models are flat-shaded (corners split per face): push along the averaged normal so it stays closed
+  const smooth = weldedNormals(top.pos, top.nrm);
+  const p = v3();
+  for (let i = 0; i < top.pos.length / 3; i++) {
+    p.fromArray(top.pos, i * 3);
+    const wt = weightOnSet(top, i, torso), wu = weightOnSet(top, i, upper), wl = weightOnSet(top, i, lower);
+    const wn = weightOnSet(top, i, neck), ww = weightOnSet(top, i, wrist);
+    let puff = (0.05 * wt + 0.042 * wu + 0.034 * wl + 0.014 * wn) * (1 - ww);
+    // baffles: horizontal rings on the body, rings around the sleeves
+    const sleeve = wu + wl > 0.5;
+    const sh = sleeve && shL && shR ? (p.distanceTo(shL) < p.distanceTo(shR) ? shL : shR) : null;
+    const q = sh ? p.distanceTo(sh) : p.y;
+    const seam = Math.abs(Math.cos((Math.PI * q) / 0.105)) ** 8;
+    puff *= 1 - 0.5 * seam;
+    top.pos[i * 3] += smooth[i * 3] * puff;
+    top.pos[i * 3 + 1] += smooth[i * 3 + 1] * puff;
+    top.pos[i * 3 + 2] += smooth[i * 3 + 2] * puff;
+    top.paint[i * PAINT_STRIDE + 3] *= 1 - 0.3 * seam;
+    // a satin nylon sheen (glossier than this catches every flat facet as a white blotch)
+    top.pbr[i * 2] = 0.02;
+    top.pbr[i * 2 + 1] = 0.62;
+  }
+}
+
+/** Per-vertex normals averaged over every corner at the same spot (flat-shaded meshes split them). */
+export function weldedNormals(pos: ArrayLike<number>, nrm: ArrayLike<number>): Float32Array {
+  const n = pos.length / 3;
+  const key = (i: number) => `${Math.round(pos[i * 3] * 2e4)},${Math.round(pos[i * 3 + 1] * 2e4)},${Math.round(pos[i * 3 + 2] * 2e4)}`;
+  const sums = new Map<string, [number, number, number]>();
+  for (let i = 0; i < n; i++) {
+    const k = key(i);
+    const s = sums.get(k) ?? [0, 0, 0];
+    s[0] += nrm[i * 3];
+    s[1] += nrm[i * 3 + 1];
+    s[2] += nrm[i * 3 + 2];
+    sums.set(k, s);
+  }
+  const out = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const s = sums.get(key(i))!;
+    const l = Math.hypot(s[0], s[1], s[2]) || 1;
+    out[i * 3] = s[0] / l;
+    out[i * 3 + 1] = s[1] / l;
+    out[i * 3 + 2] = s[2] / l;
+  }
+  return out;
+}
+
+/** Jeans -> baggy: wide legs that flare toward the ankle and stack up over the shoes. */
+function makeBaggy(legs: Work[], rig: Rig): void {
+  for (const side of ['L', 'R']) {
+    const hip = rig.at.get(`UpperLeg${side}`), knee = rig.at.get(`LowerLeg${side}`), ankle = rig.at.get(`Foot${side}`);
+    if (!hip || !knee || !ankle) continue;
+    const thigh = v3().subVectors(knee, hip), shinV = v3().subVectors(ankle, knee);
+    const thighLen = thigh.length(), shinLen = shinV.length();
+    thigh.normalize();
+    shinV.normalize();
+    const p = v3(), q = v3(), r = v3();
+    for (const w of legs) {
+      for (let i = 0; i < w.pos.length / 3; i++) {
+        const wTh = weightOn(w, i, rig, (k) => k === `UpperLeg${side}`);
+        const wSh = weightOn(w, i, rig, (k) => k === `LowerLeg${side}` || k === `Foot${side}`);
+        if (wTh + wSh < 0.3) continue;
+        p.fromArray(w.pos, i * 3);
+        let f: number;
+        if (wSh >= wTh) {
+          q.subVectors(p, knee);
+          const along = q.dot(shinV);
+          r.copy(q).addScaledVector(shinV, -along);
+          const s = Math.min(1, Math.max(0, along / shinLen));
+          f = 1.26 + 0.62 * s ** 1.15;
+          // stacked denim: soft creases near the bottom
+          if (s > 0.5) w.paint[i * PAINT_STRIDE + 3] *= 1 - 0.2 * Math.abs(Math.sin(s * Math.PI * 7)) ** 6;
+        } else {
+          q.subVectors(p, hip);
+          const along = q.dot(thigh);
+          r.copy(q).addScaledVector(thigh, -along);
+          f = 1.2 + 0.06 * Math.min(1, Math.max(0, along / thighLen));
+        }
+        p.addScaledVector(r, (f - 1) * Math.min(1, wTh + wSh));
+        w.pos.set([p.x, p.y, p.z], i * 3);
+      }
+    }
+  }
+  // the hems come all the way down over the shoes
+  lowerHems(legs, rig, 0.03);
+}
+
+/** Big flap pockets on the outside of each thigh. */
+function cargoPockets(out: ProcMesh, rig: Rig): void {
+  for (const side of ['L', 'R']) {
+    const hip = rig.at.get(`UpperLeg${side}`), knee = rig.at.get(`LowerLeg${side}`);
+    if (!hip || !knee) continue;
+    const axis = v3().subVectors(knee, hip);
+    const len = axis.length();
+    axis.normalize();
+    const outward = v3(Math.sign(hip.x) || (side === 'L' ? 1 : -1), 0, 0);
+    const c = hip.clone().addScaledVector(axis, len * 0.58).addScaledVector(outward, 0.118);
+    const fwd = v3(0, 0, 1);
+    const st = style(SLOT.BOTTOM, { shade: 0.86 });
+    out.box(c, v3(0.012, 0.07, 0.052), st, [outward, axis.clone().negate(), fwd]);
+    // the flap
+    out.box(c.clone().addScaledVector(axis, -0.058).addScaledVector(outward, 0.006), v3(0.01, 0.016, 0.056), style(SLOT.BOTTOM, { shade: 0.72 }), [outward, axis.clone().negate(), fwd]);
+  }
+}
+
+/** Sneakers -> chunky: bigger all round, with thick soles. */
+function makeChunky(feet: Work[], rig: Rig): void {
+  const fl = rig.at.get('FootL'), fr = rig.at.get('FootR');
+  if (!fl || !fr) return;
+  for (const side of [fl, fr]) {
+    const other = side === fl ? fr : fl;
+    const mine = (p: V3) => (p.x - side.x) ** 2 + (p.z - side.z) ** 2 < (p.x - other.x) ** 2 + (p.z - other.z) ** 2;
+    let minY = Infinity, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    const p = v3();
+    for (const w of feet) {
+      for (let i = 0; i < w.pos.length / 3; i++) {
+        p.fromArray(w.pos, i * 3);
+        if (!mine(p)) continue;
+        minY = Math.min(minY, p.y);
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+        z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z);
+      }
+    }
+    if (!Number.isFinite(minY)) continue;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2 + (z1 - z0) * 0.08;
+    for (const w of feet) {
+      const sole = w.tag === 'soles';
+      for (let i = 0; i < w.pos.length / 3; i++) {
+        p.fromArray(w.pos, i * 3);
+        if (!mine(p)) continue;
+        p.x = cx + (p.x - cx) * 1.34;
+        p.z = cz + (p.z - cz) * 1.2;
+        p.y = minY + (p.y - minY) * (sole ? 1.9 : 1.32);
+        w.pos.set([p.x, p.y, p.z], i * 3);
+      }
+    }
+  }
+}
+

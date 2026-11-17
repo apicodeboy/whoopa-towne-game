@@ -332,6 +332,10 @@ export class ProceduralCharacter implements CharacterVisual {
       return;
     }
 
+    if (pose.skydive) {
+      this.skydive(dt, pose);
+      return;
+    }
     if (pose.hanging) {
       this.hangFrom(dt);
       return;
@@ -421,9 +425,54 @@ export class ProceduralCharacter implements CharacterVisual {
 
     const reloadHand = pose.reload >= 0 && wm.twoHanded ? Math.sin(Math.PI * clamp(pose.reload * 1.15, 0, 1)) : 0;
     this.solveArms(reloadHand);
+
+    // double jump: a front flip around the hips with the knees tucked
+    if (pose.flip !== undefined && pose.flip >= 0) {
+      const f = clamp(pose.flip, 0, 1);
+      const e = f * f * (3 - 2 * f), tuck = Math.sin(Math.PI * f);
+      _q.setFromEuler(_e.set(-Math.PI * 2 * e, 0, 0));
+      const hip = _c.set(0, 0.95, 0);
+      this.body.quaternion.copy(_q);
+      this.body.position.copy(hip).sub(_a.copy(hip).applyQuaternion(_q));
+      for (const leg of [this.legL, this.legR]) {
+        leg.upper.rotation.x += 1.4 * tuck;
+        leg.lower.rotation.x -= 2.0 * tuck;
+      }
+      this.flipping = true;
+    } else if (this.flipping) {
+      this.flipping = false;
+      this.body.quaternion.identity();
+      this.body.position.set(0, 0, 0);
+    }
   }
 
   private hanging = false;
+  private flipping = false;
+
+  /** Skydiving: belly down, arms up and out, knees bent with the feet up behind. */
+  private skydive(dt: number, pose: CharacterPose): void {
+    this.hanging = true;
+    this.idleT += dt;
+    const t = this.idleT;
+    const sinY = Math.sin(pose.yaw), cosY = Math.cos(pose.yaw);
+    const right = pose.vx * cosY - pose.vz * sinY;
+    _q.setFromEuler(_e.set(-1.32 - (pose.crouching ? 0.35 : 0) + Math.sin(t * 2.3) * 0.04, 0, -clamp(right * 0.035, -0.4, 0.4)));
+    const hip = _c.set(0, 1.0, 0);
+    this.body.quaternion.copy(_q);
+    this.body.position.copy(hip).sub(_a.copy(hip).applyQuaternion(_q));
+    this.hips.position.y = HIP_STAND;
+    this.legs.rotation.y = 0;
+    this.spine.rotation.set(0, 0, 0);
+    this.head.rotation.x = -0.75;
+    this.weaponPivot.visible = false;
+    for (const [leg, side] of [[this.legL, -1], [this.legR, 1]] as const) {
+      leg.upper.rotation.set(-0.12, 0, side * 0.22);
+      leg.lower.rotation.x = -1.05 + Math.sin(t * 2.6 + side) * 0.06;
+    }
+    // hands up beside the head (spine space), elbows out
+    this.solveArm(this.shoulderR, _b.set(0.5, 0.75, -0.08), this.armRU, this.armRF, 1);
+    this.solveArm(this.shoulderL, _b.set(-0.5, 0.75, -0.08), this.armLU, this.armLF, -1);
+  }
 
   /** Hanging from balloons: hands up on the strings, legs dangling, swinging under the grip. */
   private hangFrom(dt: number): void {

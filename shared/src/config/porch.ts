@@ -35,13 +35,28 @@ export const PORCH = {
 
   // ---- the transport (a party blimp flying a straight line over the town) ------------
   transport: {
-    altitude: 82,
+    altitude: 100,
     /** Meters per second. */
     speed: 9,
     /** How far beyond the map edge the route starts and ends. */
     overshoot: 30,
     /** Seconds after take-off before anyone may jump. */
     doorsOpen: 2,
+  },
+
+  // ---- skydiving (straight out of the blimp, before the balloons go up) ------------------
+  skydive: {
+    gravity: 15,
+    /** Top fall speed (m/s) normally, and while holding crouch to dive. */
+    fallSpeed: 24,
+    diveSpeed: 34,
+    /** Top horizontal speed (m/s) and how quickly steering responds. */
+    steerSpeed: 14,
+    steerAccel: 10,
+    /** The balloons go up on their own this far (m) above whatever is below you... */
+    deployHeight: 30,
+    /** ...or sooner when you press jump, once you have fallen for this long (s). */
+    minFreefall: 0.8,
   },
 
   // ---- balloon descent ---------------------------------------------------------

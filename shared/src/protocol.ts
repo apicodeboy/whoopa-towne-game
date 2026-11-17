@@ -72,6 +72,10 @@ export const PF = {
   BALLOON: 256,
   /** Using a healing item. */
   HEALING: 512,
+  /** Skydiving out of the blimp (before the balloons go up). */
+  SKYDIVE: 1024,
+  /** Used the double jump (until landing): remote players see the flip. */
+  AIRJUMP: 2048,
 } as const;
 
 /** Held-item codes in snapshots: WEAPON_IDS indices, then these. */

@@ -99,6 +99,9 @@ export class RemotePlayer {
   private reloadDur = 2;
   private wasAlive = true;
   private wasRiding = false;
+  /** Double-jump flip progress (0..1), -1 when not flipping. */
+  private flipT = -1;
+  private wasAirJump = false;
   private friendly: boolean;
 
   constructor(idx: number, name: string, team: TeamId, isBot: boolean, visual: CharacterVisual, friendly: boolean) {
@@ -234,6 +237,15 @@ export class RemotePlayer {
     p.alive = alive;
     p.held = heldFromCode(this.held);
     p.hanging = alive && (this.flags & PF.BALLOON) !== 0;
+    p.skydive = alive && (this.flags & PF.SKYDIVE) !== 0;
+    const airJump = (this.flags & PF.AIRJUMP) !== 0;
+    if (airJump && !this.wasAirJump) this.flipT = 0;
+    this.wasAirJump = airJump;
+    if (this.flipT >= 0) {
+      this.flipT += dt / 0.48;
+      if (this.flipT >= 1 || (this.flags & PF.GROUND) !== 0) this.flipT = -1;
+    }
+    p.flip = this.flipT;
     this.visual.update(dt, p, visible);
 
     // on the transport (JUMP OFF THE PORCH) nobody is in the world yet

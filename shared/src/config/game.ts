@@ -34,6 +34,9 @@ export const PLAYER = {
   accelAir: 14,
   gravity: 22,
   jumpVelocity: 7.4,
+  /** A second jump in mid-air (once per time off the ground). */
+  airJumps: 1,
+  doubleJumpVelocity: 6.8,
   maxPitch: 1.45,
 
   maxHealth: 100,
@@ -160,11 +163,13 @@ export const INVITE_CODE_LENGTH = 6;
 /** No 0/O/1/I/L so codes are easy to read out loud. */
 export const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-export const NAME_MAX_LENGTH = 16;
+/** Player names (people and bots alike): letters and numbers only, no spaces, up to 12. */
+export const NAME_MAX_LENGTH = 12;
+export const NAME_PATTERN = /^[A-Za-z0-9]{1,12}$/;
 
 export function sanitizeName(raw: unknown): string {
   let s = typeof raw === 'string' ? raw : '';
-  s = s.replace(/[^\p{L}\p{N} _\-.']/gu, '').replace(/\s+/g, ' ').trim();
-  if (s.length > NAME_MAX_LENGTH) s = s.slice(0, NAME_MAX_LENGTH).trim();
+  s = s.replace(/[^A-Za-z0-9]/g, '');
+  if (s.length > NAME_MAX_LENGTH) s = s.slice(0, NAME_MAX_LENGTH);
   return s.length > 0 ? s : 'Player';
 }

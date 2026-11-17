@@ -100,7 +100,7 @@ export class LocalSession implements Session {
       this.myIdx = me.idx;
       const names = BOT_NAMES.slice();
       for (let k = 1; k < this.sim.players.length; k++) {
-        const name = names.splice(Math.floor(this.sim.rng.next() * names.length), 1)[0] ?? `Bot ${k}`;
+        const name = names.splice(Math.floor(this.sim.rng.next() * names.length), 1)[0] ?? `Bot${k}`;
         const squad = Math.floor(k / size);
         this.sim.addPlayer({ id: `bot-${k}`, name, team: (squad % 2) as TeamId, squad, isBot: true });
       }

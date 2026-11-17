@@ -138,6 +138,8 @@ export interface MapDef {
   hotspots: Array<{ x: number; z: number }>;
   /** Good places for loot (inside shops, houses, up on roofs). JUMP OFF THE PORCH puts bookbags here first. */
   lootSpots?: Array<{ x: number; y: number; z: number }>;
+  /** Big area names shown floating over the map while people are in the air (to call landings). */
+  districts?: Array<{ name: string; x: number; z: number }>;
   /** What lies beyond each edge, for the backdrop. Unset sides get a hazy skyline. */
   backdrop?: Partial<Record<'n' | 's' | 'e' | 'w', 'city' | 'hills' | 'ocean'>>;
 }

@@ -293,6 +293,15 @@ export class Effects {
     f.grow = grow;
   }
 
+  /** A ring of air puffed out under a double jump. */
+  airPuff(pos: THREE.Vector3): void {
+    const n = Math.max(4, Math.round(10 * this.density));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      this.dust.emit(pos.x, pos.y, pos.z, Math.cos(a) * 2.4, -0.6 + Math.random() * 0.4, Math.sin(a) * 2.4, 0.3 + Math.random() * 0.15, 0.95 * DIM, 0.95 * DIM, 0.95 * DIM);
+    }
+  }
+
   /** Bullet hitting the world: sparks, a puff of dust and a decal. */
   impact(pos: THREE.Vector3, normal: THREE.Vector3): void {
     const n = Math.max(2, Math.round(7 * this.density));

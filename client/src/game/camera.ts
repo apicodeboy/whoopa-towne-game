@@ -39,6 +39,11 @@ export class CameraRig {
   baseFov = 95;
   /** FOV multiplier of the current weapon when fully aimed. */
   aimFovMult = 0.75;
+  /**
+   * Special views (JUMP OFF THE PORCH): a long boom around the blimp, the camera up above a
+   * skydiver. `dist` = boom length, `height` = pivot height above the target position.
+   */
+  mode: { dist: number; height: number } | null = null;
 
   private sideT = 1;
   private crouchT = 0;
@@ -99,9 +104,10 @@ export class CameraRig {
     this.sprintT = approach(this.sprintT, sprinting ? 1 : 0, dt * 4);
 
     const aimE = this.aimT * this.aimT * (3 - 2 * this.aimT);
-    this.pivotH = lerp(PIVOT_STAND, PIVOT_CROUCH, this.crouchT);
-    const wantShoulder = lerp(SHOULDER_HIP, SHOULDER_AIM, aimE) * this.sideT;
-    const wantDist = lerp(DIST_HIP, DIST_AIM, aimE);
+    const mode = this.mode;
+    this.pivotH = mode ? mode.height - RISE : lerp(PIVOT_STAND, PIVOT_CROUCH, this.crouchT);
+    const wantShoulder = mode ? 0 : lerp(SHOULDER_HIP, SHOULDER_AIM, aimE) * this.sideT;
+    const wantDist = mode ? mode.dist : lerp(DIST_HIP, DIST_AIM, aimE);
 
     forwardFromYawPitch(yaw, pitch, _fwd);
     rightFromYaw(yaw, _right);
@@ -126,7 +132,7 @@ export class CameraRig {
     const t = phys.sphereCast(sx, sy, sz, -_fwd.x, -_fwd.y, -_fwd.z, CAM_RADIUS, wantDist, Q_CAMERA);
     if (t >= 0) allowed = Math.max(0.12, t - 0.04);
     if (allowed < this.dist) this.dist = allowed; // snap in: never show the inside of a wall
-    else this.dist = approach(this.dist, allowed, dt * 7); // ease back out
+    else this.dist = approach(this.dist, allowed, dt * (mode ? Math.max(7, allowed) : 7)); // ease back out
 
     const cam = this.camera;
     cam.position.set(sx - _fwd.x * this.dist, sy - _fwd.y * this.dist, sz - _fwd.z * this.dist);

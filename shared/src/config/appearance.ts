@@ -125,6 +125,7 @@ export const TOPS = [
   opt('crop', 'Crop Top'),
   soon('jersey', 'Jersey'),
   soon('jacket', 'Jacket'),
+  opt('puffer', 'Puffer Jacket'),
 ];
 export const TOP_COLORS = [
   opt('black', 'Black', { color: '#1e1e22' }),
@@ -142,9 +143,9 @@ export const TOP_COLORS = [
 ];
 export const BOTTOMS = [
   opt('slimjeans', 'Slim Jeans'),
-  soon('baggyjeans', 'Baggy Jeans'),
+  opt('baggyjeans', 'Baggy Jeans'),
   opt('jeans', 'Regular Jeans'),
-  soon('cargo', 'Cargo Pants'),
+  opt('cargo', 'Cargo Pants'),
   soon('sweatpants', 'Sweatpants'),
   soon('joggers', 'Joggers'),
   opt('shorts', 'Shorts'),
@@ -175,6 +176,7 @@ export const SHOES = [
   soon('slides', 'Slides'),
   soon('sandals', 'Sandals'),
   soon('dress', 'Dress Shoes'),
+  opt('chunky', 'Chunky Sneakers'),
 ];
 export const SHOE_COLORS = [
   opt('black', 'Black', { color: '#1e1e22' }),
@@ -191,6 +193,7 @@ export const HATS = [
   opt('none', 'None'), opt('capfwd', 'Baseball Cap Forward'), opt('capback', 'Baseball Cap Backward'),
   opt('beanie', 'Beanie'), opt('bucket', 'Bucket Hat'), opt('durag', 'Durag'),
   opt('bandana', 'Bandana'), opt('headband', 'Headband'), opt('cowboy', 'Cowboy Hat'),
+  opt('skimask', 'Ski Mask'), opt('hoodup', 'Hood Up'), opt('spikyhood', 'Spiky Hood'),
 ];
 export const GLASSES = [
   opt('none', 'None'), opt('clear', 'Clear Glasses'), opt('sunglasses', 'Black Sunglasses'),
@@ -304,24 +307,24 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   brows: 'natural',
   nose: 'average',
   ears: 'average',
-  hair: 'spiky',
-  hairColor: 'darkbrown',
+  hair: 'shortdreads',
+  hairColor: 'black',
   facialHair: 'none',
   facialHairColor: 'darkbrown',
   lips: 'average',
   mouthAcc: 'none',
   mouthProp: 'none',
   teeth: 'natural',
-  top: 'hoodie',
-  topColor: 'purple',
-  bottom: 'shorts',
-  bottomColor: 'darkblue',
-  shoes: 'lowtops',
-  shoeColor: 'blue',
-  hat: 'none',
+  top: 'puffer',
+  topColor: 'black',
+  bottom: 'baggyjeans',
+  bottomColor: 'gray',
+  shoes: 'chunky',
+  shoeColor: 'white',
+  hat: 'beanie',
   glasses: 'none',
-  earrings: 'none',
-  necklace: 'none',
+  earrings: 'diamondstuds',
+  necklace: 'diamond',
   wrist: 'none',
   faceAcc: 'none',
   tattoos: Object.freeze({}) as Record<string, string>,
@@ -464,16 +467,17 @@ export function randomAppearance(rand: () => number = Math.random): Appearance {
   a.mouthAcc = pickFrom(MOUTH_ACCESSORIES, rand, { none: 14 });
   a.mouthProp = pickFrom(MOUTH_PROPS, rand, { none: 6 });
   a.teeth = pickFrom(TEETH, rand);
-  a.top = pickFrom(TOPS, rand, fem ? {} : { crop: 0.3 });
-  a.topColor = pickFrom(TOP_COLORS, rand);
-  a.bottom = pickFrom(BOTTOMS, rand, fem ? {} : { leggings: 0.3 });
-  a.bottomColor = pickFrom(BOTTOM_COLORS, rand, { black: 3, blue: 3, darkblue: 3, gray: 2, beige: 1.5 });
-  a.shoes = pickFrom(SHOES, rand);
-  a.shoeColor = pickFrom(SHOE_COLORS, rand, { white: 3, black: 3 });
-  a.hat = pickFrom(HATS, rand, { none: 9 });
-  a.glasses = pickFrom(GLASSES, rand, { none: 10 });
-  a.earrings = pickFrom(EARRINGS, rand, { none: fem ? 3 : 8 });
-  a.necklace = pickFrom(NECKLACES, rand, { none: 8 });
+  // street sketchbook: puffers and hoodies, baggy denim and cargos, chunky sneakers, masks and hoods
+  a.top = pickFrom(TOPS, rand, { puffer: 4, hoodie: 3.5, tee: 2, tank: 0.8, crop: fem ? 1 : 0.2 });
+  a.topColor = pickFrom(TOP_COLORS, rand, { black: 5, white: 2, gray: 2.5, red: 1.5, pink: 1.2, green: 1, brown: 1, beige: 1 });
+  a.bottom = pickFrom(BOTTOMS, rand, { baggyjeans: 5, cargo: 3.5, jeans: 1, slimjeans: 0.8, shorts: 0.5, leggings: fem ? 0.6 : 0.1 });
+  a.bottomColor = pickFrom(BOTTOM_COLORS, rand, { black: 4, gray: 3, blue: 2.5, darkblue: 2.5, beige: 1.2, green: 0.8, pink: 0.4, white: 0.6 });
+  a.shoes = pickFrom(SHOES, rand, { chunky: 5, boots: 2, lowtops: 1, running: 1 });
+  a.shoeColor = pickFrom(SHOE_COLORS, rand, { white: 4, black: 4, gray: 1.5, red: 1 });
+  a.hat = pickFrom(HATS, rand, { none: 5, beanie: 3, skimask: 1.4, hoodup: 1.8, spikyhood: 0.8, capfwd: 1, capback: 1, durag: 1, bucket: 0.8, cowboy: 0.1, headband: 0.3 });
+  a.glasses = pickFrom(GLASSES, rand, { none: 7, sunglasses: 2.5, tinted: 1 });
+  a.earrings = pickFrom(EARRINGS, rand, { none: fem ? 3 : 5, diamondstuds: 3 });
+  a.necklace = pickFrom(NECKLACES, rand, { none: 4, diamond: 2.5, silver: 2, thickgold: 1.2 });
   a.wrist = pickFrom(WRIST, rand, { none: 6 });
   a.faceAcc = pickFrom(FACE_ACCESSORIES, rand, { none: 14 });
   a.details = BODY_DETAILS.filter(() => rand() < 0.12).map((d) => d.id);

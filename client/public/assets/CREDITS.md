@@ -11,6 +11,9 @@ sound effects) is generated in code and original to this project.
 | `vehicles/car.glb`, `vehicles/taxi.glb` | Car, Taxi | Quaternius | CC0 1.0 | https://quaternius.com · https://poly.pizza/u/Quaternius |
 | `props/dumpster.glb`, `props/hydrant.glb`, `props/trashcan.glb` | Dumpster, Fire Hydrant, Trashcan | Quaternius | CC0 1.0 | https://quaternius.com · https://poly.pizza/u/Quaternius |
 | `kenney/van.glb`, `kenney/delivery.glb`, `kenney/cone.glb`, `kenney/Textures/colormap.png` | Car Kit (3.1) | Kenney | CC0 1.0 | https://kenney.nl/assets/car-kit |
+| `fonts/permanent-marker.woff2` | Permanent Marker (UI marker lettering) | Font Diner | Apache License 2.0 | https://fonts.google.com/specimen/Permanent+Marker |
+| `fonts/inter.woff2` | Inter (title screen) | Rasmus Andersson | SIL Open Font License 1.1 | https://fonts.google.com/specimen/Inter |
+| `fonts/rubik-spray-paint.woff2` | Rubik Spray Paint (UI graffiti titles) | NaN, Hubert & Fischer | SIL Open Font License 1.1 | https://fonts.google.com/specimen/Rubik+Spray+Paint |
 
 To swap a model, drop a new `.glb` over the old file. If a file is missing or fails to load the
 game falls back to its built-in procedural stand-in, so nothing breaks.

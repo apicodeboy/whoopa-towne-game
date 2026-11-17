@@ -16,7 +16,7 @@ import {
 import { stepProjectile, type Projectile } from '@shared/sim/game';
 import type { PhysicsWorld } from '@shared/sim/physics';
 import {
-  AIR_BALLOON, AIR_RIDING, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, playerStateFromArray, reserveOf, weaponInSlot,
+  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, playerStateFromArray, reserveOf, weaponInSlot,
   type InputCmd, type PlayerState, type StepActions,
 } from '@shared/sim/player';
 import type { Assets } from './assets';
@@ -31,6 +31,7 @@ import { ProceduralCharacter } from './characters/proceduralCharacter';
 import { Effects } from './fx/effects';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
+import { AirLabels } from './porch/airLabels';
 import { Predictor } from './predictor';
 import { RemotePlayer } from './remotePlayer';
 import type { GameRenderer } from './renderer';
@@ -146,6 +147,12 @@ export class Game {
   paused = false;
   /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
   readonly porchWorld: PorchWorld | null = null;
+  /** Air state last frame (camera views change when it does). */
+  private lastAir = 0;
+  /** Double-jump flip progress (0..1), -1 when not flipping. */
+  private flipT = -1;
+  /** Area names floating over the map while you are in the air. */
+  private airLabels: AirLabels | null = null;
   /** JUMP OFF THE PORCH: the riot crowd along the edge of the safe area. */
   private crowd: RiotCrowd | null = null;
   readonly porchHud: PorchHud | null = null;
@@ -247,6 +254,7 @@ export class Game {
       this.gfx.scene.add(this.porchWorld.group);
       this.crowd = new RiotCrowd(this.phys, this.map);
       this.gfx.scene.add(this.crowd.group);
+      this.airLabels = new AirLabels(deps.uiRoot, this.map);
       this.porchHud = new PorchHud(deps.uiRoot, {
         spectate: () => this.nextSpectate(),
         leave: () => this.onLeaveRequest?.(),
@@ -668,8 +676,8 @@ export class Game {
       transportAt(pi.route, pi.speed, takeoff, this.session.serverTime(), _xz);
       this.renderPos.x = _xz.x;
       this.renderPos.z = _xz.z;
-      // hanging under the gondola, so the camera looks around under the blimp and out over the town
-      this.renderPos.y = this.visY = pi.altitude - 7;
+      // the camera circles the blimp itself (the blimp's body sits 4.2 m above the route)
+      this.renderPos.y = this.visY = pi.altitude + 4.2;
     }
     let spectating = false;
     if (this.porchWorld && !this.alive && this.myLife >= 0) {
@@ -688,6 +696,16 @@ export class Game {
       }
       this.fireWas = fire;
     }
+
+    // JUMP OFF THE PORCH views: around the blimp, up above a skydiver, back from the balloons
+    const air = this.porchWorld && this.alive && !spectating ? st.air : AIR_GROUND;
+    if (air === AIR_SKYDIVE && this.lastAir !== AIR_SKYDIVE) this.view.pitch = -0.8; // look down at yourself and the town
+    if (air === AIR_RIDING && this.lastAir !== AIR_RIDING) this.view.pitch = -0.32;
+    this.lastAir = air;
+    this.rig.mode = air === AIR_RIDING ? { dist: 27, height: 0 }
+      : air === AIR_SKYDIVE ? { dist: 5.2, height: 0.95 }
+      : air === AIR_BALLOON ? { dist: 4.4, height: 1.55 }
+      : null;
 
     const aimYaw = this.view.yaw;
     const aimPitch = clamp(this.view.pitch + this.recoilP, -PLAYER.maxPitch, PLAYER.maxPitch);
@@ -709,6 +727,12 @@ export class Game {
     p.alive = this.alive;
     p.held = st.slot === 2 ? (THROWABLE_IDS[st.thr - 1] ?? 'none') : !weapon || weapon.id === 'fists' ? 'none' : weapon.id;
     p.hanging = !!this.porchWorld && this.alive && st.air === AIR_BALLOON;
+    p.skydive = !!this.porchWorld && this.alive && st.air === AIR_SKYDIVE;
+    if (this.flipT >= 0) {
+      this.flipT += dt / 0.48;
+      if (this.flipT >= 1 || st.grounded) this.flipT = -1;
+    }
+    p.flip = this.flipT;
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
       this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding && !spectating);
@@ -718,6 +742,7 @@ export class Game {
     if (wantBalloon && !this.myBalloon) {
       this.myBalloon = makeBalloon();
       this.localChar.root.add(this.myBalloon);
+      this.deps.audio?.pop?.(null);
     } else if (!wantBalloon && this.myBalloon) {
       this.myBalloon.removeFromParent();
       this.myBalloon = null;
@@ -754,10 +779,10 @@ export class Game {
           this.balloons.set(rp.idx, b);
         } else if (!ballooning && has) this.dropBalloon(rp.idx);
         const b = this.balloons.get(rp.idx);
-        if (b) swayBalloon(b, this.time + rp.idx * 1.3);
+        if (b) swayBalloon(b, this.time + rp.idx * 1.3, dt);
       }
     }
-    if (this.myBalloon) swayBalloon(this.myBalloon, this.time);
+    if (this.myBalloon) swayBalloon(this.myBalloon, this.time, dt);
 
     // ---- projectiles, effects, world ----
     for (const vp of this.projectiles.values()) {
@@ -788,6 +813,10 @@ export class Game {
 
     this.gfx.followShadow(this.renderPos.x, this.renderPos.z);
     this.gfx.render(this.rig.camera);
+    if (this.airLabels) {
+      const el = this.gfx.renderer.domElement;
+      this.airLabels.update(this.rig.camera, this.alive && st.air !== AIR_GROUND, el.clientWidth, el.clientHeight);
+    }
 
     // ---- HUD ----
     this.fillHud(phase, weapon, aimYaw, aimPitch);
@@ -855,6 +884,11 @@ export class Game {
       if (act.dryFire) audio?.dryFire();
       if (act.swapped) audio?.swap();
       if (act.jumped) audio?.jump();
+      if (act.doubleJumped) {
+        this.flipT = 0;
+        audio?.jump();
+        this.effects.airPuff(_v.set(st.x, st.y + 0.1, st.z));
+      }
       if (act.landed) audio?.land(act.landSpeed);
     } else {
       this.predictor.record(cmd);
@@ -1218,6 +1252,7 @@ export class Game {
     this.smokeMat.dispose();
     this.hud.dispose();
     this.porchHud?.dispose();
+    this.airLabels?.dispose();
     this.porchWorld?.dispose();
     this.crowd?.dispose();
     this.deps.audio?.crowd?.(0);
