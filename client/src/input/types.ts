@@ -34,6 +34,8 @@ export interface InputFrame {
 
   // one-frame events
   crouchPress: boolean;
+  /** Crouch pressed while sprinting forward: roll. */
+  roll: boolean;
   sprintPress: boolean;
   swapShoulder: boolean;
   pause: boolean;
@@ -54,7 +56,7 @@ export function makeInputFrame(): InputFrame {
     moveX: 0, moveZ: 0, lookYaw: 0, lookPitch: 0,
     fire: false, aim: false, jump: false, sprint: false, crouchHold: false, reload: false, throwBtn: false, scoreboard: false,
     use: false, heal: false, drop: false, useOrHeal: false,
-    crouchPress: false, sprintPress: false, swapShoulder: false, pause: false, slotSelect: -1, slotCycle: 0,
+    crouchPress: false, roll: false, sprintPress: false, swapShoulder: false, pause: false, slotSelect: -1, slotCycle: 0,
     navX: 0, navY: 0, accept: false, back: false,
   };
 }
@@ -64,7 +66,7 @@ export function clearInputFrame(f: InputFrame): void {
   f.fire = false; f.aim = false; f.jump = false; f.sprint = false; f.crouchHold = false;
   f.reload = false; f.throwBtn = false; f.scoreboard = false;
   f.use = false; f.heal = false; f.drop = false; f.useOrHeal = false;
-  f.crouchPress = false; f.sprintPress = false; f.swapShoulder = false; f.pause = false;
+  f.crouchPress = false; f.roll = false; f.sprintPress = false; f.swapShoulder = false; f.pause = false;
   f.slotSelect = -1; f.slotCycle = 0;
   f.navX = 0; f.navY = 0; f.accept = false; f.back = false;
 }

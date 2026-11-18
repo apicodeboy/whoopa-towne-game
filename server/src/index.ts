@@ -5,6 +5,7 @@ import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import express, { type RequestHandler, type Response } from 'express';
 import { GAME_NAME, NET, ROOM_NAME } from '../../shared/src/config/game.ts';
+import { setupEconomy } from './economy/index.ts';
 import { initRapier } from './rapier.ts';
 import { MatchRoom } from './rooms/MatchRoom.ts';
 
@@ -75,6 +76,16 @@ export async function startServer(listenPort = port): Promise<Server> {
     transport: new WebSocketTransport({ pingInterval: 6000, pingMaxRetries: 4 }),
     express: (app) => {
       app.disable('x-powered-by');
+      // GRAMS, AJ's and TRAP: accounts, purchases, inventory (see docs/ECONOMY.md)
+      const dev = process.env.NODE_ENV !== 'production';
+      setupEconomy(app, {
+        dbPath: process.env.ECONOMY_DB ?? resolve(here, '../data/economy.json'),
+        publicUrl: process.env.PUBLIC_URL ?? `http://localhost:${listenPort}`,
+        allowedOrigins: [
+          ...(process.env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean),
+          ...(dev ? ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'http://127.0.0.1:5173'] : []),
+        ],
+      });
       app.get('/healthz', async (_req, res) => {
         const rooms = await matchMaker.query({ name: ROOM_NAME });
         res.json({

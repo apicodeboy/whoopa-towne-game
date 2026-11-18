@@ -1,3 +1,4 @@
+import { bindings } from './bindings';
 import type { DeviceKind, InputContext, InputFrame, InputSource } from './types';
 
 /** Radians of view rotation per pixel of mouse travel at sensitivity 1. */
@@ -174,18 +175,22 @@ export class KeyboardMouseSource implements InputSource {
       const btn = this.buttons | this.buttonsHit;
       if (btn & 1) frame.fire = true;
       if (btn & 4) frame.aim = true;
-      if (k.has('Space') || p.has('Space')) frame.jump = true;
-      if (k.has('ShiftLeft') || k.has('ShiftRight')) frame.sprint = true;
-      if (k.has('ControlLeft') || k.has('ControlRight')) frame.crouchHold = true;
-      if (k.has('KeyR') || p.has('KeyR')) frame.reload = true;
-      if (k.has('KeyG') || p.has('KeyG') || (btn & 2) !== 0) frame.throwBtn = true;
-      if (k.has('Tab')) frame.scoreboard = true;
-      if (k.has('KeyE') || p.has('KeyE') || k.has('KeyF') || p.has('KeyF')) frame.use = true;
-      if (k.has('KeyH') || p.has('KeyH')) frame.heal = true;
-      if (k.has('KeyX') || p.has('KeyX')) frame.drop = true;
+      // keys from Settings → Controls (the default layout also keeps a few alternates)
+      const b = bindings.keys;
+      const alt = bindings.defaultKeys;
+      const held = (code: string) => k.has(code) || p.has(code);
+      if (held(b.jump)) frame.jump = true;
+      if (k.has(b.sprint) || (alt && k.has('ShiftRight'))) frame.sprint = true;
+      if (k.has(b.crouchHold) || (alt && k.has('ControlRight'))) frame.crouchHold = true;
+      if (held(b.reload)) frame.reload = true;
+      if (held(b.throw) || (btn & 2) !== 0) frame.throwBtn = true;
+      if (k.has(b.scores)) frame.scoreboard = true;
+      if (held(b.use) || (alt && held('KeyF'))) frame.use = true;
+      if (held(b.heal)) frame.heal = true;
+      if (held(b.drop)) frame.drop = true;
 
-      if (p.has('KeyC')) frame.crouchPress = true;
-      if (p.has('KeyQ') || p.has('KeyV')) frame.swapShoulder = true;
+      if (p.has(b.crouch)) frame.crouchPress = true;
+      if (p.has(b.shoulder) || (alt && p.has('KeyV'))) frame.swapShoulder = true;
       if (p.has('Digit1')) frame.slotSelect = 0;
       if (p.has('Digit2')) frame.slotSelect = 1;
       if (p.has('Digit3')) frame.slotSelect = 2;

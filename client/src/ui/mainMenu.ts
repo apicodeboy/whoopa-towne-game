@@ -4,6 +4,7 @@ import type { BotDifficulty } from '@shared/protocol';
 import type { Profile } from '../core/profile';
 import type { DeviceKind } from '../input/types';
 import { button, el } from './dom';
+import { gIcon, gramsHtml } from './economyArt';
 import { glyphHtml } from './prompts';
 
 export interface MainMenuActions {
@@ -14,6 +15,12 @@ export interface MainMenuActions {
   openCharacter(): void;
   openLoadout(): void;
   openSettings(): void;
+  /** GRAMS / AJ's / TRAP / account. */
+  openStore(): void;
+  openTrap(): void;
+  openGrams(): void;
+  signIn(): void;
+  signOut(): void;
 }
 
 /** Small line icons (stroke = currentColor). */
@@ -104,6 +111,10 @@ export class MainMenu {
   private promptsEl: HTMLElement;
   private actionButtons: HTMLButtonElement[] = [];
   private thumbs: Partial<Record<ModeId | 'lobby', string>> = {};
+  private gramsChip: HTMLButtonElement;
+  private authLink: HTMLButtonElement;
+  private meCap: HTMLElement;
+  private signedIn = false;
   private profile: Profile;
 
   constructor(parent: HTMLElement, profile: Profile, actions: MainMenuActions) {
@@ -111,7 +122,13 @@ export class MainMenu {
 
     // ---- nav: pills, the logo notch, the controller tip, Quick Play ----
     const pill = (label: string, onClick: () => void) => button(label, 'hm-pill', onClick);
+    const store = pill("AJ's", () => actions.openStore());
+    store.classList.add('hm-aj');
+    const trap = pill('TRAP', () => actions.openTrap());
+    trap.classList.add('hm-trap');
     const navLeft = el('nav', 'hm-nav-left', [
+      store,
+      trap,
       pill('Character', () => actions.openCharacter()),
       pill('Loadout', () => actions.openLoadout()),
       pill('Settings', () => actions.openSettings()),
@@ -130,7 +147,9 @@ export class MainMenu {
     const more = button('', 'hm-burger', () => actions.openSettings());
     more.innerHTML = icon('menu');
     more.setAttribute('aria-label', 'Settings');
-    const navRight = el('div', 'hm-nav-right', [pad, quickTop, more]);
+    this.gramsChip = button('', 'hm-grams', () => actions.openGrams());
+    this.gramsChip.title = 'GRAMS (buy more)';
+    const navRight = el('div', 'hm-nav-right', [pad, this.gramsChip, quickTop, more]);
     const nav = el('header', 'hm-nav', [navLeft, notch, navRight]);
 
     // ---- the headline ----
@@ -160,7 +179,10 @@ export class MainMenu {
       this.updateAvatar();
     });
     this.avatarEl = el('span', 'hm-avatar');
-    const me = el('label', 'hm-me', [this.avatarEl, el('span', 'hm-me-text', [el('span', 'hm-me-cap', 'Player'), this.nameInput])]);
+    this.meCap = el('span', 'hm-me-cap', 'Player');
+    this.authLink = button('Sign in', 'hm-auth', () => (this.signedIn ? actions.signOut() : actions.signIn()));
+    // sign in / out sits on the caption line, so the pill keeps its size next to the mode cards
+    const me = el('div', 'hm-me', [this.avatarEl, el('label', 'hm-me-text', [el('span', 'hm-me-row', [this.meCap, this.authLink]), this.nameInput])]);
     this.promptsEl = el('div', 'hm-prompts');
     const left = el('div', 'hm-left', [this.statEl, this.statCapEl, me, this.promptsEl]);
 
@@ -246,6 +268,19 @@ export class MainMenu {
     this.updateAvatar();
     this.setDevice('kbm');
     this.applyThumbs();
+    this.setAccount(null);
+  }
+
+  /** Signed in: the account name is your name (and the GRAMS balance shows); signed out: free name. */
+  setAccount(a: { username: string; balance: number } | null): void {
+    this.signedIn = !!a;
+    this.gramsChip.innerHTML = a ? gramsHtml(a.balance, 22) : `${gIcon(22)}<span>GRAMS</span>`;
+    this.authLink.textContent = a ? 'Sign out' : 'Sign in';
+    this.meCap.textContent = a ? 'Signed in' : 'Player · guest';
+    this.nameInput.readOnly = !!a;
+    if (a) this.nameInput.value = a.username;
+    else this.nameInput.value = this.profile.name;
+    this.updateAvatar();
   }
 
   /** Pictures of the town for the cards (the app renders them once the art has loaded). */

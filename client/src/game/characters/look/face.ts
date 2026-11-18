@@ -299,6 +299,10 @@ export function buildEarrings(kind: string, h: HeadRig, out: ProcMesh): void {
       case 'hoops':
         out.torus(at.clone().add(v3(side * 0.0016, -0.0122, 0)), v3(1, 0, 0), 0.013, 0.0016, METAL.gold, 18, 5);
         break;
+      case 'diamondhoops':
+        // AJ's: a fat hoop set with stones all the way round
+        out.torus(at.clone().add(v3(side * 0.0018, -0.0142, 0)), v3(1, 0, 0), 0.015, 0.0024, (u) => (Math.floor(u * 28) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 28, 5);
+        break;
       case 'dangling': {
         const top = at.clone().add(v3(side * 0.0018, 0, 0));
         const bot = top.clone().add(v3(0, -0.016, 0));

@@ -1,6 +1,7 @@
 export * from './math';
 export * from './config/appearance';
 export * from './config/porch';
+export * from './config/economy';
 export * from './config/crews';
 export * from './config/game';
 export * from './config/weapons';

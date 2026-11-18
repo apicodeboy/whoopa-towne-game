@@ -85,6 +85,8 @@ export function defaultServerUrl(): string {
 /** Matchmaking entry points: Quick Play, Create Private Lobby, Join with Code. */
 export class NetClient {
   readonly url: string;
+  /** Account session (signed-in players): the server uses their account name and owned cosmetics. */
+  token: string | null = null;
   private client: Client;
 
   constructor(url = defaultServerUrl()) {
@@ -94,19 +96,23 @@ export class NetClient {
 
   /** Auto-joins an open public lobby for the mode (or creates one). */
   async quickPlay(mode: ModeId, name: string, loadout: Loadout, look?: Appearance, squads?: SquadMode): Promise<LobbyConnection> {
-    const opts: JoinOptions = { mode, name, loadout, look: look && encodeAppearance(look), ...(mode === 'porch' ? { squads: squads ?? 'solo' } : {}) };
+    const opts: JoinOptions = { mode, name, loadout, look: look && encodeAppearance(look), ...(mode === 'porch' ? { squads: squads ?? 'solo' } : {}), ...this.auth() };
     return new LobbyConnection(await this.client.joinOrCreate(ROOM_NAME, opts));
   }
 
   /** Creates an unlisted lobby that friends join with its 6-character code. */
   async createPrivate(mode: ModeId, name: string, loadout: Loadout, look?: Appearance, squads?: SquadMode): Promise<LobbyConnection> {
-    const opts: JoinOptions = { mode, name, loadout, look: look && encodeAppearance(look), private: true, ...(mode === 'porch' ? { squads: squads ?? 'solo' } : {}) };
+    const opts: JoinOptions = { mode, name, loadout, look: look && encodeAppearance(look), private: true, ...(mode === 'porch' ? { squads: squads ?? 'solo' } : {}), ...this.auth() };
     return new LobbyConnection(await this.client.create(ROOM_NAME, opts));
   }
 
   async joinByCode(code: string, name: string, loadout: Loadout, look?: Appearance): Promise<LobbyConnection> {
-    const opts: JoinOptions = { name, loadout, look: look && encodeAppearance(look) };
+    const opts: JoinOptions = { name, loadout, look: look && encodeAppearance(look), ...this.auth() };
     return new LobbyConnection(await this.client.joinById(code.trim().toUpperCase(), opts));
+  }
+
+  private auth(): { token?: string } {
+    return this.token ? { token: this.token } : {};
   }
 }
 

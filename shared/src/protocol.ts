@@ -74,8 +74,12 @@ export const PF = {
   HEALING: 512,
   /** Skydiving out of the blimp (before the balloons go up). */
   SKYDIVE: 1024,
-  /** Used the double jump (until landing): remote players see the flip. */
+  /** Used the double jump (until landing). */
   AIRJUMP: 2048,
+  /** Rolling (sprint + crouch). */
+  ROLL: 4096,
+  /** Pulling up onto a ledge. */
+  CLIMB: 8192,
 } as const;
 
 /** Held-item codes in snapshots: WEAPON_IDS indices, then these. */
@@ -387,4 +391,6 @@ export interface JoinOptions {
   look?: string | Appearance;
   /** JUMP OFF THE PORCH team size. */
   squads?: SquadMode;
+  /** Account session (GRAMS / AJ's / TRAP): signed-in players get their name and owned cosmetics. */
+  token?: string;
 }

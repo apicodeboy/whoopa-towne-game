@@ -258,6 +258,23 @@ export class GameRenderer {
 
   render(camera: THREE.Camera): void {
     this.updateLights(camera);
+    // up in the air (the blimp, a skydive) the haze pushes out, so the land past the town shows
+    // instead of a white wall of fog
+    const fog = this.scene.fog as THREE.Fog;
+    const high = Math.max(0, camera.position.y - 25);
+    fog.near = this.profile.fogNear + high * 2.5;
+    fog.far = this.profile.fogFar + high * 7;
+    const cam = camera as THREE.PerspectiveCamera;
+    if (cam.isPerspectiveCamera) {
+      const far = Math.max(this.profile.far, fog.far + 40);
+      // (a longer view needs a further near plane too, or distant ground flickers)
+      const near = high > 0 ? Math.min(1.5, 0.08 + high * 0.012) : 0.08;
+      if (Math.abs(cam.far - far) > 1 || Math.abs(cam.near - near) > 0.005) {
+        cam.far = far;
+        cam.near = near;
+        cam.updateProjectionMatrix();
+      }
+    }
     const now = performance.now();
     const dt = (now - this.lastRenderAt) / 1000;
     this.lastRenderAt = now;

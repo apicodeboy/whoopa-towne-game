@@ -1,3 +1,4 @@
+import { bindings } from './bindings';
 import type { DeviceKind, InputContext, InputFrame, InputSource } from './types';
 
 /** Standard Gamepad API button indices. */
@@ -165,20 +166,28 @@ export class GamepadSource implements InputSource {
         this.lookRamp = 0;
       }
 
-      if (btn(B.R2)) frame.fire = true;
-      if (btn(B.L2)) frame.aim = true;
-      if (btn(B.SOUTH)) frame.jump = true;
-      if (btn(B.WEST)) frame.reload = true;
-      if (btn(B.L1)) frame.throwBtn = true;
-      if (btn(B.SELECT) || btn(B.TOUCHPAD)) frame.scoreboard = true;
-      if (pressed(B.EAST)) frame.crouchPress = true;
-      if (pressed(B.L3)) frame.sprintPress = true;
-      if (pressed(B.R1) || pressed(B.R3)) frame.swapShoulder = true;
-      if (pressed(B.NORTH)) frame.slotCycle = 1;
+      // buttons from Settings → Controls
+      const m = bindings.pad;
+      if (btn(m.fire)) frame.fire = true;
+      if (btn(m.aim)) frame.aim = true;
+      if (btn(m.jump)) frame.jump = true;
+      if (btn(m.reload)) frame.reload = true;
+      if (btn(m.throw)) frame.throwBtn = true;
+      if (btn(m.scores) || (m.scores === B.SELECT && btn(B.TOUCHPAD))) frame.scoreboard = true;
+      if (pressed(m.crouch)) frame.crouchPress = true;
+      if (pressed(m.sprint)) frame.sprintPress = true;
+      if (pressed(m.shoulder)) frame.swapShoulder = true;
+      if (pressed(m.swap)) frame.slotCycle = 1;
       if (pressed(B.LEFT)) frame.slotSelect = 0;
       if (pressed(B.RIGHT)) frame.slotSelect = 1;
       if (pressed(B.UP)) frame.slotSelect = 2;
-      if (btn(B.DOWN)) frame.useOrHeal = true;
+      // search and heal on one button: it picks up when there is something in reach, heals otherwise
+      if (m.use === m.heal) {
+        if (btn(m.use)) frame.useOrHeal = true;
+      } else {
+        if (btn(m.use)) frame.use = true;
+        if (btn(m.heal)) frame.heal = true;
+      }
     } else {
       // ---- menu navigation: d-pad or left stick, with key-repeat ----
       let nx = 0, ny = 0;

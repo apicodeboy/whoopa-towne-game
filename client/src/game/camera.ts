@@ -3,10 +3,12 @@ import { approach, damp, forwardFromYawPitch, lerp, rightFromYaw, type Vec3 } fr
 import { Q_CAMERA, type PhysicsWorld } from '@shared/sim/physics';
 
 const CAM_RADIUS = 0.2;
-const DIST_HIP = 3.1;
-const DIST_AIM = 1.45;
-const SHOULDER_HIP = 0.62;
-const SHOULDER_AIM = 0.5;
+// the character sits left of the crosshair (gun side toward the middle of the screen), close
+// enough that the gun reads, and over the right shoulder when aiming
+const DIST_HIP = 2.6;
+const DIST_AIM = 1.7;
+const SHOULDER_HIP = 0.85;
+const SHOULDER_AIM = 0.78;
 const PIVOT_STAND = 1.5;
 const PIVOT_CROUCH = 1.02;
 const RISE = 0.2;

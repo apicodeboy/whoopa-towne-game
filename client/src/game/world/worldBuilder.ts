@@ -50,6 +50,9 @@ const STYLES: Record<string, { tex: string; color: number; tile: number }> = {
   wood: { tex: 'wood', color: 0x9a7a55, tile: 1.4 },
   glass: { tex: 'metal', color: 0x6f8fa8, tile: 3 },
   ruin: { tex: 'concrete', color: 0x9b9a86, tile: 2 },
+  // BABYLON
+  mudbrick: { tex: 'stucco', color: 0xc49a6c, tile: 3 },
+  sandstone: { tex: 'concrete', color: 0xc9a46b, tile: 3 },
 };
 const FACADES = ['brickdark', 'brick', 'apartment', 'stucco', 'concrete', 'metal', 'brickdark', 'brick'];
 const CAR_COLORS = [0xb33a3a, 0x2f5f9e, 0xd9d9d9, 0x26282c, 0x3d7a4a, 0xc9a227, 0x7a4fa3, 0x8a8a8a];
@@ -73,6 +76,8 @@ const AREA_STYLE: Record<string, { tex: string; color: number; tile: number }> =
   jungle: { tex: 'grass', color: 0x86a873, tile: 5 },
   dirt: { tex: 'gravel', color: 0xa88a64, tile: 3 },
   sand: { tex: 'gravel', color: 0xf0dfb4, tile: 5 },
+  desert: { tex: 'gravel', color: 0xe3c58f, tile: 6 },
+  oasis: { tex: 'water', color: 0x2fa3b5, tile: 1 },
   surf: { tex: 'water', color: 0xd8f1f2, tile: 1 },
   ocean: { tex: 'water', color: 0x2a86b0, tile: 1 },
   plaza: { tex: 'concrete', color: 0xd9d6cf, tile: 3 },
@@ -237,8 +242,10 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         break;
       }
       case 'roof': {
-        box('concrete').add(spec, { color: 0x77777a, tile: 4, skipTop: true });
-        box('ground:gravel').addQuad(s.x - s.sx / 2, s.z - s.sz / 2, s.x + s.sx / 2, s.z + s.sz / 2, s.y + s.sy / 2, { color: 0x6a6a6e, tile: 3 });
+        // flat roofs: gravel on concrete (packed earth on BABYLON's mud-brick houses)
+        const mud = s.style === 'mudbrick' || s.style === 'sandstone';
+        box('concrete').add(spec, { color: mud ? 0xa98457 : 0x77777a, tile: 4, skipTop: true });
+        box('ground:gravel').addQuad(s.x - s.sx / 2, s.z - s.sz / 2, s.x + s.sx / 2, s.z + s.sz / 2, s.y + s.sy / 2, { color: mud ? 0xc29a68 : 0x6a6a6e, tile: 3 });
         break;
       }
       case 'parapet': {
@@ -311,6 +318,17 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       case 'wreck':
         box('metal').add(spec, { color: s.color ?? 0xd5d9de, tile: 2, skipBottom: onGround });
         break;
+      case 'sandstone':
+        box('concrete').add(spec, { color: s.color ?? 0xc9a46b, tile: 3, skipBottom: onGround });
+        break;
+      case 'glazed':
+        // glazed blue brick (BABYLON's gate)
+        box('brick').add(spec, { color: s.color ?? 0x2e5aa8, tile: 1.6, skipBottom: onGround });
+        break;
+      case 'glass':
+        // storefront glass (AJ's): see-through, catches a little light
+        box('glass').add(spec, { color: 0xcfe8f5 });
+        break;
       case 'counter':
         box('wood').add(spec, { color: 0x6f4f33, tile: 1.3, skipBottom: true });
         box('flat').add({ ...spec, y: s.y + s.sy / 2 + 0.02, sx: s.sx + 0.08, sy: 0.05, sz: s.sz + 0.08 }, { color: 0x2f3338 });
@@ -334,6 +352,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   // ================================================================== perimeter facades + skyline
   perimeterFacades();
   skyline();
+  outskirts();
 
   // ================================================================== props
   map.props.forEach((p, i) => paintProp(p, i));
@@ -473,8 +492,11 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     group,
     zones,
     lights,
-    update(_dt: number, _time: number, camera?: THREE.Vector3) {
+    update(_dt: number, time: number, camera?: THREE.Vector3) {
       if (camera) sky.position.copy(camera);
+      // the clouds drift slowly across the sky
+      const clouds = sky.getObjectByName('clouds');
+      if (clouds) clouds.rotation.y = time * 0.004;
     },
     dispose() {
       for (const d of disposables) d.dispose();
@@ -839,6 +861,124 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     }
   }
 
+  /**
+   * The land past the edges of the big map, so the view from the blimp is forest and desert
+   * rather than haze: one ground sheet (dunes in the west, forest floor elsewhere), a deep band
+   * of trees to the north and east, rocks and mesas across the desert. Visual only.
+   */
+  function outskirts(): void {
+    if (map.id !== 'greater-towne') return;
+    const noise = (x: number, z: number): number => {
+      const xi = Math.floor(x), zi = Math.floor(z), fx = x - xi, fz = z - zi;
+      const h = (a: number, c: number) => hash(((a * 73856093) ^ (c * 19349663)) & 0x7fffffff);
+      const s = (t: number) => t * t * (3 - 2 * t);
+      const u = s(fx), v = s(fz);
+      return (h(xi, zi) * (1 - u) + h(xi + 1, zi) * u) * (1 - v) + (h(xi, zi + 1) * (1 - u) + h(xi + 1, zi + 1) * u) * v;
+    };
+    /** How far outside the playable area a point is (0 inside). */
+    const outside = (x: number, z: number) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
+    const desertAt = (x: number, z: number) => x < -205 + (z < b.minZ ? -40 : 0) || x < b.minX - 20;
+
+    // ---- the ground sheet (stops at the shore; the ocean is drawn already) ----
+    const W0 = -1800, W1 = 1800, Z0 = -1800, Z1 = b.maxZ - 0.6;
+    const g = new THREE.PlaneGeometry(W1 - W0, Z1 - Z0, 96, Math.round((96 * (Z1 - Z0)) / (W1 - W0)));
+    g.rotateX(-Math.PI / 2);
+    g.translate((W0 + W1) / 2, 0, (Z0 + Z1) / 2);
+    const pos = g.attributes.position;
+    const col = new Float32Array(pos.count * 3);
+    const sand = new THREE.Color(0xdcbb82), sandDark = new THREE.Color(0xc9a46b), green = new THREE.Color(0x5d7f45), greenDark = new THREE.Color(0x4a6b3a);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      const d = outside(x, z);
+      const n = noise(x / 60, z / 60);
+      const desert = desertAt(x, z) ? 1 : 0;
+      // dunes rise out of the desert away from the edge (never into the playable area)
+      const rise = Math.min(1, Math.max(0, (d - 30) / 120));
+      const y = -0.12 + rise * (desert ? 3 + n * 14 + noise(x / 23, z / 23) * 5 : n * 4);
+      pos.setY(i, y);
+      if (desert) c.copy(sand).lerp(sandDark, noise(x / 31, z / 31) * 0.8);
+      else c.copy(green).lerp(greenDark, n);
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true });
+    const ground = new THREE.Mesh(g, groundMat);
+    ground.receiveShadow = false;
+    ground.matrixAutoUpdate = false;
+    group.add(ground);
+    disposables.push(g, groundMat);
+    const groundY = (x: number, z: number) => {
+      const d = outside(x, z), n = noise(x / 60, z / 60);
+      const rise = Math.min(1, Math.max(0, (d - 30) / 120));
+      return -0.12 + rise * (desertAt(x, z) ? 3 + n * 14 + noise(x / 23, z / 23) * 5 : n * 4);
+    };
+
+    // ---- the woods: a deep band of trees along the north and east ----
+    const trunk = new THREE.CylinderGeometry(0.25, 0.4, 2.6, 5);
+    trunk.translate(0, 1.3, 0);
+    const crown = new THREE.IcosahedronGeometry(2.6, 0);
+    crown.translate(0, 4.4, 0);
+    const pine = new THREE.ConeGeometry(2.2, 6.5, 6);
+    pine.translate(0, 5.2, 0);
+    const GREENS = [0x3f7a3a, 0x4d8a42, 0x356b35, 0x5a9446];
+    let k = 0;
+    const tree = (x: number, z: number) => {
+      const y = groundY(x, z), s = 0.8 + hash(k + 3) * 0.9, ry = hash(k + 7) * 6;
+      geo('faceted').add(trunk, trs(x, y, z, ry, s, s, s), 0x6b4a2c);
+      geo('faceted').add(hash(k + 11) < 0.45 ? pine : crown, trs(x, y, z, ry, s, s * (0.9 + hash(k + 13) * 0.4), s), GREENS[k % GREENS.length]);
+      k++;
+    };
+    const cityN = (x: number) => x > -90; // the Hill and downtown back onto city blocks: trees start further out
+    for (let x = -205; x < b.maxX + 280; x += 8) {
+      for (let z = b.minZ - 14; z > b.minZ - 320; z -= 8) {
+        const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
+        k++;
+        const d = b.minZ - pz;
+        if (cityN(px) && d < 75) continue;
+        if (hash(k * 5) > 0.75 - d / 900) continue;
+        tree(px, pz);
+      }
+    }
+    for (let x = b.maxX + 75; x < b.maxX + 320; x += 8) {
+      for (let z = b.minZ - 14; z < 61; z += 8) {
+        const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
+        k++;
+        if (hash(k * 5) > 0.7 - (px - b.maxX) / 900) continue;
+        tree(px, pz);
+      }
+    }
+
+    // ---- the desert: rocks out on the dunes, flat-topped mesas on the horizon ----
+    const rock = new THREE.IcosahedronGeometry(1, 0);
+    const ROCKS = [0xb48a5a, 0xa47a4e, 0xc49a68];
+    for (let i = 0; i < 220; i++) {
+      const x = b.minX - 25 - hash(i * 7 + 1) * 700, z = b.minZ - 200 + hash(i * 7 + 2) * (b.maxZ - b.minZ + 160);
+      const r = 1.2 + hash(i * 7 + 3) * 4.5;
+      geo('faceted').add(rock, trs(x, groundY(x, z) - r * 0.3, z, hash(i) * 6, r * 1.3, r * 0.8, r), ROCKS[i % 3]);
+    }
+    for (let i = 0; i < 70; i++) {
+      // north-west corner of the desert too
+      const x = -205 - hash(i * 5 + 300) * 600, z = b.minZ - 20 - hash(i * 5 + 301) * 500;
+      const r = 1.5 + hash(i * 5 + 302) * 4;
+      geo('faceted').add(rock, trs(x, groundY(x, z) - r * 0.3, z, hash(i) * 6, r * 1.3, r * 0.8, r), ROCKS[i % 3]);
+    }
+    const mesa = new THREE.CylinderGeometry(1, 1.25, 1, 7);
+    mesa.translate(0, 0.5, 0);
+    const MESAS = [0xb07a4c, 0xa56f45, 0xbd8657];
+    for (let i = 0; i < 16; i++) {
+      const a = Math.PI * (0.55 + hash(i + 900) * 0.75); // spread around the west
+      const dist = 520 + hash(i + 910) * 700;
+      const x = b.minX + Math.cos(a) * dist, z = -20 + Math.sin(a) * dist * -1;
+      if (z > b.maxZ - 30) continue;
+      const r = 40 + hash(i + 920) * 90, h = 30 + hash(i + 930) * 60;
+      geo('faceted').add(mesa, trs(x, -2, z, hash(i + 940) * 6, r, h, r * (0.6 + hash(i + 950) * 0.5)), MESAS[i % 3]);
+      geo('faceted').add(mesa, trs(x, -2 + h * 0.62, z, hash(i + 940) * 6, r * 1.02, h * 0.06, r * (0.6 + hash(i + 950) * 0.5) * 1.02), 0x8f5f3a);
+    }
+    for (const gq of [trunk, crown, pine, rock, mesa]) gq.dispose();
+  }
+
   /** Distant towers beyond the map edge, for depth. */
   function skyline(): void {
     const ccx = (b.minX + b.maxX) / 2, ccz = (b.minZ + b.maxZ) / 2;
@@ -855,7 +995,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       const out = 70 + hash(i + 700) * 70;
       const r = 32 + hash(i + 800) * 30;
       const hill = new THREE.IcosahedronGeometry(1, 2);
-      geo('faceted').add(hill, trs(c.x + ox * out, -r * 0.4, c.z + oz * out, hash(i) * 6, r, r * (0.5 + hash(i + 820) * 0.3), r), [0x3f6a38, 0x4a7a40, 0x36603a][i % 3]);
+      const desertSide = backdrop.w === 'desert' && (c.x < b.minX + 0.01 || c.x < -205);
+      const tones = desertSide ? [0xc9a46b, 0xb8935c, 0xd4b077] : [0x3f6a38, 0x4a7a40, 0x36603a];
+      geo('faceted').add(hill, trs(c.x + ox * out, -r * 0.4, c.z + oz * out, hash(i) * 6, r, r * (0.5 + hash(i + 820) * 0.3), r), tones[i % 3]);
       hill.dispose();
     });
     const nearCliff = (x: number, z: number) => cliffs.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < 130 * 130);
@@ -940,21 +1082,103 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       disposables.push(sg, sm);
     }
 
-    // the sun or moon, where the shadow-casting light comes from
-    const moonTex = LIGHTING.sun.body === 'sun' ? sunTexture() : moonTexture();
-    const moonMat = new THREE.SpriteMaterial({
-      map: moonTex, fog: false, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    const moon = new THREE.Sprite(moonMat);
-    const [mx, my, mz] = LIGHTING.sun.dir;
-    const len = Math.hypot(mx, my, mz);
-    moon.position.set((mx / len) * 90, (my / len) * 90, (mz / len) * 90);
-    moon.scale.setScalar(LIGHTING.sun.body === 'sun' ? 30 : 16);
-    moon.renderOrder = -98;
-    moon.frustumCulled = false;
-    mesh.add(moon);
-    disposables.push(moonTex, moonMat);
+    // the sun or moon, where the shadow-casting light comes from. The light itself is high
+    // (short shadows, readable streets); the disc is drawn lower in the same direction so you
+    // actually see it in the sky from the third-person camera.
+    // (all of it is drawn in the opaque pass, before the town, so buildings always cover it:
+    // the halo adds light, the sun disc and the clouds are cut-outs)
+    const day = LIGHTING.sun.body === 'sun';
+    const [mx, , mz] = LIGHTING.sun.dir;
+    const az = Math.atan2(mx, mz);
+    const elev = day ? 0.36 : 0.5; // radians above the horizon
+    const at = new THREE.Vector3(Math.sin(az) * Math.cos(elev) * 90, Math.sin(elev) * 90, Math.cos(az) * Math.cos(elev) * 90);
+    const skySprite = (map: THREE.Texture, size: number, order: number, additive: boolean) => {
+      const m = new THREE.SpriteMaterial({
+        map, fog: false, depthTest: false, depthWrite: false, transparent: false,
+        blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, alphaTest: additive ? 0 : 0.5,
+      });
+      const sp = new THREE.Sprite(m);
+      sp.position.copy(at);
+      sp.scale.setScalar(size);
+      sp.renderOrder = order;
+      sp.frustumCulled = false;
+      mesh.add(sp);
+      disposables.push(map, m);
+    };
+    if (day) {
+      skySprite(sunHaloTexture(), 46, -99, true);
+      skySprite(sunTexture(), 26, -98, false);
+    } else {
+      skySprite(moonTexture(), 16, -98, true);
+    }
+
+    // puffy cartoon clouds around the horizon (in front of the sun, behind the town)
+    if (day) {
+      const clouds = new THREE.Group();
+      clouds.name = 'clouds';
+      const texes = [0, 1, 2, 3].map((v) => cloudTexture(v));
+      const mats = texes.map((t) => new THREE.SpriteMaterial({ map: t, fog: false, depthTest: false, depthWrite: false, transparent: false, alphaTest: 0.5 }));
+      disposables.push(...texes, ...mats);
+      for (let i = 0; i < 26; i++) {
+        const a = (i / 26) * Math.PI * 2 + hash(i * 5 + 11) * 0.22;
+        const e = 0.07 + hash(i * 5 + 12) ** 1.6 * 0.42;
+        const r = 88;
+        const sp = new THREE.Sprite(mats[i % mats.length]);
+        sp.position.set(Math.sin(a) * Math.cos(e) * r, Math.sin(e) * r, Math.cos(a) * Math.cos(e) * r);
+        const w = 20 + hash(i * 5 + 13) * 22;
+        sp.scale.set(w, w * 0.42, 1);
+        sp.renderOrder = -97;
+        sp.frustumCulled = false;
+        clouds.add(sp);
+      }
+      mesh.add(clouds);
+    }
     return mesh;
+  }
+
+  /** A puffy cartoon cloud: white lumps on a flat bottom, a soft grey belly, a thin ink rim. */
+  function cloudTexture(variant: number): THREE.CanvasTexture {
+    const w = 512, h = 216;
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const g = cv.getContext('2d')!;
+    const base = h * 0.8;
+    const lumps: Array<[number, number, number]> = [];
+    const n = 5 + (variant % 3);
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const x = w * (0.12 + 0.76 * t) + (hash(variant * 31 + i) - 0.5) * 30;
+      const r = h * (0.2 + 0.26 * Math.sin(Math.PI * t) + hash(variant * 17 + i) * 0.1);
+      lumps.push([x, base - r * 0.6, r]);
+    }
+    const shape = (grow: number) => {
+      g.beginPath();
+      for (const [x, y, r] of lumps) {
+        g.moveTo(x + r + grow, y);
+        g.arc(x, y, r + grow, 0, Math.PI * 2);
+      }
+      g.rect(lumps[0][0], base - h * 0.18 - grow, lumps[n - 1][0] - lumps[0][0], h * 0.18 + grow * 2);
+    };
+    // ink rim, then the body clipped flat at the bottom
+    g.save();
+    g.beginPath();
+    g.rect(0, 0, w, base + 3);
+    g.clip();
+    g.fillStyle = '#7f8ea6';
+    shape(4);
+    g.fill();
+    const body = g.createLinearGradient(0, 0, 0, base);
+    body.addColorStop(0, '#ffffff');
+    body.addColorStop(0.62, '#f4f7fb');
+    body.addColorStop(1, '#c9d5e6');
+    g.fillStyle = body;
+    shape(0);
+    g.fill();
+    g.restore();
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
   }
 
   /** Open cone from a lamp head down to the ground, bright at the top and fading to nothing. */
@@ -1007,19 +1231,41 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     }
   }
 
-  function sunTexture(): THREE.CanvasTexture {
+  /** Soft glow around the sun (added to the sky). */
+  function sunHaloTexture(): THREE.CanvasTexture {
     const s = 256;
     const cv = document.createElement('canvas');
     cv.width = cv.height = s;
     const g = cv.getContext('2d')!;
     const halo = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-    halo.addColorStop(0, 'rgba(255,255,250,1)');
-    halo.addColorStop(0.09, 'rgba(255,250,232,0.95)');
-    halo.addColorStop(0.13, 'rgba(255,240,205,0.45)');
-    halo.addColorStop(0.35, 'rgba(255,230,190,0.12)');
-    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    halo.addColorStop(0, 'rgb(150,130,90)');
+    halo.addColorStop(0.3, 'rgb(70,60,40)');
+    halo.addColorStop(0.65, 'rgb(18,15,10)');
+    halo.addColorStop(1, 'rgb(0,0,0)');
     g.fillStyle = halo;
     g.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  /** The sun: a solid cartoon disc with an ink rim (a cut-out). */
+  function sunTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = s;
+    const g = cv.getContext('2d')!;
+    g.beginPath();
+    g.arc(s / 2, s / 2, s * 0.4, 0, Math.PI * 2);
+    g.fillStyle = '#fff6d2';
+    g.fill();
+    g.lineWidth = s * 0.03;
+    g.strokeStyle = '#e0a63a';
+    g.stroke();
+    g.beginPath();
+    g.arc(s / 2 - s * 0.08, s / 2 - s * 0.08, s * 0.22, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.fill();
     const t = new THREE.CanvasTexture(cv);
     t.colorSpace = THREE.SRGBColorSpace;
     return t;

@@ -180,10 +180,24 @@ land in `tools/out/`.
 
 ---
 
+## GRAMS, AJ'S and TRAP
+
+Premium cosmetics: GRAMS (the currency), AJ'S (the store, also a walk-in building on Porch St
+with AJ at the register) and TRAP (your items). All cosmetic, nothing changes gameplay. To try
+it locally with fake payments:
+
+```bash
+ECONOMY_TEST_PAYMENTS=1 npm run dev
+```
+
+Setup, Stripe, the security model, testing and deployment: [docs/ECONOMY.md](docs/ECONOMY.md).
+
 ## Deploying
 
-Nothing in this project depends on a paid service, an account system or a database. You need
-somewhere to run **one Node.js process that accepts WebSocket connections**. Hosting prices
+The game itself needs no paid service and no database. You need somewhere to run **one Node.js
+process that accepts WebSocket connections**. Accounts and GRAMS are kept in a data file on that
+server (put it on persistent storage), and taking real money needs a Stripe account: see
+[docs/ECONOMY.md](docs/ECONOMY.md). Hosting prices
 and free tiers change, so check your provider before choosing; none is assumed here.
 
 ### Option A: one service (simplest)

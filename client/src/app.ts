@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { botAppearance, type Appearance } from '@shared/config/appearance';
+import { botAppearance, decodeAppearance, encodeAppearance, isPremiumOption, type Appearance } from '@shared/config/appearance';
+import { unlocksOf, type StoreCategory } from '@shared/config/economy';
 import type { ModeId } from '@shared/config/game';
 import type { Loadout } from '@shared/config/weapons';
 import type { BotDifficulty } from '@shared/protocol';
@@ -20,9 +21,13 @@ import { mapForMode } from '@shared/map/maps';
 import { InputManager } from './input/inputManager';
 import { TouchSource } from './input/touch';
 import type { DeviceKind } from './input/types';
+import { AccountService } from './net/account';
 import { LobbyConnection, NetClient, describeJoinError } from './net/online';
 import { LocalSession, type LocalSessionOptions, type Session } from './net/session';
 import { CharacterScreen } from './ui/characterScreen';
+import { bindings } from './input/bindings';
+import { AjTalk } from './ui/ajTalk';
+import { AuthModal, GramsScreen, StoreScreen, TrapScreen } from './ui/economyScreens';
 import { LoadoutScreen } from './ui/loadoutScreen';
 import { LobbyScreen } from './ui/lobbyScreen';
 import { MainMenu } from './ui/mainMenu';
@@ -77,6 +82,18 @@ export class App {
   private lobbyScreen: LobbyScreen;
   private loadoutScreen: LoadoutScreen;
   private characterScreen: CharacterScreen;
+  /** GRAMS / AJ's / TRAP. */
+  readonly account = new AccountService();
+  private auth!: AuthModal;
+  private gramsScreen!: GramsScreen;
+  private storeScreen!: StoreScreen;
+  private trapScreen!: TrapScreen;
+  /** The signed-in account whose saved look has been put on already. */
+  private lookFrom: string | null = null;
+  /** Talking to AJ in free roam (his greeting and options). */
+  private ajTalk!: AjTalk;
+  /** A store screen was opened from AJ's counter: the walk resumes when it closes. */
+  private shopFromWorld = false;
   private settingsScreen: SettingsScreen;
   private pause: PauseMenu;
   private results: ResultsBar;
@@ -128,6 +145,11 @@ export class App {
       openCharacter: () => this.characterScreen.show(true),
       openLoadout: () => this.loadoutScreen.show(true),
       openSettings: () => this.settingsScreen.show(true),
+      openStore: () => this.openStore(),
+      openTrap: () => this.trapScreen.show(true),
+      openGrams: () => this.openGrams(),
+      signIn: () => this.auth.open(),
+      signOut: () => void this.account.logout(),
     });
     this.lobbyScreen = new LobbyScreen(ui, {
       setReady: (r) => this.lobby?.setReady(r),
@@ -143,6 +165,7 @@ export class App {
       resume: () => this.setPaused(false),
       openLoadout: () => this.loadoutScreen.show(true),
       openSettings: () => this.settingsScreen.show(true),
+      openTrap: () => this.trapScreen.show(true),
       leave: () => void this.leaveMatch(),
       endMatch: () => {
         this.lobby?.endMatch();
@@ -163,10 +186,37 @@ export class App {
     this.characterScreen = new CharacterScreen(ui, {
       profile: this.profile,
       build: (look) => this.makeCharacter(0, 0, look),
-      // a kept look goes to the lobby right away (it shows from the next match)
-      onKeep: (look) => this.lobby?.setLook(look),
+      // a kept look goes to the lobby right away (it shows from the next match) and to the account
+      onKeep: (look) => {
+        this.lobby?.setLook(look);
+        if (this.account.signedIn) void this.account.equip(encodeAppearance(look)).catch(() => undefined);
+      },
       onClose: () => this.characterScreen.show(false),
+      owns: (field, option) => this.ownedKeys().has(`${field}:${option}`),
+      openStore: () => this.openStore(),
+      openTrap: () => this.trapScreen.show(true),
     });
+    // ---- GRAMS, AJ's, TRAP ----
+    const ecoDeps = {
+      account: this.account,
+      profile: this.profile,
+      build: (look: Appearance) => this.makeCharacter(0, 0, look),
+      applyLook: (look: Appearance) => this.applyLook(look),
+    };
+    this.auth = new AuthModal(ui, this.account);
+    this.gramsScreen = new GramsScreen(ui, { ...ecoDeps, auth: this.auth });
+    const openGrams = () => this.openGrams();
+    this.storeScreen = new StoreScreen(ui, { ...ecoDeps, auth: this.auth, openGrams, openTrap: () => this.trapScreen.show(true) });
+    this.trapScreen = new TrapScreen(ui, { ...ecoDeps, auth: this.auth, openGrams, openStore: () => this.openStore() });
+    this.ajTalk = new AjTalk(ui, {
+      shop: () => this.fromCounter(() => this.openStore()),
+      grams: () => this.fromCounter(() => this.openGrams()),
+      preview: () => this.fromCounter(() => this.openStore('outfits')),
+      leave: () => this.resumeFromCounter(),
+    }, () => this.game?.talkToAj());
+    this.storeScreen.setWalkIn(() => this.startRoam(), () => !this.game && !this.lobby);
+    this.account.onChange(() => this.onAccountChange());
+    void this.account.init();
     // the preview starts with the stand-in figure if the models are still downloading
     void this.assetsReady.then(() => this.characterScreen.rebuild());
 
@@ -176,6 +226,11 @@ export class App {
     this.input.attachTouch(this.touch);
     this.touch.onFirstTouch = () => this.input.noteDevice('touch');
     this.input.onDeviceChange((d) => this.onDeviceChange(d));
+    // new key / button assignments: every on-screen glyph follows
+    bindings.onChange(() => {
+      this.onDeviceChange(this.input.device);
+      this.game?.hud.setDevice(this.input.device, true);
+    });
     this.input.gamepad.onConnection = (connected, kind) => {
       this.toasts.show(connected ? `${deviceName(kind)} connected.` : 'Controller disconnected.', connected ? 'good' : 'info', 2600);
     };
@@ -192,6 +247,85 @@ export class App {
     }
     this.setState('menu');
     this.raf = requestAnimationFrame(this.backdropFrame);
+  }
+
+  // ------------------------------------------------------------------ GRAMS / AJ's / TRAP
+  private ownedKeys(): Set<string> {
+    return unlocksOf(this.account.account?.owned ?? [], isPremiumOption);
+  }
+
+  openStore(category?: StoreCategory): void {
+    this.storeScreen.openAt(category);
+  }
+
+  openGrams(): void {
+    if (!this.account.signedIn) {
+      this.auth.open(() => this.gramsScreen.show(true), 'register');
+      return;
+    }
+    this.gramsScreen.show(true);
+  }
+
+  // ------------------------------------------------------------------ free roam + AJ at the counter
+  /** Greater Whoopa Towne to yourself, starting out front of AJ'S (no bots, no clock). */
+  startRoam(): void {
+    this.storeScreen.show(false);
+    this.trapScreen.show(false);
+    this.gramsScreen.show(false);
+    this.enterFullscreen();
+    this.menu.commitName();
+    this.startGame(new LocalSession(this.R, {
+      mode: 'tdm', roam: true, name: this.profile.name, loadout: this.profile.loadout, look: this.profile.look, seed: this.debug.seed,
+    }));
+    this.toasts.show("Free roam: walk into AJ'S and talk to AJ at the register.", 'info', 4200);
+  }
+
+  /** At the counter: the game holds still while AJ talks. */
+  private openAjTalk(): void {
+    const game = this.game;
+    if (!game || game.paused || this.matchOver) return;
+    game.paused = true;
+    this.input.setGameplay(false);
+    this.input.kbm.releaseLock();
+    this.ajTalk.open();
+    this.updateClickToPlay();
+  }
+
+  private fromCounter(open: () => void): void {
+    this.ajTalk.close();
+    this.shopFromWorld = true;
+    open();
+  }
+
+  private resumeFromCounter(): void {
+    this.ajTalk.close();
+    this.shopFromWorld = false;
+    if (this.game?.paused) this.setPaused(false);
+  }
+
+  /** Any store / sign-in screen still open? */
+  private ecoOpen(): boolean {
+    return !!this.ui.querySelector('.screen.eco:not(.hidden), .eco-auth-wrap:not(.hidden)');
+  }
+
+  /** Wear a look: the profile keeps it, the lobby gets it for the next match. */
+  private applyLook(look: Appearance): void {
+    this.profile.setLook(look);
+    this.lobby?.setLook(look);
+    this.game?.setMyLook(look);
+    this.characterScreen.rebuild();
+  }
+
+  private onAccountChange(): void {
+    const a = this.account.account;
+    this.menu.setAccount(a ? { username: a.username, balance: a.balance } : null);
+    if (this.net) this.net.token = this.account.session;
+    // just signed in: put on the look saved on the account (from any device)
+    if (a && this.lookFrom !== a.username) {
+      this.lookFrom = a.username;
+      if (a.look) this.applyLook(decodeAppearance(a.look, this.profile.look));
+    }
+    if (!a) this.lookFrom = null;
   }
 
   // ------------------------------------------------------------------ state
@@ -213,6 +347,7 @@ export class App {
 
   /** The player picked up a different input device: swap prompts and on-screen controls. */
   private onDeviceChange(device: DeviceKind): void {
+    if (device === 'xbox' || device === 'playstation' || device === 'gamepad') this.settingsScreen.padKind = device;
     document.body.dataset.device = device;
     document.body.classList.toggle('is-touch', device === 'touch');
     this.menu.setDevice(device);
@@ -297,6 +432,7 @@ export class App {
     this.menu.setBusy(true, kind === 'join' ? 'Joining lobby…' : 'Finding a lobby…');
     try {
       this.net ??= new NetClient();
+      this.net.token = this.account.session;
       const { loadout, look, squads } = this.profile;
       const conn =
         kind === 'quick' ? await this.net.quickPlay(mode, name, loadout, look, squads)
@@ -365,7 +501,7 @@ export class App {
   private startGame(session: Session): void {
     this.endGame();
     this.audio.unlock();
-    this.stage.useMap(mapForMode(session.mode), this.assets);
+    this.stage.useMap(session.map ?? mapForMode(session.mode), this.assets);
     this.session = session;
     this.matchOver = false;
     const game = new Game({
@@ -385,7 +521,11 @@ export class App {
     game.onPause = () => this.togglePause();
     game.onFrame = () => {
       if (!this.input.ctx.gameplay) this.nav.handle(this.input.frame);
+      this.ajTalk.prompt(game.canTalkToAj, this.input.device);
+      // shopping from AJ's counter: back to walking around once the last store screen closes
+      if (this.shopFromWorld && !this.ajTalk.visible && !this.ecoOpen()) this.resumeFromCounter();
     };
+    game.onTalkToAj = () => this.openAjTalk();
     game.onLeaveRequest = () => void this.leaveMatch();
     game.onMatchOver = () => {
       this.matchOver = true;
@@ -418,6 +558,9 @@ export class App {
   }
 
   private endGame(): void {
+    this.ajTalk?.close();
+    this.ajTalk?.prompt(false, '');
+    this.shopFromWorld = false;
     if (this.game) {
       this.game.dispose();
       this.game = null;
@@ -445,6 +588,8 @@ export class App {
   // ------------------------------------------------------------------ pause & pointer lock
   togglePause(): void {
     if (!this.game || this.matchOver) return;
+    // at AJ's counter / in the store: Escape (or B) backs out of those instead
+    if (this.ajTalk.visible || this.shopFromWorld || this.ecoOpen()) return;
     if (this.loadoutScreen.visible) {
       this.loadoutScreen.show(false);
       return;

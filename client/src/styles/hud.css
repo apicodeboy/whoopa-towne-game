@@ -604,9 +604,19 @@
 }
 .respawn .who {
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 26px;
   letter-spacing: 1.5px;
   color: var(--bad);
+}
+.respawn .who small {
+  display: block;
+  margin-top: 4px;
+  font: 600 14px 'Inter', var(--font);
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.respawn .who small b {
+  color: #fff;
 }
 .respawn .sub {
   font-size: 10px;
@@ -1163,4 +1173,116 @@
 .hud[data-device='touch'] .minimap-box {
   transform: scale(0.62);
   transform-origin: top left;
+}
+
+/* ---------------------------------------------------------------- damage numbers */
+.dmg-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.dmg-pop {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font: 400 26px/1 var(--font-display);
+  color: #fff;
+  -webkit-text-stroke: 1.5px #0a0a0d;
+  text-shadow: 0 3px 0 #0a0a0d;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.dmg-pop.head {
+  color: #ffd23f;
+  font-size: 31px;
+}
+.dmg-pop.kill {
+  color: #ff4d3d;
+  font-size: 34px;
+}
+
+/* ---------------------------------------------------------------- equipped weapon picture (bottom left) */
+.gunpic {
+  position: absolute;
+  left: calc(18px + var(--safe-left));
+  bottom: calc(112px + var(--safe-bottom));
+  width: 250px;
+  height: 92px;
+  padding: 6px 12px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.gunpic .gp-img {
+  position: absolute;
+  right: 6px;
+  top: 2px;
+  width: 168px;
+  height: 84px;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.55));
+}
+.gunpic .gp-name {
+  position: absolute;
+  left: 12px;
+  bottom: 8px;
+  max-width: 120px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.05;
+  letter-spacing: 1px;
+}
+@media (max-height: 520px) {
+  .gunpic {
+    bottom: calc(84px + var(--safe-bottom));
+    width: 190px;
+    height: 64px;
+  }
+  .gunpic .gp-img {
+    width: 120px;
+    height: 60px;
+  }
+  .gunpic .gp-name {
+    font-size: 12px;
+  }
+}
+/* JUMP OFF THE PORCH: the armor box sits over the health, the gun goes above it */
+.hud[data-mode='porch'] .gunpic {
+  bottom: calc(176px + var(--safe-bottom));
+}
+@media (max-height: 520px) {
+  .hud[data-mode='porch'] .gunpic {
+    bottom: calc(140px + var(--safe-bottom));
+  }
+}
+
+/* ---------------------------------------------------------------- phones: the new pieces */
+/* gun picture: small, top left under the health (the bottom left is the move stick) */
+.hud[data-device='touch'] .gunpic,
+.hud[data-device='touch'][data-mode='porch'] .gunpic {
+  bottom: auto;
+  top: calc(162px + var(--safe-top));
+  left: calc(12px + var(--safe-left));
+  width: 150px;
+  height: 46px;
+  padding: 4px 8px;
+}
+.hud[data-device='touch'] .gunpic .gp-img {
+  right: 2px;
+  top: 1px;
+  width: 92px;
+  height: 44px;
+}
+.hud[data-device='touch'] .gunpic .gp-name {
+  left: 8px;
+  bottom: 5px;
+  max-width: 60px;
+  font-size: 9px;
+}
+.hud[data-device='touch'] .dmg-pop {
+  font-size: 20px;
 }

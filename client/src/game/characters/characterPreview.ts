@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { crewColorHex } from '@shared/config/crews';
-import { makePose, type CharacterVisual } from './characterTypes';
+import { makePose, type CharacterVisual, type HeldItem } from './characterTypes';
 
 /** Turn that shows the character's face three-quarters on. */
 const SHOWCASE_YAW = 0.55;
@@ -119,11 +119,20 @@ export class CharacterPreview {
     return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
   }
 
+  /** Something in the hands (weapon skin previews); null = relaxed, empty-handed. */
+  private held: HeldItem | null = null;
+
+  setHeld(item: HeldItem | null): void {
+    this.held = item;
+    this.pose.held = item ?? 'none';
+    this.visual?.setMenuIdle?.(!item);
+  }
+
   /** Shows a new character (the preview owns and disposes it from now on). */
   setCharacter(visual: CharacterVisual): void {
     this.visual?.dispose();
     this.visual = visual;
-    visual.setMenuIdle?.(true);
+    visual.setMenuIdle?.(!this.held);
     this.scene.add(visual.root);
     visual.setVisible(true);
     const f = visual.frame;

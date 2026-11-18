@@ -146,3 +146,24 @@
 body.is-touch .hud .killfeed {
   right: calc(12px + var(--safe-right));
 }
+
+/* JUMP OFF THE PORCH / free roam: search & pick up, heal (hold) */
+.tb.extra {
+  display: none;
+  width: 54px;
+  height: 54px;
+}
+.touch.extras .tb.extra {
+  display: flex;
+}
+.tb.use {
+  right: calc(240px + var(--safe-right));
+  bottom: calc(176px + var(--safe-bottom));
+  background: rgba(40, 110, 200, 0.55);
+}
+.tb.heal {
+  right: calc(240px + var(--safe-right));
+  bottom: calc(244px + var(--safe-bottom));
+  background: rgba(40, 160, 80, 0.6);
+  border-color: rgba(150, 255, 170, 0.85);
+}

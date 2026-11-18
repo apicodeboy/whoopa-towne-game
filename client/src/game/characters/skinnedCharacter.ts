@@ -6,8 +6,9 @@ import { approach, clamp, damp, lerp } from '@shared/math';
 import { CHARACTER_MESH, type Assets, type CharacterTemplate, type ModelTemplate } from '../assets';
 import { BALLOON_GRIP, type CharacterPose, type CharacterVisual, type HeldItem } from './characterTypes';
 import { LOOK_MATERIAL, weldedNormals, type Assembled, type LookBuilder } from './look/assemble';
-import { paint, paletteFor } from './look/palette';
+import { paint, paletteFor, printsFor } from './look/palette';
 import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
+import { applyWeaponSkin } from './weaponSkins';
 
 /** Target standing height of the model in meters (matches the gameplay capsule). */
 const HEIGHT = 1.8;
@@ -30,12 +31,13 @@ const FOREGRIP: Partial<Record<HeldItem, number>> = { ar: 0.7, smg: 0.66, shotgu
 
 const GUN_FIT: Record<string, { length: number; grip: number; muzzleNegZ: boolean; up: number }> = {
   // sized for the characters' stylized (short-armed) proportions
-  ar: { length: 0.8, grip: 0.42, muzzleNegZ: true, up: 0.03 },
-  smg: { length: 0.56, grip: 0.4, muzzleNegZ: false, up: 0.05 },
-  shotgun: { length: 0.86, grip: 0.36, muzzleNegZ: false, up: 0.02 },
-  pistol: { length: 0.24, grip: 0.2, muzzleNegZ: false, up: 0.04 },
+  // (a touch oversized, like most third-person shooters, so the gun reads past the body)
+  ar: { length: 0.9, grip: 0.42, muzzleNegZ: true, up: 0.03 },
+  smg: { length: 0.62, grip: 0.4, muzzleNegZ: false, up: 0.05 },
+  shotgun: { length: 0.95, grip: 0.36, muzzleNegZ: false, up: 0.02 },
+  pistol: { length: 0.27, grip: 0.2, muzzleNegZ: false, up: 0.04 },
   // no sniper model yet: the rifle, longer (placeholder art)
-  sniper: { length: 1.0, grip: 0.38, muzzleNegZ: true, up: 0.035 },
+  sniper: { length: 1.1, grip: 0.38, muzzleNegZ: true, up: 0.035 },
   grenade: { length: 0.11, grip: 0.5, muzzleNegZ: true, up: 0 },
 };
 
@@ -143,6 +145,8 @@ const _v4 = new THREE.Vector3();
 const _v5 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+/** Scratch for the NPC wave (rotateBoneWorld uses _q2 / _q3 itself). */
+const _qw = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
 const _e1 = new THREE.Euler();
 const _grip = new THREE.Vector3(BALLOON_GRIP.x, BALLOON_GRIP.y, BALLOON_GRIP.z);
@@ -166,9 +170,9 @@ function outlineMaterial(width: number): THREE.MeshBasicMaterial {
     shader.uniforms.uOutline = uniform;
     // push along the welded normal (the flat-shaded mesh's own normals would tear the shell open)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uOutline;\nattribute vec3 smoothNormal;')
+      .replace('#include <common>', '#include <common>\nuniform float uOutline;\nattribute vec3 smoothNormal;\nattribute float ink;')
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = smoothNormal;')
-      .replace('#include <skinning_vertex>', '#include <skinning_vertex>\n\ttransformed += normalize(objectNormal) * uOutline;');
+      .replace('#include <skinning_vertex>', '#include <skinning_vertex>\n\ttransformed += normalize(objectNormal) * uOutline * ink;');
   };
   m.customProgramCacheKey = () => 'ink-outline';
   return m;
@@ -305,6 +309,8 @@ export class SkinnedCharacter implements CharacterVisual {
   private sprintT = 0;
   private crouchT = 0;
   private lowT = 0;
+  /** 0..1 blend from the hip hold to the aimed (shouldered) hold. */
+  private aimT = 0;
   private shootT = 0;
   private recoil = 0;
   private flinch = 0;
@@ -470,7 +476,7 @@ export class SkinnedCharacter implements CharacterVisual {
   }
 
   private repaint(): void {
-    paint(this.colors.array as Float32Array, this.built.paint, paletteFor(this.look, this.team));
+    paint(this.colors.array as Float32Array, this.built.paint, paletteFor(this.look, this.team), this.built.rigPos, printsFor(this.look));
     this.colors.needsUpdate = true;
   }
 
@@ -515,6 +521,79 @@ export class SkinnedCharacter implements CharacterVisual {
 
   setVisible(v: boolean): void {
     this.root.visible = v;
+  }
+
+  // ------------------------------------------------------------------ NPCs (AJ behind the counter)
+  private lookTarget: THREE.Vector3 | null = null;
+  private lookYaw = 0;
+  private lookPitch = 0;
+  private waveT = -1;
+
+  /** NPC idle: turn the head (and a little of the chest) toward a world point, or null to look ahead. */
+  lookAt(target: THREE.Vector3 | null): void {
+    this.lookTarget = target ? (this.lookTarget ?? new THREE.Vector3()).copy(target) : null;
+  }
+
+  /** NPC idle: a wave with the right hand. */
+  wave(): void {
+    if (this.waveT < 0 || this.waveT > 0.7) this.waveT = 0;
+  }
+
+  /** Head turn and wave on top of the relaxed idle clip (NPCs only; players never use it). */
+  private npcLayer(dt: number, yaw: number): void {
+    let wantYaw = 0, wantPitch = 0;
+    if (this.lookTarget && this.head) {
+      const head = this.head.getWorldPosition(_v1);
+      const dx = this.lookTarget.x - head.x, dz = this.lookTarget.z - head.z;
+      // relative to where the body faces (forward at yaw 0 is -Z)
+      const rel = Math.atan2(-dx, -dz) - yaw;
+      wantYaw = clamp(Math.atan2(Math.sin(rel), Math.cos(rel)), -1.15, 1.15);
+      wantPitch = clamp(Math.atan2(this.lookTarget.y - head.y, Math.hypot(dx, dz)), -0.45, 0.35);
+    }
+    const k = damp(5, dt);
+    this.lookYaw = lerp(this.lookYaw, wantYaw, k);
+    this.lookPitch = lerp(this.lookPitch, wantPitch, k);
+    const up = _v4.set(0, 1, 0);
+    if (this.chest && Math.abs(this.lookYaw) > 1e-3) {
+      _q1.setFromAxisAngle(up, this.lookYaw * 0.3);
+      rotateBoneWorld(this.chest, _q1);
+    }
+    if (this.head) {
+      _q1.setFromAxisAngle(up, this.lookYaw * 0.7);
+      rotateBoneWorld(this.head, _q1);
+      const a = yaw + this.lookYaw;
+      _q1.setFromAxisAngle(_v5.set(Math.cos(a), 0, -Math.sin(a)), this.lookPitch);
+      rotateBoneWorld(this.head, _q1);
+    }
+    // the wave: arm up and out, the forearm swinging side to side
+    const arm = this.arms.R;
+    if (this.waveT >= 0 && arm) {
+      this.waveT += dt / 1.9;
+      if (this.waveT >= 1) {
+        this.waveT = -1;
+        return;
+      }
+      const t = this.waveT;
+      const e = Math.min(1, t / 0.18, (1 - t) / 0.2);
+      const env = e * e * (3 - 2 * e);
+      const right = _v5.set(Math.cos(yaw), 0, -Math.sin(yaw));
+      const fwd = _v2.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+      const sh = arm.upper.getWorldPosition(_v1);
+      const el = arm.lower.getWorldPosition(new THREE.Vector3());
+      const cur = el.clone().sub(sh).normalize();
+      const want = new THREE.Vector3().addScaledVector(right, 0.85).addScaledVector(up, 0.35).addScaledVector(fwd, 0.25).normalize();
+      _q1.setFromUnitVectors(cur, want);
+      _qw.identity().slerp(_q1, env);
+      rotateBoneWorld(arm.upper, _qw);
+      const el2 = arm.lower.getWorldPosition(new THREE.Vector3());
+      const wr = arm.wrist.getWorldPosition(new THREE.Vector3());
+      const fore = wr.sub(el2).normalize();
+      const swing = Math.sin(t * Math.PI * 7) * 0.45;
+      const wantF = new THREE.Vector3().addScaledVector(up, 1).addScaledVector(right, swing).addScaledVector(fwd, 0.15).normalize();
+      _q1.setFromUnitVectors(fore, wantF);
+      _qw.identity().slerp(_q1, env);
+      rotateBoneWorld(arm.lower, _qw);
+    }
   }
 
   /** Stands in a relaxed idle with no weapon (menus only). */
@@ -577,6 +656,8 @@ export class SkinnedCharacter implements CharacterVisual {
       return;
     }
     const g = template.root.clone(true);
+    // AJ's wrap (a material swap only: same gun, same stats)
+    if (key !== 'grenade') applyWeaponSkin(g, this.look.weaponSkin, template.size);
     const s = fit.length / template.size.z;
     g.scale.setScalar(s);
     // template: long axis on +Z, origin at bottom center. We want the barrel on -Z and the grip at the origin.
@@ -592,7 +673,13 @@ export class SkinnedCharacter implements CharacterVisual {
   update(dt: number, pose: CharacterPose, visible = true): void {
     this.root.position.set(pose.x, pose.y, pose.z);
     this.root.rotation.y = pose.yaw;
-    this.setHeld(pose.held);
+    // using a healing item: the gun is put away while the hands work
+    const healKind = pose.alive && pose.heal !== undefined && pose.heal >= 0 ? pose.heal : -1;
+    this.setHeld(healKind >= 0 ? 'none' : pose.held);
+    if (healKind < 0) {
+      this.healT = 0;
+      if (this.healProp) this.healProp.visible = false;
+    }
 
     // off screen: skip the animation work and catch up when the character is seen again
     if (!visible) {
@@ -616,6 +703,7 @@ export class SkinnedCharacter implements CharacterVisual {
     if (this.menuIdle) {
       for (const a of this.all) a.setEffectiveWeight(a === this.calm ? 1 : 0);
       this.mixer.update(dt);
+      this.npcLayer(dt, pose.yaw);
       return;
     }
     if (pose.skydive) {
@@ -644,7 +732,7 @@ export class SkinnedCharacter implements CharacterVisual {
     const mvF = -pose.vx * sinY - pose.vz * cosY;
     const mvR = pose.vx * cosY - pose.vz * sinY;
     const moving = speed > 0.35;
-    const held = pose.held;
+    const held: HeldItem = healKind >= 0 ? 'none' : pose.held;
     const twoHand = held === 'ar' || held === 'smg' || held === 'shotgun' || held === 'sniper';
     const pistol = held === 'pistol';
     const armed = twoHand || pistol;
@@ -654,6 +742,7 @@ export class SkinnedCharacter implements CharacterVisual {
     this.sprintT = approach(this.sprintT, pose.sprinting && speed > 5.6 ? 1 : 0, dt * 6);
     this.crouchT = approach(this.crouchT, pose.crouching ? 1 : 0, dt * 7);
     this.lowT = approach(this.lowT, !armed && !unarmed ? 1 : 0, dt * 8);
+    this.aimT = approach(this.aimT, pose.aiming && armed && this.sprintT < 0.5 ? 1 : 0, dt * 9);
     this.shootT = Math.max(0, this.shootT - dt * (unarmed ? 3.2 : 5));
     this.recoil = Math.max(0, this.recoil - dt * 11);
     this.flinch = Math.max(0, this.flinch - dt * 5);
@@ -818,9 +907,15 @@ export class SkinnedCharacter implements CharacterVisual {
       const q = this.gunMount.quaternion;
       const rq = this.root.quaternion;
       const sh = this.root.worldToLocal(this.arms.R.upper.getWorldPosition(new THREE.Vector3()));
-      // long guns sit in front of the right side of the chest, a little across the body; a
-      // pistol is held out at arm's length
-      const want = new THREE.Vector3(twoHand ? -0.1 : -0.02, twoHand ? -0.14 : -0.05, twoHand ? -0.27 : -0.38).applyQuaternion(q).add(sh);
+      // from the hip a long gun is held out on the right side (so it shows past the body from
+      // the over-the-shoulder camera); aiming brings it up into the shoulder at cheek height.
+      // A pistol is held out at arm's length, up at eye level when aiming.
+      const a = this.aimT * this.aimT * (3 - 2 * this.aimT);
+      const want = new THREE.Vector3(
+        lerp(twoHand ? 0.07 : -0.02, twoHand ? -0.02 : -0.1, a),
+        lerp(twoHand ? -0.16 : -0.06, twoHand ? 0.01 : 0.03, a),
+        lerp(twoHand ? -0.3 : -0.38, twoHand ? -0.24 : -0.46, a),
+      ).applyQuaternion(q).add(sh);
       want.addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(q), this.recoil * 0.05);
       // right hand to the grip (the wrist sits just behind it)...
       const back = new THREE.Vector3(0, -0.012, 0.055).applyQuaternion(q);
@@ -868,23 +963,167 @@ export class SkinnedCharacter implements CharacterVisual {
       this.gunMount.position.set(_v1.x, _v1.y, _v1.z - 0.04 + this.recoil * 0.04);
     }
 
-    // double jump: a quick front flip with the knees tucked, around the hips
-    if (pose.flip !== undefined && pose.flip >= 0) {
-      const f = clamp(pose.flip, 0, 1);
+    if (healKind >= 0) this.healPose(dt, healKind);
+
+    // roll (sprint + crouch): tucked up tight, once over forward around the middle of the body
+    if (pose.roll !== undefined && pose.roll >= 0) {
+      const f = clamp(pose.roll, 0, 1);
       const e = f * f * (3 - 2 * f);
-      const tuck = Math.sin(Math.PI * f);
+      const tuck = Math.min(1, Math.sin(Math.PI * f) * 1.6);
       this.legs.forEach((leg) => {
-        _q1.setFromAxisAngle(_v5, 1.4 * tuck);
+        _q1.setFromAxisAngle(_v5, 1.5 * tuck);
         rotateBoneWorld(leg.upper, _q1);
-        _q1.setFromAxisAngle(_v5, -2.0 * tuck);
+        _q1.setFromAxisAngle(_v5, -2.1 * tuck);
         rotateBoneWorld(leg.lower, _q1);
       });
+      if (this.spine) {
+        _q1.setFromAxisAngle(_v5, -0.7 * tuck);
+        rotateBoneWorld(this.spine, _q1);
+      }
+      if (this.head) {
+        _q1.setFromAxisAngle(_v5, -0.5 * tuck);
+        rotateBoneWorld(this.head, _q1);
+      }
       _q1.setFromAxisAngle(_v4.set(1, 0, 0), -Math.PI * 2 * e);
-      const hip = _v3.set(0, 0.95, 0);
+      const hip = _v3.set(0, 0.5, 0);
       this.model.quaternion.copy(_q1).multiply(_flip);
       this.model.position.copy(hip).sub(_v2.copy(hip).applyQuaternion(_q1));
       this.gunMount.visible = false;
       this.tilted = true;
+    } else if (pose.climb !== undefined && pose.climb >= 0) {
+      this.climbPose(clamp(pose.climb, 0, 1));
+    }
+  }
+
+  // ------------------------------------------------------------------ ledge
+  /**
+   * Pulling up onto a ledge: both hands up on the edge, the body rising past them, one knee
+   * coming up over the top, leaning in.
+   */
+  private climbPose(t: number): void {
+    const R = this.arms.R, L = this.arms.L;
+    const rq = this.root.quaternion;
+    const right = _v5.set(Math.cos(this.root.rotation.y), 0, -Math.sin(this.root.rotation.y));
+    // the edge drops past the body as it rises (the hands stay on it)
+    const edgeY = 2.05 - 1.25 * Math.min(1, t / 0.7);
+    for (const [arm, side] of [[R, 1], [L, -1]] as const) {
+      if (!arm) continue;
+      const hand = new THREE.Vector3(side * 0.22, edgeY, -0.42 + 0.15 * t);
+      reach(arm, this.root.localToWorld(hand), new THREE.Vector3(side * 1, -0.6, 0.6).applyQuaternion(rq));
+    }
+    if (this.spine) {
+      _q1.setFromAxisAngle(right, -0.45 * Math.sin(Math.PI * Math.min(1, t * 1.2)));
+      rotateBoneWorld(this.spine, _q1);
+    }
+    const knee = Math.sin(Math.PI * clamp((t - 0.25) / 0.75, 0, 1));
+    if (this.legs[0]) {
+      _q1.setFromAxisAngle(right, 1.3 * knee);
+      rotateBoneWorld(this.legs[0].upper, _q1);
+      _q1.setFromAxisAngle(right, -1.6 * knee);
+      rotateBoneWorld(this.legs[0].lower, _q1);
+    }
+    this.gunMount.visible = false;
+    this.tilted = true;
+  }
+
+  // ------------------------------------------------------------------ healing
+  private healT = 0;
+  private healProp: THREE.Group | null = null;
+  private healPropKind = -1;
+
+  /** The item in hand: a first-aid kit, a bandage roll or a drink bottle. */
+  private makeHealProp(kind: number): THREE.Group {
+    const g = new THREE.Group();
+    const mat = (c: number, rough = 0.6) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, flatShading: true });
+    if (kind === 2) {
+      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 0.17, 10), mat(0x2f9be8, 0.3));
+      const label = new THREE.Mesh(new THREE.CylinderGeometry(0.037, 0.037, 0.07, 10), mat(0xff7a1a));
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 8), mat(0xffffff));
+      cap.position.y = 0.1;
+      g.add(bottle, label, cap);
+    } else if (kind === 0) {
+      const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.07, 12), mat(0xf1ece0, 0.9));
+      roll.rotation.z = Math.PI / 2;
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.004), mat(0xf1ece0, 0.9));
+      tail.position.set(0, -0.07, 0.044);
+      g.add(roll, tail);
+    } else {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.06), mat(0xf4f4f0, 0.5));
+      const crossA = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.022, 0.065), mat(0xd62b2b, 0.5));
+      const crossB = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.075, 0.065), mat(0xd62b2b, 0.5));
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), mat(0x2a2a2e));
+      handle.position.y = 0.075;
+      g.add(box, crossA, crossB, handle);
+    }
+    g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    return g;
+  }
+
+  /**
+   * Healing: a first-aid kit is opened in front of the chest and pressed on; a bandage is
+   * wound around the arm; a drink is tipped back. Head down to watch the hands (or back to drink).
+   */
+  private healPose(dt: number, kind: number): void {
+    const R = this.arms.R, L = this.arms.L;
+    if (!R || !L) return;
+    this.healT += dt;
+    const t = this.healT;
+    if (!this.healProp || this.healPropKind !== kind) {
+      if (this.healProp) {
+        this.healProp.removeFromParent();
+        this.healProp.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh) {
+            m.geometry.dispose();
+            (m.material as THREE.Material).dispose();
+          }
+        });
+      }
+      this.healProp = this.makeHealProp(kind);
+      this.healPropKind = kind;
+      this.root.add(this.healProp);
+    }
+    this.healProp.visible = true;
+    const rq = this.root.quaternion;
+    const shR = this.root.worldToLocal(R.upper.getWorldPosition(new THREE.Vector3()));
+    const shL = this.root.worldToLocal(L.upper.getWorldPosition(new THREE.Vector3()));
+    const mid = shR.clone().add(shL).multiplyScalar(0.5);
+    const right = _v5.set(Math.cos(this.root.rotation.y), 0, -Math.sin(this.root.rotation.y));
+    const at = (v: THREE.Vector3) => this.root.localToWorld(v.clone());
+    let headPitch = -0.35;
+    if (kind === 2) {
+      // drink: bottle up to the mouth, tipping back in sips
+      const sip = 0.5 + 0.5 * Math.sin(t * 3.2);
+      reach(R, at(shR.clone().add(new THREE.Vector3(-0.1, 0.14 + 0.03 * sip, -0.12))), new THREE.Vector3(1, -1.2, 0.3).applyQuaternion(rq));
+      reach(L, at(shL.clone().add(new THREE.Vector3(0.0, -0.45, 0.05))), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
+      headPitch = 0.25 + 0.12 * sip;
+      this.grip('R', WRIST_TWIST * 0.5, 0.9);
+    } else {
+      // kit / bandage held in the left hand in front of the belly...
+      reach(L, at(mid.clone().add(new THREE.Vector3(-0.06, -0.32, -0.27))), new THREE.Vector3(-1, -1.4, 0.3).applyQuaternion(rq));
+      // ...the right hand works on it: winding a bandage, pressing a dressing on
+      const w = kind === 0 ? 8 : 5;
+      const r = kind === 0 ? 0.07 : 0.035;
+      const work = mid.clone().add(new THREE.Vector3(0.05 + Math.cos(t * w) * r, -0.22 + Math.sin(t * w) * r, -0.24 - (kind === 0 ? 0 : 0.03 * (0.5 + 0.5 * Math.sin(t * w)))));
+      reach(R, at(work), new THREE.Vector3(1, -1.3, 0.5).applyQuaternion(rq));
+      this.grip('L', -WRIST_TWIST, 0.8);
+      this.grip('R', WRIST_TWIST * 0.4, 0.5);
+    }
+    if (this.head) {
+      _q1.setFromAxisAngle(right, headPitch);
+      rotateBoneWorld(this.head, _q1);
+    }
+    // the item rides in its hand (just past the wrist, on the palm side)
+    const arm = kind === 2 ? R : L;
+    const wr = arm.wrist.getWorldPosition(new THREE.Vector3());
+    const el = arm.lower.getWorldPosition(new THREE.Vector3());
+    const hand = wr.clone().addScaledVector(wr.clone().sub(el).normalize(), 0.07);
+    this.healProp.position.copy(this.root.worldToLocal(hand));
+    if (kind === 2) {
+      // tipped toward the mouth
+      this.healProp.rotation.set(-0.9 - 0.3 * Math.sin(t * 3.2), 0, 0);
+    } else {
+      this.healProp.rotation.set(-0.5, 0, 0);
     }
   }
 
@@ -1009,6 +1248,13 @@ export class SkinnedCharacter implements CharacterVisual {
     this.geometry.dispose();
     this.outlineMat.dispose();
     this.mouth?.dispose();
+    this.healProp?.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+    });
     this.root.removeFromParent();
   }
 }

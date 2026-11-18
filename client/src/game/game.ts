@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { decodeAppearance, type Appearance } from '@shared/config/appearance';
 import { CREWS, type TeamId } from '@shared/config/crews';
-import { INTERP_DELAY_MS, PLAYER, TICK_DT, TURF } from '@shared/config/game';
-import { BAGS, HEAL_KINDS, ITEM, PORCH } from '@shared/config/porch';
+import { INTERP_DELAY_MS, LEDGE, PLAYER, ROLL, TICK_DT, TURF } from '@shared/config/game';
+import { BAGS, HEAL_KINDS, ITEM, LOOT, PORCH } from '@shared/config/porch';
 import { AMMO_NAMES, AMMO_TYPES, SLOT_PRIMARY_B, THROWABLES, THROWABLE_IDS, WEAPONS, WEAPON_IDS, type Loadout, type WeaponDef } from '@shared/config/weapons';
 import type { MapDef } from '@shared/map/types';
 import { DEG, Rng, clamp, wrapAngle, type Vec3 } from '@shared/math';
@@ -16,7 +16,7 @@ import {
 import { stepProjectile, type Projectile } from '@shared/sim/game';
 import type { PhysicsWorld } from '@shared/sim/physics';
 import {
-  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, playerStateFromArray, reserveOf, weaponInSlot,
+  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, pickHeal, playerStateFromArray, reserveOf, weaponInSlot,
   type InputCmd, type PlayerState, type StepActions,
 } from '@shared/sim/player';
 import type { Assets } from './assets';
@@ -32,6 +32,10 @@ import { Effects } from './fx/effects';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
 import { AirLabels } from './porch/airLabels';
+import { AjNpc } from './ajs/ajNpc';
+import { DamageNumbers } from '../ui/damageNumbers';
+import { GunIcons } from './gunIcons';
+import { glyphHtml } from '../ui/prompts';
 import { Predictor } from './predictor';
 import { RemotePlayer } from './remotePlayer';
 import type { GameRenderer } from './renderer';
@@ -145,12 +149,21 @@ export class Game {
   /** JUMP OFF THE PORCH: the player asked to leave after being eliminated. */
   onLeaveRequest: (() => void) | null = null;
   paused = false;
+  /** AJ at the register in AJ'S (on the Greater Whoopa Towne map). */
+  readonly aj: AjNpc | null = null;
+  /** Free roam: standing at AJ's counter, so the "Talk to AJ" prompt shows. */
+  canTalkToAj = false;
+  /** Free roam: the player pressed the interact button at the counter. */
+  onTalkToAj: (() => void) | null = null;
+  private useWas = false;
+  /** Damage you deal, floating over whoever you hit. */
+  private dmgNums: DamageNumbers;
+  readonly gunIcons: GunIcons;
+  private mySkin = 'none';
   /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
   readonly porchWorld: PorchWorld | null = null;
   /** Air state last frame (camera views change when it does). */
   private lastAir = 0;
-  /** Double-jump flip progress (0..1), -1 when not flipping. */
-  private flipT = -1;
   /** Area names floating over the map while you are in the air. */
   private airLabels: AirLabels | null = null;
   /** JUMP OFF THE PORCH: the riot crowd along the edge of the safe area. */
@@ -239,6 +252,11 @@ export class Game {
     this.localChar.setVisible(false);
 
     this.hud = new Hud(deps.uiRoot, this.map);
+    this.dmgNums = new DamageNumbers(this.hud.root);
+    // pictures of the guns (with your wrap) for the weapon panel and pickup cards
+    this.mySkin = (mine?.look ? decodeAppearance(mine.look) : null)?.weaponSkin ?? 'none';
+    this.gunIcons = new GunIcons(this.gfx.renderer, deps.assets ?? null);
+    this.hud.gunIcon = (id) => this.gunIcons.get(id, this.mySkin);
     this.hud.setDevice(deps.input.device);
     this.unsubDevice = deps.input.onDeviceChange((d) => this.hud.setDevice(d));
     this.hudState.mode = this.session.mode;
@@ -259,10 +277,16 @@ export class Game {
         spectate: () => this.nextSpectate(),
         leave: () => this.onLeaveRequest?.(),
       });
-      this.porchHud.setVoice(deps.settings.values.volume > 0);
       deps.input.porchSlots = true;
       this.session.handlers.onMatchEnd = (msg: MatchEndMsg) => this.porchHud?.showResult(msg.players, this.session.myIdx, msg.winner);
     }
+
+    // AJ'S on the big map: AJ works the register (you can talk to him in free roam)
+    if (this.map.id === 'greater-towne') {
+      this.aj = new AjNpc((team, seed, look) => this.makeCharacter(team, seed, look));
+      this.gfx.scene.add(this.aj.root);
+    }
+    if (this.session.roam) this.hud.root.dataset.roam = '1';
 
     window.addEventListener('resize', this.onResize);
     this.resize();
@@ -465,6 +489,8 @@ export class Game {
           const kind = killed ? 'kill' : head ? 'head' : 'hit';
           this.hud.hitMarker(kind);
           audio?.hitMarker(kind);
+          const rp = this.remotes.get(victim);
+          if (rp) this.dmgNums.add(_v.set(rp.x, rp.y + (head ? 1.75 : 1.35), rp.z), dmg, kind);
         }
         if (victim === myIdx) {
           this.hud.damageFrom(e[6] / 100, e[7] / 100, dmg);
@@ -592,7 +618,7 @@ export class Game {
         // everybody lands empty-handed: point them at the bookbags
         if (e[1] === myIdx && this.porchHud) {
           const st = this.predictor.state;
-          if (!st.wA && !st.wB && !st.wH) this.porchHud.banner('NO WEAPON — SEARCH BOOKBAGS', 'info', 'landed', 4);
+          if (!st.wA && !st.wB && !st.wH) this.porchHud.banner('NO WEAPON — SEARCH BOOKBAGS', 'info', 4);
         }
         break;
       }
@@ -640,6 +666,7 @@ export class Game {
       this.autoFireT = 0;
     }
     input.touch?.setCrouchLit(input.wantCrouch);
+    input.touch?.setExtras(!!this.porchWorld || !!this.session.roam);
     if (!this.paused) {
       this.view.yaw = wrapAngle(this.view.yaw + f.lookYaw);
       this.view.pitch = clamp(this.view.pitch + f.lookPitch, -PLAYER.maxPitch, PLAYER.maxPitch);
@@ -728,11 +755,10 @@ export class Game {
     p.held = st.slot === 2 ? (THROWABLE_IDS[st.thr - 1] ?? 'none') : !weapon || weapon.id === 'fists' ? 'none' : weapon.id;
     p.hanging = !!this.porchWorld && this.alive && st.air === AIR_BALLOON;
     p.skydive = !!this.porchWorld && this.alive && st.air === AIR_SKYDIVE;
-    if (this.flipT >= 0) {
-      this.flipT += dt / 0.48;
-      if (this.flipT >= 1 || st.grounded) this.flipT = -1;
-    }
-    p.flip = this.flipT;
+    p.flip = -1; // the double jump is a straight second hop (no flip)
+    p.heal = this.alive && st.healT > 0 ? st.healKind : -1;
+    p.roll = this.alive && st.rollT > 0 ? 1 - st.rollT / ROLL.time : -1;
+    p.climb = this.alive && st.climbT > 0 ? 1 - st.climbT / LEDGE.time : -1;
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
       this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding && !spectating);
@@ -784,6 +810,16 @@ export class Game {
     }
     if (this.myBalloon) swayBalloon(this.myBalloon, this.time, dt);
 
+    // ---- AJ at the register ----
+    if (this.aj) {
+      const near = Math.hypot(camPos.x - this.aj.root.position.x, camPos.z - this.aj.root.position.z) < 60;
+      this.aj.update(dt, this.alive ? { x: this.renderPos.x, y: this.visY, z: this.renderPos.z } : null, near);
+      this.canTalkToAj = !!this.session.roam && this.alive && !this.paused && this.aj.inReach(st.x, st.y, st.z);
+      const use = f.use || f.useOrHeal;
+      if (this.canTalkToAj && use && !this.useWas) this.talkToAj();
+      this.useWas = use;
+    }
+
     // ---- projectiles, effects, world ----
     for (const vp of this.projectiles.values()) {
       vp.mesh.position.set(vp.p.x, vp.p.y, vp.p.z);
@@ -821,6 +857,10 @@ export class Game {
     // ---- HUD ----
     this.fillHud(phase, weapon, aimYaw, aimPitch);
     this.hud.update(this.hudState, dt);
+    {
+      const el = this.gfx.renderer.domElement;
+      this.dmgNums.update(dt, this.rig.camera, el.clientWidth, el.clientHeight);
+    }
     if (this.porchHud) this.updatePorchHud(dt, aimYaw, spectating);
 
     // warm-up countdown beeps
@@ -885,7 +925,6 @@ export class Game {
       if (act.swapped) audio?.swap();
       if (act.jumped) audio?.jump();
       if (act.doubleJumped) {
-        this.flipT = 0;
         audio?.jump();
         this.effects.airPuff(_v.set(st.x, st.y + 0.1, st.z));
       }
@@ -953,9 +992,13 @@ export class Game {
     if (f.aim) b |= BTN.AIM;
     if (f.reload) b |= BTN.RELOAD;
     if (f.throwBtn) b |= BTN.THROW;
+    if (f.roll) b |= BTN.ROLL;
     if (this.porchWorld) {
-      if (f.use || (f.useOrHeal && this.promptTarget)) b |= BTN.USE;
-      if (f.heal || (f.useOrHeal && !this.promptTarget)) b |= BTN.HEAL;
+      // one controller button can do both: pick up when something is in reach, heal otherwise
+      // (and once a heal has started, keeping it held keeps healing)
+      const healing = this.predictor.state.healT > 0;
+      if (f.use || (f.useOrHeal && this.promptTarget && !healing)) b |= BTN.USE;
+      if (f.heal || (f.useOrHeal && (!this.promptTarget || healing))) b |= BTN.HEAL;
       if (f.drop) b |= BTN.DROP;
     }
     return b;
@@ -1064,6 +1107,7 @@ export class Game {
     h.gun = !!weapon;
     h.melee = !!weapon && weapon.magSize === 0;
     h.weaponName = weapon ? weapon.name : st.thr > 0 ? THROWABLES[THROWABLE_IDS[st.thr - 1]].name : 'Nothing';
+    h.weaponId = weapon ? (weapon.id === 'fists' ? '' : weapon.id) : st.slot === 2 && st.thr > 0 ? THROWABLE_IDS[st.thr - 1] : '';
     h.porch = this.porchWorld && snap?.porch ? { zone: snap.porch.zone, next: snap.porch.next } : null;
     h.reload = weapon && st.reloadT > 0 ? 1 - st.reloadT / weapon.reloadTime : -1;
     h.throwables = st.throwables;
@@ -1165,6 +1209,7 @@ export class Game {
     // what is in reach (same rule as the server)
     let prompt = '';
     this.promptTarget = '';
+    let card: { kind: number; code: number; count: number; x: number; y: number; z: number } | null = null;
     if (this.alive && st.air === 0) {
       let best = PORCH.reach * PORCH.reach;
       for (const [id, b] of world.allBags) {
@@ -1182,6 +1227,7 @@ export class Game {
         if (d < best) {
           best = d;
           prompt = `PICK UP ${itemName(it.kind, it.code, it.count)}`;
+          card = it;
           this.promptTarget = `p${id}`;
         }
       }
@@ -1213,9 +1259,18 @@ export class Game {
       heals: [st.bandages, st.medkits, st.drinks],
       healing: st.healT > 0 ? 1 - st.healT / PORCH.heals[HEAL_KINDS[st.healKind]].time : -1,
       healName: PORCH.heals[HEAL_KINDS[st.healKind]]?.name ?? '',
-      prompt: prompt ? `[${key}] ${prompt}` : '',
+      // under 20 health: which button heals (or that there is nothing to heal with)
+      lowHealth: this.alive && st.air === AIR_GROUND && st.hp < 20 && st.healT <= 0
+        ? pickHeal(st) >= 0
+          ? device === 'touch' ? 'LOW HEALTH — HOLD <b>HEAL</b>' : `LOW HEALTH — HOLD ${glyphHtml(device, 'heal')} TO HEAL`
+          : 'LOW HEALTH — FIND A MED KIT'
+        : '',
+      // a pickup gets a card floating over it instead of the plain prompt
+      prompt: prompt && !card ? `[${key}] ${prompt}` : '',
+      card: card ? this.pickupCard(card, device) : null,
       doorsIn: Math.max(0, (doorsAt - this.session.serverTime()) / 1000),
       spectating: spectating ? this.remotes.get(this.spectateIdx)?.name ?? '' : '',
+      killer: this.killer,
       squad,
       yaw,
       total: this.roster.size,
@@ -1230,13 +1285,87 @@ export class Game {
     hud.board(this.deps.input.frame.scoreboard, rows);
   }
 
+  /** The card floating over a pickup in reach: what it is, a few numbers, the button. */
+  private pickupCard(it: { kind: number; code: number; count: number; x: number; y: number; z: number }, device: string): { html: string; x: number; y: number } | null {
+    _v.set(it.x, it.y + 0.75, it.z).project(this.rig.camera);
+    if (_v.z > 1) return null;
+    const el = this.gfx.renderer.domElement;
+    const x = (_v.x * 0.5 + 0.5) * el.clientWidth, y = (-_v.y * 0.5 + 0.5) * el.clientHeight;
+    const rarityOf = (kind: number, code: number) => LOOT.find((l) => l.item.kind === kind && l.item.code === code)?.rarity ?? 'common';
+    let name = itemName(it.kind, it.code, 1), rarity = 'common', img = '', rows: Array<[string, string]> = [];
+    if (it.kind === ITEM.WEAPON) {
+      const w = WEAPONS[WEAPON_IDS[it.code]];
+      if (w) {
+        name = w.name.toUpperCase();
+        rarity = rarityOf(it.kind, it.code);
+        img = this.gunIcons.get(w.id, this.mySkin);
+        rows = [
+          ['DMG', w.pellets > 1 ? `${w.damage}×${w.pellets}` : String(w.damage)],
+          ['RATE', `${w.rpm}`],
+          ['MAG', String(w.magSize)],
+          ['AMMO', w.ammo === 'none' ? '—' : (AMMO_NAMES[w.ammo] ?? '').replace(/ ammo/i, '')],
+        ];
+      }
+    } else if (it.kind === ITEM.AMMO) {
+      name = (AMMO_NAMES[AMMO_TYPES[it.code]] ?? 'Ammo').toUpperCase();
+      rows = [['ROUNDS', String(it.count)]];
+    } else if (it.kind === ITEM.HEAL) {
+      const h = PORCH.heals[HEAL_KINDS[it.code]];
+      name = (h?.name ?? 'Heal').toUpperCase();
+      rarity = it.code === 1 ? 'rare' : 'uncommon';
+      if (h) rows = [['HEALS', `+${h.amount}`], ['UP TO', String(h.cap)], ['TIME', `${h.time}s`], ['QTY', String(it.count)]];
+    } else if (it.kind === ITEM.ARMOR) {
+      name = 'ARMOR';
+      rarity = it.code >= 100 ? 'epic' : 'rare';
+      rows = [['ARMOR', `+${it.code}`]];
+    } else if (it.kind === ITEM.THROWABLE) {
+      const t = THROWABLES[THROWABLE_IDS[it.code]];
+      name = (t?.name ?? 'Throwable').toUpperCase();
+      img = this.gunIcons.get(THROWABLE_IDS[it.code] ?? 'grenade');
+      rows = [['QTY', String(it.count)]];
+    }
+    const button = device === 'touch' ? '<b>USE</b>' : glyphHtml(device as never, 'use');
+    const html = `<div class="pc-top"><span class="pc-rar">${rarity}</span><span class="pc-name">${name}</span></div>
+${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
+<div class="pc-stats">${rows.map(([k, v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('')}</div>
+<div class="pc-act">${button} PICK UP</div>`;
+    return { html: `<div class="pc r-${rarity}">${html}</div>`, x, y };
+  }
+
   /** Change the loadout for the next respawn. */
   setLoadout(loadout: Loadout): void {
     this.session.setLoadout(loadout);
   }
 
+  /**
+   * Free roam only: put on a new look right away (just bought / equipped at AJ's). Matches keep
+   * the look they started with, the same as online.
+   */
+  setMyLook(look: Appearance): void {
+    if (!this.session.roam) return;
+    const old = this.localChar;
+    const visible = old.root.visible;
+    if (this.myBalloon) this.myBalloon.removeFromParent();
+    old.root.removeFromParent();
+    old.dispose();
+    this.localChar = this.makeCharacter(this.myTeam, this.session.myIdx, look);
+    this.gfx.scene.add(this.localChar.root);
+    this.localChar.setVisible(visible);
+    this.mySkin = look.weaponSkin ?? 'none';
+  }
+
+  /** Free roam: start a conversation with AJ (the app opens the dialogue). */
+  talkToAj(): void {
+    if (!this.aj || !this.canTalkToAj) return;
+    this.aj.greet();
+    this.onTalkToAj?.();
+  }
+
   dispose(): void {
     this.stop();
+    this.aj?.dispose();
+    this.dmgNums.dispose();
+    this.gunIcons.dispose();
     window.removeEventListener('resize', this.onResize);
     this.unsubSettings();
     this.unsubDevice();

@@ -33,10 +33,16 @@ export interface PorchHudState {
   /** 0..1 progress using a healing item, -1 when not healing. */
   healing: number;
   healName: string;
+  /** Low-health warning (HTML: may hold a button glyph), or ''. */
+  lowHealth: string;
+  /** The card over the pickup in reach (HTML and its screen position), or null. */
+  card: { html: string; x: number; y: number } | null;
   /** Interaction prompt (plain text), or ''. */
   prompt: string;
   /** Seconds until the transport doors open (0 = open). */
   doorsIn: number;
+  /** Who knocked you off ('' for the riot or a fall). */
+  killer: string;
   /** Name of the player being watched while out, or ''. */
   spectating: string;
   squad: Array<{ name: string; alive: boolean; hp: number; me: boolean }>;
@@ -46,15 +52,6 @@ export interface PorchHudState {
   total: number;
   device: string;
 }
-
-const VOICE: Record<string, string> = {
-  deploy: 'Everybody off the porch!',
-  hot: 'The streets getting hot!',
-  closer: 'That riot getting closer!',
-  few: 'Only a few left standing!',
-  final: 'Who really run this Towne?',
-  landed: 'You landed with nothing. Go find something.',
-};
 
 function fmt(sec: number): string {
   const s = Math.max(0, Math.ceil(sec));
@@ -82,6 +79,8 @@ export class PorchHud {
   private slotEls: HTMLElement[] = [];
   private bagEl: HTMLElement;
   private healBar: HTMLElement;
+  private lowEl: HTMLElement;
+  private cardEl: HTMLElement;
   private healFill: HTMLElement;
   private healText: HTMLElement;
   private promptEl: HTMLElement;
@@ -89,6 +88,7 @@ export class PorchHud {
   private riotEl: HTMLElement;
   private toastsEl: HTMLElement;
   private outEl: HTMLElement;
+  private outBy: HTMLElement;
   private outTitle: HTMLElement;
   private outPlace: HTMLElement;
   private outStats: HTMLElement;
@@ -102,7 +102,6 @@ export class PorchHud {
   private lastShrink = false;
   private saidFew = false;
   private outShown = false;
-  private voiceOn = true;
 
   constructor(parent: HTMLElement, actions: PorchHudActions) {
     this.aliveEl = el('b', '', '0');
@@ -135,12 +134,15 @@ export class PorchHud {
     this.healFill = el('i', '');
     this.healText = el('span', '', 'HEALING');
     this.healBar = el('div', 'ph-heal hidden', [this.healText, el('div', 'bar', [this.healFill])]);
+    this.lowEl = el('div', 'ph-lowhp hidden');
+    this.cardEl = el('div', 'ph-card hidden');
     this.promptEl = el('div', 'ph-prompt hidden');
     this.bannerEl = el('div', 'ph-banner hidden');
     this.riotEl = el('div', 'ph-riot hidden', [el('div', 'ph-riot-text', "YOU'RE IN THE RIOT — GET OUT!")]);
     this.toastsEl = el('div', 'ph-toasts');
 
-    this.outTitle = el('div', 'ph-out-title', 'KNOCKED OFF THE PORCH');
+    this.outTitle = el('div', 'ph-out-title', 'Knocked Off');
+    this.outBy = el('div', 'ph-out-by', '');
     this.outPlace = el('div', 'ph-out-place', '');
     this.outStats = el('div', 'ph-out-stats', '');
     const spec = button('SPECTATE', 'btn primary', () => {
@@ -150,13 +152,13 @@ export class PorchHud {
     const leave = button('LEAVE MATCH', 'btn', () => actions.leave());
     leave.dataset.back = '1';
     this.outHint = el('div', 'ph-out-hint', '');
-    this.outEl = el('div', 'ph-out hidden', [this.outTitle, this.outPlace, this.outStats, el('div', 'row center', [spec, leave]), this.outHint]);
+    this.outEl = el('div', 'ph-out hidden', [this.outTitle, this.outBy, this.outPlace, this.outStats, el('div', 'row center', [spec, leave]), this.outHint]);
     this.specEl = el('div', 'ph-spec hidden');
     this.winEl = el('div', 'ph-win hidden');
     this.boardEl = el('div', 'ph-board hidden');
 
     this.root = el('div', 'porch-hud', [
-      top, this.compassEl, this.squadEl, this.armorBox, this.invEl, this.bagEl, this.healBar,
+      top, this.compassEl, this.squadEl, this.armorBox, this.invEl, this.bagEl, this.healBar, this.lowEl, this.cardEl,
       this.promptEl, this.bannerEl, this.riotEl, this.toastsEl, this.specEl, this.outEl, this.winEl, this.boardEl,
     ]);
     parent.append(this.root);
@@ -168,32 +170,12 @@ export class PorchHud {
     apply();
   }
 
-  /** Big center banner (and the announcer, when there is a voice line for it). */
-  banner(text: string, tone: 'warn' | 'good' | 'info' = 'info', voice?: keyof typeof VOICE, seconds = 3): void {
+  /** Big center banner (text only: there is no announcer voice). */
+  banner(text: string, tone: 'warn' | 'good' | 'info' = 'info', seconds = 3): void {
     this.bannerEl.textContent = text;
     this.bannerEl.dataset.tone = tone;
     this.bannerEl.classList.remove('hidden');
     this.bannerTimer = seconds;
-    if (voice) this.say(VOICE[voice]);
-  }
-
-  setVoice(on: boolean): void {
-    this.voiceOn = on;
-  }
-
-  /** Neighborhood announcer (the browser's speech voice, low and slow). */
-  private say(line: string): void {
-    if (!this.voiceOn || typeof speechSynthesis === 'undefined') return;
-    try {
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(line);
-      u.rate = 1.02;
-      u.pitch = 0.75;
-      u.volume = 0.9;
-      speechSynthesis.speak(u);
-    } catch {
-      /* no voice available */
-    }
   }
 
   /** "+ Kingpin AR" style pickup notes. */
@@ -239,17 +221,17 @@ export class PorchHud {
         const prev = this.lastStage;
         this.lastStage = snap.stage;
         if (prev >= 0) {
-          if (snap.stage === STAGE_DEPLOY) this.banner('EVERYBODY OFF THE PORCH!', 'good', 'deploy');
-          else if (snap.stage === STAGE_RIOT) this.banner('RIOT APPROACHING', 'warn', 'hot', 3.5);
-          else if (snap.stage === STAGE_ENDED - 1) this.banner('FINAL RIOT', 'warn', 'final', 3.5);
-          else if (snap.stage > STAGE_RIOT && snap.stage < STAGE_ENDED) this.banner('RIOT APPROACHING', 'warn', 'closer', 3.5);
+          if (snap.stage === STAGE_DEPLOY) this.banner('EVERYBODY OFF THE PORCH!', 'good');
+          else if (snap.stage === STAGE_RIOT) this.banner('RIOT APPROACHING', 'warn', 3.5);
+          else if (snap.stage === STAGE_ENDED - 1) this.banner('FINAL RIOT', 'warn', 3.5);
+          else if (snap.stage > STAGE_RIOT && snap.stage < STAGE_ENDED) this.banner('RIOT APPROACHING', 'warn', 3.5);
         }
       }
-      if (snap.shrinking && !this.lastShrink) this.banner('THE RIOT IS SPREADING', 'warn', undefined, 2.5);
+      if (snap.shrinking && !this.lastShrink) this.banner('THE RIOT IS SPREADING', 'warn', 2.5);
       this.lastShrink = snap.shrinking;
       if (!this.saidFew && snap.alive <= 5 && snap.alive > 1 && snap.stage >= STAGE_EARLY && snap.stage < STAGE_ENDED) {
         this.saidFew = true;
-        this.banner('ONLY A FEW LEFT STANDING', 'info', 'few');
+        this.banner('ONLY A FEW LEFT STANDING', 'info');
       }
     }
     this.set('kills', s.kills, () => (this.killsEl.textContent = String(s.kills)));
@@ -292,9 +274,18 @@ export class PorchHud {
       this.bagEl.innerHTML = `<div class="row">${heals}<kbd>${s.device === 'kbm' ? 'H' : '▼'}</kbd></div><div class="row">${ammo}</div>`;
     });
     this.set('healing', s.healing >= 0, () => this.healBar.classList.toggle('hidden', s.healing < 0));
+    this.set('card', s.card?.html ?? '', () => {
+      this.cardEl.classList.toggle('hidden', !s.card);
+      if (s.card) this.cardEl.innerHTML = s.card.html;
+    });
+    if (s.card) this.cardEl.style.transform = `translate(${s.card.x.toFixed(0)}px, ${s.card.y.toFixed(0)}px) translate(-50%, -100%)`;
+    this.set('lowhp', s.lowHealth, () => {
+      this.lowEl.classList.toggle('hidden', !s.lowHealth);
+      this.lowEl.innerHTML = s.lowHealth;
+    });
     if (s.healing >= 0) {
       this.healFill.style.width = `${Math.round(s.healing * 100)}%`;
-      this.set('healName', s.healName, () => (this.healText.textContent = `USING ${s.healName.toUpperCase()}`));
+      this.set('healName', s.healName, () => (this.healText.textContent = `HOLD TO KEEP HEALING · ${s.healName.toUpperCase()}`));
     }
 
     // ---- prompts ----
@@ -319,6 +310,7 @@ export class PorchHud {
     const out = !s.alive && !!snap && snap.place > 0 && snap.stage < STAGE_ENDED;
     if (out && !this.outShown) {
       this.outShown = true;
+      this.outBy.innerHTML = s.killer ? `by <b>${escapeHtml(s.killer)}</b>` : '';
       this.outPlace.innerHTML = `<b>#${snap!.place}</b><span>OF ${s.total}</span>`;
       this.outStats.innerHTML = `<div><b>${s.kills}</b><span>ELIMINATIONS</span></div><div><b>${snap!.damage}</b><span>DAMAGE</span></div>`;
       this.outHint.textContent = s.device === 'kbm' ? 'CLICK TO SPECTATE · ESC FOR THE MENU' : '';
@@ -358,7 +350,6 @@ export class PorchHud {
       ${top.map((r) => `<tr class="${r.idx === myIdx ? 'me' : ''}"><td>${r.place ?? '-'}</td><td class="n">${escapeHtml(r.name)}${r.bot ? ' <i>BOT</i>' : ''}</td><td>${r.kills}</td><td>${r.damage ?? 0}</td></tr>`).join('')}
       </table>`;
     this.winEl.classList.remove('hidden');
-    if (won) this.say(VOICE.final.replace('Who really run this Towne?', 'You run the Towne!'));
   }
 
   /** TAB board: who is still in it. */
@@ -375,11 +366,6 @@ export class PorchHud {
   }
 
   dispose(): void {
-    try {
-      if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
-    } catch {
-      /* ignore */
-    }
     this.root.remove();
   }
 }

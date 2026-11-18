@@ -219,16 +219,23 @@ test('porch: fists reach 2 m, guns draw from the ammo pools, drops land as picku
 });
 const WEAPON_FIST_DAMAGE = 22;
 
-test('porch: healing items take time, heal up to their cap, and armor soaks gunfire', async () => {
+test('porch: healing items take time (held all the way), heal up to their cap, and armor soaks gunfire', async () => {
   const { sim, me } = await porchSim();
   sim.tick();
   land(me, -18, 30);
   me.health = 40;
   sim.porch!.give(me, { kind: ITEM.HEAL, code: 0, count: 3 });
   wait(sim, 0.1, me);
+  // let go halfway: cancelled, nothing used up, no health
   step(sim, me, { buttons: BTN.HEAL });
   assert(me.state.healT > 0, 'started healing');
-  const evs = wait(sim, PORCH.heals.bandage.time + 0.2, me);
+  wait(sim, PORCH.heals.bandage.time / 2, me, { buttons: BTN.HEAL });
+  const early = wait(sim, 0.2, me);
+  const before = { hp: me.health, bandages: me.state.bandages, healT: me.state.healT };
+  assert(before.healT === 0 && of(early, EV.HEALED).length === 0 && before.hp === 40 && before.bandages === 3, 'letting go cancels the heal');
+  // hold it all the way
+  step(sim, me, { buttons: BTN.HEAL });
+  const evs = wait(sim, PORCH.heals.bandage.time + 0.2, me, { buttons: BTN.HEAL });
   assert(of(evs, EV.HEALED).length === 1 && me.health === 55 && me.state.bandages === 2, `bandage: ${me.health} hp`);
   // armor
   sim.porch!.give(me, { kind: ITEM.ARMOR, code: 50, count: 1 });

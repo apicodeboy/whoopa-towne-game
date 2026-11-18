@@ -68,6 +68,8 @@ export interface HudState {
   showFps: boolean;
   /** What is in hand (name), whether it is a gun / melee (else a throwable). */
   weaponName?: string;
+  /** Id of what is in hand for its picture (weapon or throwable id; '' = nothing / fists). */
+  weaponId?: string;
   gun?: boolean;
   melee?: boolean;
   /** JUMP OFF THE PORCH: the safe area and where the riot is heading (minimap). */
@@ -136,6 +138,11 @@ export class Hud {
   private healthFill: HTMLElement;
   private healthNum: HTMLElement;
   private healthBox: HTMLElement;
+  private gunPic: HTMLElement;
+  private gunPicImg: HTMLImageElement;
+  private gunPicName: HTMLElement;
+  /** Renders a weapon's picture (set by the game; '' when there is none). */
+  gunIcon: ((id: string) => string) | null = null;
   private shieldEl: HTMLElement;
   private ammoMag: HTMLElement;
   private ammoRes: HTMLElement;
@@ -235,6 +242,12 @@ export class Hud {
       this.shieldEl,
     ]);
 
+    // ---- the equipped weapon's picture (bottom left) ----
+    this.gunPicImg = el('img', 'gp-img');
+    this.gunPicImg.alt = '';
+    this.gunPicName = el('div', 'gp-name', '');
+    this.gunPic = el('div', 'gunpic hidden', [this.gunPicImg, this.gunPicName]);
+
     // ---- ammo ----
     this.ammoMag = el('span', 'mag', '0');
     this.ammoRes = el('span', 'res', '0');
@@ -280,7 +293,7 @@ export class Hud {
     this.root.append(
       this.legendEl, this.hintEl,
       this.vignette, this.flashEl, bar, mapBox, this.feedEl, this.arcsEl, this.cross, this.hitEl,
-      this.healthBox, this.ammoBox, this.objectiveEl, this.confirmEl, this.announceEl, this.respawnEl, this.boardEl, this.netEl,
+      this.gunPic, this.healthBox, this.ammoBox, this.objectiveEl, this.confirmEl, this.announceEl, this.respawnEl, this.boardEl, this.netEl,
     );
     parent.append(this.root);
     this.onResize();
@@ -398,6 +411,13 @@ export class Hud {
     const w = s.slot === 0 ? WEAPONS[s.loadout.primary] : WEAPONS[s.loadout.secondary];
     const wname = s.weaponName ?? (gun ? w.name : THROWABLES[s.loadout.throwable].name);
     this.set('wname', wname, () => (this.ammoName.textContent = wname.toUpperCase()));
+    const picId = s.alive ? s.weaponId ?? '' : '';
+    this.set('gunpic', `${picId}|${wname}`, () => {
+      const url = picId && this.gunIcon ? this.gunIcon(picId) : '';
+      this.gunPic.classList.toggle('hidden', !url);
+      if (url) this.gunPicImg.src = url;
+      this.gunPicName.textContent = wname.toUpperCase();
+    });
     const magText = s.melee ? '—' : gun ? String(s.mag) : String(s.throwables);
     const resText = s.melee ? '' : gun ? String(s.reserve) : '';
     this.set('mag', magText, () => (this.ammoMag.textContent = magText));
@@ -462,8 +482,10 @@ export class Hud {
     const dead = !s.alive && s.phase === PHASE.PLAYING;
     this.set('dead', dead, () => this.respawnEl.classList.toggle('hidden', !dead));
     if (dead) {
-      const who = s.killer ? `DROPPED BY ${s.killer.toUpperCase()}` : 'YOU WENT DOWN';
-      this.set('killer', who, () => (this.respawnText.textContent = who));
+      const who = s.killer;
+      this.set('killer', who, () => {
+        this.respawnText.innerHTML = `Knocked Off${who ? `<small>by <b>${escapeHtml(who)}</b></small>` : ''}`;
+      });
       this.respawnFill.style.width = `${Math.round((1 - Math.min(1, s.respawnIn / 5000)) * 100)}%`;
     }
 

@@ -372,7 +372,7 @@
   position: absolute;
   left: 50%;
   top: calc(50% + 70px);
-  width: 220px;
+  width: 280px;
   transform: translateX(-50%);
   text-align: center;
   font-size: 10px;
@@ -535,6 +535,14 @@
   font-size: 30px;
   letter-spacing: 1.5px;
   color: #ff6a50;
+}
+.ph-out-by {
+  margin-top: 2px;
+  font: 600 16px 'Inter', var(--font);
+  color: rgba(255, 255, 255, 0.7);
+}
+.ph-out-by b {
+  color: #fff;
 }
 .ph-out-place b,
 .ph-win-place {
@@ -703,4 +711,205 @@
   .ph-win-title.won {
     font-size: 36px;
   }
+}
+
+/* under 20 health: which button heals */
+.ph-lowhp {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 70px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 90, 70, 0.8);
+  background: rgba(40, 8, 6, 0.72);
+  color: #ffd6cf;
+  font: 700 13px 'Inter', var(--font);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  animation: ph-lowhp 1s ease-in-out infinite;
+}
+.ph-lowhp b {
+  color: #fff;
+}
+.ph-lowhp .glyph {
+  margin: 0 2px;
+}
+@keyframes ph-lowhp {
+  50% {
+    border-color: rgba(255, 90, 70, 0.3);
+  }
+}
+
+/* ---------------------------------------------------------------- the card over a pickup in reach */
+.ph-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.ph-card .pc {
+  --r: #b8bec8;
+  position: relative;
+  width: 230px;
+  padding: 10px 12px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-top: 3px solid var(--r);
+  background: linear-gradient(180deg, rgba(28, 28, 33, 0.95), rgba(16, 16, 19, 0.95));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 24px color-mix(in srgb, var(--r) 25%, transparent);
+  color: #f3f1ec;
+  font-family: 'Inter', var(--font);
+  animation: pc-in 0.14s ease-out;
+}
+.ph-card .pc::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  border: 8px solid transparent;
+  border-bottom: none;
+  border-top-color: rgba(16, 16, 19, 0.95);
+  transform: translateX(-50%);
+}
+@keyframes pc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.ph-card .r-common { --r: #b8bec8; }
+.ph-card .r-uncommon { --r: #57d163; }
+.ph-card .r-rare { --r: #4da3ff; }
+.ph-card .r-epic { --r: #b06bff; }
+.pc-top {
+  display: flex;
+  flex-direction: column;
+}
+.pc-rar {
+  font: 800 9px 'Inter', var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--r);
+}
+.pc-name {
+  font: 400 19px/1.1 var(--font-display);
+  letter-spacing: 0.5px;
+}
+.pc-img {
+  display: block;
+  width: 100%;
+  height: 74px;
+  margin: 2px 0;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.6));
+}
+.pc-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+.pc-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.pc-stats b {
+  font: 700 13px 'Inter', var(--font);
+}
+.pc-stats span {
+  font: 700 8px 'Inter', var(--font);
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.55);
+}
+.pc-act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  font: 800 12px 'Inter', var(--font);
+  letter-spacing: 0.08em;
+  color: #ffd977;
+}
+
+/* ---------------------------------------------------------------- phones */
+/* the pickup card shrinks to a compact chip */
+.hud-porch[data-device='touch'] .ph-card .pc,
+body.is-touch .ph-card .pc {
+  width: 168px;
+  padding: 7px 9px;
+  border-radius: 12px;
+}
+body.is-touch .pc-name {
+  font-size: 14px;
+}
+body.is-touch .pc-img {
+  height: 40px;
+}
+body.is-touch .pc-stats {
+  gap: 3px;
+  margin-top: 4px;
+}
+body.is-touch .pc-stats b {
+  font-size: 11px;
+}
+body.is-touch .pc-stats span {
+  font-size: 7px;
+}
+body.is-touch .pc-act {
+  margin-top: 5px;
+  font-size: 10px;
+}
+/* pickup notes go left of the buttons, clear of the ammo counter */
+body.is-touch .ph-toasts {
+  right: auto;
+  left: 50%;
+  bottom: auto;
+  top: calc(64px + var(--safe-top));
+  align-items: center;
+  transform: translateX(-50%);
+}
+body.is-touch .ph-lowhp {
+  top: auto;
+  bottom: calc(14px + var(--safe-bottom));
+  font-size: 11px;
+}
+@media (max-height: 520px) {
+  .ph-card .pc {
+    width: 190px;
+  }
+  .pc-img {
+    height: 50px;
+  }
+}
+/* the weapon slots and the bag (ammo / heals) sit bottom-centre, between the thumbs */
+body.is-touch .ph-inv {
+  right: auto;
+  left: 50%;
+  bottom: calc(60px + var(--safe-bottom));
+  transform: translateX(-50%);
+}
+body.is-touch .ph-slot {
+  width: 64px;
+  padding: 3px 5px 4px;
+  font-size: 9px;
+}
+body.is-touch .ph-bag {
+  right: auto;
+  left: 50%;
+  bottom: calc(104px + var(--safe-bottom));
+  transform: translateX(-50%) scale(0.85);
+  transform-origin: 50% 100%;
+}
+body.is-touch .ph-armor {
+  display: none;
 }

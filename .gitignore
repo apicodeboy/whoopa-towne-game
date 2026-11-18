@@ -5,3 +5,6 @@ dist/
 .env
 .env.local
 tools/out/
+
+# economy data (accounts, balances, purchases): never commit
+server/data/

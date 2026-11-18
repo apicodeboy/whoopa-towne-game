@@ -402,11 +402,12 @@ export class BotBrain {
         if (mag < weapon.magSize * 0.5 && res > 0 && s.reloadT <= 0) buttons |= BTN.RELOAD;
       }
       if (porch) {
-        // patch up between fights
+        // patch up between fights (holding HEAL until the item is done)
         if (s.hp < 65 && s.healT <= 0 && pickHeal(s) >= 0 && now >= this.healAt && !urgent) {
           buttons |= BTN.HEAL;
           this.healAt = now + 400;
         }
+        if (s.healT > 0 && !urgent) buttons |= BTN.HEAL;
         if (urgent && !this.lootGoal && (!this.hasGoal || now >= this.repathAt)) {
           this.hasGoal = false;
           this.pickGoal();

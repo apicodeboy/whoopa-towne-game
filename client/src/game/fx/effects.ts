@@ -3,8 +3,9 @@ import { LIGHTING } from '../lighting';
 import { SMOKE } from '@shared/config/game';
 
 const TRACER_CAP = 96;
-const TRACER_SPEED = 320;
-const TRACER_LEN = 9;
+/** Tracers fly slower than real bullets (hits are instant either way) so you can follow them. */
+const TRACER_SPEED = 190;
+const TRACER_LEN = 7;
 const SPARK_CAP = 512;
 const DUST_CAP = 384;
 const DECAL_CAP = 128;
@@ -173,6 +174,7 @@ export class Effects {
   density = 1;
   private tracers: Tracer[] = [];
   private tracerMesh: THREE.InstancedMesh;
+  private tracerHeads: THREE.Points;
   private sparks: ParticlePool;
   private dust: ParticlePool;
   private decalMesh: THREE.InstancedMesh;
@@ -190,11 +192,15 @@ export class Effects {
   constructor() {
     this.group.name = 'effects';
 
-    // tracers: one instanced stretched box, additive
-    const tGeo = new THREE.BoxGeometry(0.028, 0.028, 1);
+    // tracers: one instanced stretched box, additive, bright at the head and fading to the tail
+    const tGeo = new THREE.BoxGeometry(0.05, 0.05, 1);
     tGeo.translate(0, 0, 0.5);
+    const tz = tGeo.attributes.position;
+    const fade = new Float32Array(tz.count * 3);
+    for (let i = 0; i < tz.count; i++) fade.fill(tz.getZ(i) > 0.5 ? 1.3 : 0.08, i * 3, i * 3 + 3);
+    tGeo.setAttribute('color', new THREE.BufferAttribute(fade, 3));
     const tMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      color: 0xffffff, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
     });
     this.tracerMesh = new THREE.InstancedMesh(tGeo, tMat, TRACER_CAP);
     this.tracerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -208,6 +214,19 @@ export class Effects {
     this.disposables.push(tGeo, tMat);
 
     this.dotTex = softDot(64, 'rgba(255,255,255,1)', 'rgba(255,255,255,0)');
+    // the glowing round at the head of each tracer (shows even when the bullet flies straight
+    // away from the camera, where the streak is seen end-on)
+    const hGeo = new THREE.BufferGeometry();
+    hGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRACER_CAP * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    hGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRACER_CAP * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    hGeo.setDrawRange(0, 0);
+    const hMat = new THREE.PointsMaterial({
+      size: 0.34, map: this.dotTex, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    this.tracerHeads = new THREE.Points(hGeo, hMat);
+    this.tracerHeads.frustumCulled = false;
+    this.group.add(this.tracerHeads);
+    this.disposables.push(hGeo, hMat);
     this.flashTex = softDot(128, 'rgba(255,244,200,1)', 'rgba(255,140,40,0)');
     this.smokeTex = smokeTexture();
     this.disposables.push(this.dotTex, this.flashTex, this.smokeTex);
@@ -424,6 +443,23 @@ export class Effects {
     if (n > 0) {
       this.tracerMesh.instanceMatrix.needsUpdate = true;
       if (this.tracerMesh.instanceColor) this.tracerMesh.instanceColor.needsUpdate = true;
+    }
+    // bullet heads (only while the head is still in flight)
+    const hp = this.tracerHeads.geometry.attributes.position as THREE.BufferAttribute;
+    const hc = this.tracerHeads.geometry.attributes.color as THREE.BufferAttribute;
+    let h = 0;
+    for (const t of this.tracers) {
+      if (!t.active) continue;
+      const head = t.t * TRACER_SPEED;
+      if (head >= t.len) continue;
+      hp.setXYZ(h, t.ox + t.dx * head, t.oy + t.dy * head, t.oz + t.dz * head);
+      hc.setXYZ(h, Math.min(1, t.r * 1.2), Math.min(1, t.g * 1.1), t.b);
+      h++;
+    }
+    this.tracerHeads.geometry.setDrawRange(0, h);
+    if (h > 0) {
+      hp.needsUpdate = true;
+      hc.needsUpdate = true;
     }
 
     this.sparks.update(dt);

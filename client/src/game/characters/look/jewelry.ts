@@ -1,4 +1,4 @@
-import { METAL, ProcMesh, SLOT, fixed, style, v3, type Style, type V3 } from './meshKit';
+import { METAL, ProcMesh, SLOT, fixed, hash01, style, v3, type Style, type V3 } from './meshKit';
 
 /**
  * Pieces fitted to the body (not the head): necklaces, wrist pieces and the crew arm bands.
@@ -49,7 +49,8 @@ export function buildCrewBands(body: BodyQuery, out: ProcMesh): void {
   }
 }
 
-export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh): void {
+/** `fine`: tiny details (stones, letters) that get a thin ink line instead of the full one. */
+export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh, fine: ProcMesh = out): void {
   if (kind === 'none') return;
   const at = (side: 'L' | 'R', s: number) => {
     const a = ARM(side);
@@ -70,8 +71,17 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh): void {
     out.torus(c, axis, r + 0.0035, 0.0017, (u) => (Math.floor(u * 22) % 2 ? METAL.gold : fixed(0xc9982f, { metal: 0.65, rough: 0.3 })), 22, 5);
     return;
   }
+  if (kind === 'gloves') {
+    // AJ's shooter gloves: the hands are painted in the assembler; this is the cuff
+    for (const side of ['L', 'R'] as const) {
+      const { A, B, r } = at(side, 0.95);
+      cuff(out, A, B, 0.95, 0.024, r, 0.004, fixed(0x141417, { rough: 0.55, metal: 0.1 }));
+    }
+    return;
+  }
   // watch on the left wrist: strap plus a face on the back of the wrist
-  const gold = kind === 'goldwatch';
+  const iced = kind === 'icedwatch';
+  const gold = kind === 'goldwatch' || iced;
   const { A, B, r } = at('L', 0.86);
   cuff(out, A, B, 0.86, 0.016, r, 0.0026, gold ? METAL.gold : fixed(0x1d1e22, { rough: 0.7 }));
   const axis = v3().subVectors(B, A).normalize();
@@ -83,10 +93,15 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh): void {
   const top = base.clone().addScaledVector(outward, 0.0045);
   out.tube([base, top], 0.0095, 12, gold ? METAL.gold : METAL.steel, { flat: true });
   const dial = top.clone().addScaledVector(outward, 0.0003);
-  out.tube([top, dial], 0.0075, 12, gold ? fixed(0x1a1712, { rough: 0.3 }) : fixed(0xe8ecef, { rough: 0.3 }), { flat: true });
+  out.tube([top, dial], 0.0075, 12, iced ? fixed(0xbfe6ff, { metal: 0.3, rough: 0.06 }) : gold ? fixed(0x1a1712, { rough: 0.3 }) : fixed(0xe8ecef, { rough: 0.3 }), { flat: true });
+  if (iced) {
+    // AJ's: a bezel of stones around the dial and an iced strap
+    fine.torus(top.clone().addScaledVector(outward, 0.0006), outward, 0.0098, 0.0019, (u) => (Math.floor(u * 20) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 20, 5);
+    cuff(fine, A, B, 0.86, 0.006, r + 0.0026, 0.0018, (u) => (Math.floor(u * 24) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 24);
+  }
 }
 
-export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh): void {
+export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh, fine: ProcMesh = out): void {
   if (kind === 'none') return;
   const neck = body.joint('Neck');
   const ax = body.neckAxis;
@@ -108,9 +123,11 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh): voi
     out.torus(v3(ax.x, y - 0.009, ax.z).add(v3(0, 0, body.torso(0, y) + 0.0035)), v3(0, 0, 1), 0.0045, 0.0009, METAL.silver, 12, 4);
     return;
   }
-  const thick = kind === 'thickgold';
-  const drop = kind === 'pendant' ? 0.1 : kind === 'thingold' ? 0.065 : kind === 'diamond' ? 0.07 : thick ? 0.075 : 0.068;
-  const rad = thick ? 0.0034 : kind === 'diamond' ? 0.0025 : kind === 'silver' ? 0.0021 : 0.0015;
+  const cuban = kind === 'cuban';
+  const thick = kind === 'thickgold' || cuban;
+  const icedChain = kind === 'diamond' || kind === 'wtpendant';
+  const drop = kind === 'pendant' || kind === 'wtpendant' ? 0.1 : kind === 'thingold' ? 0.065 : kind === 'diamond' ? 0.07 : cuban ? 0.085 : thick ? 0.075 : 0.068;
+  const rad = cuban ? 0.0046 : thick ? 0.0034 : icedChain ? 0.0025 : kind === 'silver' ? 0.0021 : 0.0015;
   // around the base of the neck at the sides and back, dropping onto the chest in front
   const yBack = neck.y + 0.016;
   const N = 56;
@@ -138,7 +155,11 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh): voi
       case 'silver':
         return METAL.silver;
       case 'diamond':
+      case 'wtpendant':
         return i % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 });
+      case 'cuban':
+        // heavy links, polished faces catching the light
+        return i % 2 ? fixed(0xf2c94c, { metal: 0.75, rough: 0.22 }) : fixed(0xc0912a, { metal: 0.7, rough: 0.3 });
       case 'thickgold':
         return i % 2 ? METAL.gold : fixed(0xb88a2c, { metal: 0.65, rough: 0.32 });
       default:
@@ -146,8 +167,34 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh): voi
     }
   };
   // thick chains get chunky links
-  const radii = path.map((_p, i) => (thick ? rad * (i % 2 ? 0.8 : 1.1) : kind === 'diamond' ? rad * (i % 2 ? 0.85 : 1.15) : rad));
+  const radii = path.map((_p, i) => (thick ? rad * (i % 2 ? 0.8 : 1.1) : icedChain ? rad * (i % 2 ? 0.85 : 1.15) : rad));
   out.tube(path, radii, thick ? 6 : 5, look, { flat: true, caps: false });
+  if (kind === 'wtpendant') {
+    // AJ's: an iced-out plate with gold "WT" letters
+    const tip = path[Math.round(N / 2)];
+    const nrm = v3(0, 0, 1);
+    const w = 0.02, hh = 0.015;
+    const c = tip.clone().add(v3(0, -0.021, 0.003));
+    // hang it in front of whatever is under it (a puffer bulges more lower down)
+    for (const dy of [-hh, 0, hh]) {
+      for (const dx of [-w, 0, w]) c.z = Math.max(c.z, torsoZ(body, c.x - ax.x + dx, c.y + dy, 1) + 0.003);
+    }
+    out.tube([tip.clone().add(v3(0, -0.002, 0)), c.clone().add(v3(0, 0.014, 0.002))], 0.0014, 5, METAL.gold);
+    const plate = [v3(-w, -hh, 0), v3(w, -hh, 0), v3(w, hh, 0), v3(-w, hh, 0)].map((p) => p.add(c).add(v3(0, 0, 0.004)));
+    out.slab(plate, nrm, 0.004, fixed(0xdff3ff, { metal: 0.3, rough: 0.05 }));
+    // a sparkle grid of stones on the plate
+    for (let gx = 0; gx < 7; gx++) {
+      for (let gy = 0; gy < 5; gy++) {
+        const p = c.clone().add(v3(-w + 0.003 + gx * ((2 * w - 0.006) / 6), -hh + 0.003 + gy * ((2 * hh - 0.006) / 4), 0.0046));
+        fine.ellipsoid(p, v3(0.0017, 0.0017, 0.0009), METAL.diamond, 4, 2);
+      }
+    }
+    const z = c.z + 0.0062;
+    const L = (pts: Array<[number, number]>) => fine.tube(pts.map(([x, y]) => v3(c.x + x, c.y + y, z)), 0.0012, 4, fixed(0xf2c94c, { metal: 0.8, rough: 0.2 }));
+    L([[-0.017, 0.009], [-0.0135, -0.009], [-0.0095, 0.003], [-0.0055, -0.009], [-0.002, 0.009]]);
+    L([[0.003, 0.009], [0.017, 0.009]]);
+    L([[0.01, 0.009], [0.01, -0.009]]);
+  }
   if (kind === 'pendant') {
     const tip = path[Math.round(N / 2)];
     const nrm = v3(0, 0, 1);
@@ -161,5 +208,79 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh): voi
     out.slab(disc, nrm, 0.0032, METAL.gold);
     // a stone in the middle
     out.ellipsoid(c.clone().add(v3(0, 0, 0.0038)), v3(0.0045, 0.0045, 0.0018), fixed(0xc22a3a, { metal: 0.3, rough: 0.1 }), 6, 3);
+  }
+}
+
+/** Where the torso surface is for a point `dx` to the side of the neck axis at height y (front +1 / back -1). */
+function torsoZ(body: BodyQuery, dx: number, y: number, side: 1 | -1): number {
+  const base = side > 0 ? 0 : Math.PI;
+  let a = base + Math.asin(Math.max(-0.95, Math.min(0.95, dx / body.torso(base, y)))) * side;
+  for (let it = 0; it < 3; it++) a = base + Math.asin(Math.max(-0.95, Math.min(0.95, dx / body.torso(a, y)))) * side;
+  return body.neckAxis.z + Math.cos(a) * body.torso(a, y);
+}
+
+/**
+ * AJ's backpacks: a rounded pack on the back plus two shoulder straps. Rides rigidly on the
+ * chest bone (built in the bind pose, so it sits right whatever the body build).
+ */
+export function buildBackpack(kind: string, body: BodyQuery, out: ProcMesh): void {
+  if (kind === 'none') return;
+  const neck = body.joint('Neck');
+  const ax = body.neckAxis;
+  const top = neck.y - 0.075, bot = neck.y - 0.43;
+  const designer = kind === 'designer', camo = kind === 'camopack';
+  const halfW = designer ? 0.13 : 0.14, depth = designer ? 0.09 : 0.11;
+  // the furthest-back point of the back over the pack's height
+  let zBack = Infinity;
+  for (let y = bot; y <= top + 1e-6; y += 0.02) {
+    for (const dx of [-halfW * 0.8, 0, halfW * 0.8]) zBack = Math.min(zBack, torsoZ(body, dx, y, -1));
+  }
+  zBack -= 0.008;
+  const zc = zBack - depth / 2;
+  const base = designer ? 0x6b4a2c : camo ? 0x5b6b3a : 0x1d1d22;
+  const shell = (r: number, c: number): Style => {
+    if (camo) {
+      const n = hash01(r * 7 + 3, c * 5 + 1, 11);
+      return fixed(n > 0.66 ? 0x3b4524 : n > 0.4 ? 0x8a7a4a : n > 0.15 ? base : 0x1f2416, { rough: 0.9 });
+    }
+    if (designer) return fixed((r + c) % 3 === 0 ? 0xc9a36a : base, { rough: 0.55 });
+    return fixed(base, { rough: 0.75 });
+  };
+  // rounded-box rings from the bottom up (superellipse across, rounded off at the top)
+  const ROWS = 9, SIDES = 20;
+  const rows: V3[][] = [];
+  for (let i = 0; i <= ROWS; i++) {
+    const t = i / ROWS;
+    const y = bot + (top - bot) * t;
+    const shrink = t > 0.72 ? Math.sqrt(Math.max(0, 1 - ((t - 0.72) / 0.28) ** 2)) * 0.25 + 0.75 : 1;
+    const capK = i === 0 || i === ROWS ? 0.001 : 1;
+    const ring: V3[] = [];
+    for (let k = 0; k < SIDES; k++) {
+      const th = (k / SIDES) * Math.PI * 2;
+      const c = Math.cos(th), s = Math.sin(th);
+      const sx = Math.sign(c) * Math.abs(c) ** 0.5, sz = Math.sign(s) * Math.abs(s) ** 0.5;
+      ring.push(v3(ax.x + sx * halfW * shrink * capK, y, zc + sz * (depth / 2) * capK * (t > 0.85 ? 0.85 : 1)));
+    }
+    rows.push(ring);
+  }
+  // rows run up and the ring turns from +x toward +z, so the outside is already (down x across)
+  out.grid(rows, shell, { flat: true, wrap: true });
+  // front pocket and a zip line
+  const pocketZ = zc - depth / 2;
+  const pocketTop = bot + (top - bot) * 0.48;
+  out.box(v3(ax.x, (bot + pocketTop) / 2 + 0.01, pocketZ - 0.016), v3(halfW * 0.7, (pocketTop - bot) / 2 - 0.02, 0.018), designer ? fixed(0x4e3520, { rough: 0.5 }) : camo ? fixed(0x3b4524, { rough: 0.9 }) : fixed(0x2a2a30, { rough: 0.7 }));
+  out.tube([v3(ax.x - halfW * 0.62, pocketTop - 0.012, pocketZ - 0.035), v3(ax.x + halfW * 0.62, pocketTop - 0.012, pocketZ - 0.035)], 0.0022, 4, designer ? METAL.gold : METAL.silver);
+  out.ellipsoid(v3(ax.x + halfW * 0.5, pocketTop - 0.022, pocketZ - 0.036), v3(0.004, 0.009, 0.003), designer ? METAL.gold : METAL.silver, 5, 3);
+  // shoulder straps: from the top of the pack, over the shoulder, down the chest
+  const strap = designer ? fixed(0x3e2a18, { rough: 0.5 }) : fixed(0x141417, { rough: 0.8 });
+  for (const side of [1, -1]) {
+    const dx = side * 0.075;
+    const path: V3[] = [];
+    path.push(v3(ax.x + dx * 1.1, top - 0.02, zBack - 0.01));
+    path.push(v3(ax.x + dx, neck.y - 0.035, torsoZ(body, dx, neck.y - 0.035, -1) - 0.008));
+    path.push(v3(ax.x + dx, neck.y - 0.012, ax.z - 0.01));
+    path.push(v3(ax.x + dx, neck.y - 0.035, torsoZ(body, dx, neck.y - 0.035, 1) + 0.008));
+    for (const dy of [0.1, 0.18, 0.25]) path.push(v3(ax.x + dx * (1 + dy * 0.6), neck.y - dy, torsoZ(body, dx * (1 + dy * 0.6), neck.y - dy, 1) + 0.007));
+    out.tube(path, 0.009, 4, strap, { flat: true });
   }
 }

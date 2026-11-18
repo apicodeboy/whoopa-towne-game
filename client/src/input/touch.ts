@@ -5,7 +5,7 @@ import type { DeviceKind, InputContext, InputFrame, InputSource } from './types'
 const LOOK_RAD_PER_PX = 0.0052;
 const STICK_RADIUS = 58;
 
-type HoldButton = 'fire' | 'jump' | 'reload' | 'throw' | 'scores';
+type HoldButton = 'fire' | 'jump' | 'reload' | 'throw' | 'scores' | 'use' | 'heal';
 
 /**
  * Mobile controls: a floating virtual stick on the left half of the screen, drag anywhere
@@ -31,8 +31,8 @@ export class TouchSource implements InputSource {
   private lookY = 0;
   private dx = 0;
   private dy = 0;
-  private held: Record<HoldButton, boolean> = { fire: false, jump: false, reload: false, throw: false, scores: false };
-  private hit: Record<HoldButton, boolean> = { fire: false, jump: false, reload: false, throw: false, scores: false };
+  private held: Record<HoldButton, boolean> = { fire: false, jump: false, reload: false, throw: false, scores: false, use: false, heal: false };
+  private hit: Record<HoldButton, boolean> = { fire: false, jump: false, reload: false, throw: false, scores: false, use: false, heal: false };
   private fireId = -1;
   private fireX = 0;
   private fireY = 0;
@@ -44,6 +44,11 @@ export class TouchSource implements InputSource {
   private used = false;
   private everTouched = false;
   private disposers: Array<() => void> = [];
+  /** Shows USE / HEAL (JUMP OFF THE PORCH, free roam). */
+  setExtras(on: boolean): void {
+    this.root.classList.toggle('extras', on);
+  }
+
   /** Called the first time the screen is touched. */
   onFirstTouch: (() => void) | null = null;
 
@@ -123,6 +128,9 @@ export class TouchSource implements InputSource {
       hold('throw', 'THROW', 'throw'),
       tap('⇄', 'shoulder', () => (this.pressShoulder = true)),
       hold('scores', 'SCORES', 'scores'),
+      // JUMP OFF THE PORCH / free roam: search, pick up, talk; heal (held)
+      hold('use', 'USE', 'use extra'),
+      hold('heal', 'HEAL', 'heal extra'),
       tap('II', 'pause', () => (this.pressPause = true)),
     ]);
     uiRoot.append(this.root);
@@ -268,6 +276,8 @@ export class TouchSource implements InputSource {
       if (this.held.reload || this.hit.reload) frame.reload = true;
       if (this.held.throw || this.hit.throw) frame.throwBtn = true;
       if (this.held.scores) frame.scoreboard = true;
+      if (this.held.use || this.hit.use) frame.use = true;
+      if (this.held.heal || this.hit.heal) frame.heal = true;
       if (this.pressCrouch) frame.crouchPress = true;
       if (this.pressSwap) frame.slotCycle = 1;
       if (this.pressShoulder) frame.swapShoulder = true;

@@ -50,6 +50,30 @@ export const PLAYER = {
   spawnProtection: 2,
 } as const;
 
+// ---- Moves: roll, ledge grab -------------------------------------------------
+/** Crouch while sprinting: a quick forward roll (low, fast, can't shoot), then back up. */
+export const ROLL = {
+  time: 0.62,
+  /** Speed at the start of the roll, easing to `endSpeed`. */
+  speed: 9.2,
+  endSpeed: 5.4,
+  /** Seconds before you can roll again. */
+  cooldown: 0.35,
+} as const;
+
+/**
+ * Jumping at a wall whose top is within arm's reach grabs the edge and pulls you up onto it.
+ * Only when close: the edge must be `minUp`..`maxUp` above your feet and the wall right in front.
+ */
+export const LEDGE = {
+  minUp: 0.95,
+  maxUp: 2.3,
+  /** How far in front of your body the wall can be. */
+  reach: 0.5,
+  /** Seconds the pull-up takes. */
+  time: 0.55,
+} as const;
+
 // ---- Hitboxes (relative to feet) --------------------------------------------
 export const HITBOX = {
   /** Body capsule: sphere centers at bodyBottom / bodyTop above the feet. */

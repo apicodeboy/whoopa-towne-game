@@ -1,3 +1,4 @@
+import { bindings } from '../input/bindings';
 import type { InputFrame } from '../input/types';
 
 const FOCUSABLE = 'button:not(:disabled), input:not([type="hidden"]), [role="switch"]';
@@ -17,13 +18,39 @@ export class MenuNav {
     root.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse') this.clear();
     });
+    // capture phase: a handled Escape never reaches the game (where it would also mean "pause")
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !e.repeat && this.escape()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, true);
   }
 
   /** Topmost visible menu surface. */
   private scope(): HTMLElement | null {
     const screens = [...this.root.querySelectorAll<HTMLElement>('.screen:not(.hidden)')];
-    if (screens.length > 0) return screens[screens.length - 1];
+    if (screens.length > 0) {
+      const top = screens[screens.length - 1];
+      // a dialog open inside the screen is the only thing to navigate
+      return top.querySelector<HTMLElement>('.eco-dim:not(.hidden)') ?? top;
+    }
     return this.root.querySelector<HTMLElement>('.results-bar:not(.hidden)');
+  }
+
+  /** Escape on a keyboard: the same as B on a controller, for the store screens. */
+  escape(): boolean {
+    const screens = [...this.root.querySelectorAll<HTMLElement>('.screen:not(.hidden)')];
+    const top = screens[screens.length - 1];
+    if (!top || !(top.classList.contains('eco') || top.classList.contains('eco-auth-wrap') || top.classList.contains('aj-talk'))) return false;
+    const dialog = top.querySelector<HTMLElement>('.eco-dim:not(.hidden)');
+    if (dialog) {
+      dialog.classList.add('hidden');
+      return true;
+    }
+    top.querySelector<HTMLElement>('[data-back]:not(:disabled)')?.click();
+    this.clear();
+    return true;
   }
 
   private candidates(scope: HTMLElement): HTMLElement[] {
@@ -45,6 +72,7 @@ export class MenuNav {
 
   /** Feed one frame of input. Returns true if it consumed a navigation action. */
   handle(f: InputFrame): boolean {
+    if (bindings.capturing) return false; // Settings is waiting for a button to bind
     if (f.navX === 0 && f.navY === 0 && !f.accept && !f.back) return false;
     const scope = this.scope();
     if (!scope) return false;

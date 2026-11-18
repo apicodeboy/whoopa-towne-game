@@ -155,6 +155,11 @@ export interface CharacterScreenDeps {
   /** The player kept a new look. */
   onKeep: (look: Appearance) => void;
   onClose: () => void;
+  /** AJ's exclusives: may this player wear it? (field, option). Unowned ones show locked. */
+  owns?: (field: string, option: string) => boolean;
+  /** Opens AJ's (an unowned exclusive was picked) and TRAP. */
+  openStore?: () => void;
+  openTrap?: () => void;
 }
 
 export class CharacterScreen {
@@ -194,6 +199,11 @@ export class CharacterScreen {
       this.headerBack,
       el('div', 'cc-title', [el('b', '', 'CHARACTER'), el('span', '', ' CREATOR')]),
       this.dirtyMark,
+      ...(deps.openTrap ? [(() => {
+        const b = button('TRAP', 'btn small cc-trap', () => deps.openTrap!());
+        b.title = 'Your TRAP: everything you own from AJ\'s';
+        return b;
+      })()] : []),
     ]);
 
     // ---- left: categories
@@ -368,7 +378,7 @@ export class CharacterScreen {
     const row = el('div', 'cc-irow', [openBtn]);
     if (s.field) {
       const cycle = (dir: number) => {
-        const ok = s.options.filter((o) => o.available !== false);
+        const ok = s.options.filter((o) => o.available !== false && !this.lockedPremium(s, o));
         const i = ok.findIndex((o) => o.id === this.draft[s.field!]);
         const next = ok[(i + dir + ok.length) % ok.length];
         this.pick(s, next.id, false);
@@ -386,10 +396,20 @@ export class CharacterScreen {
     return row;
   }
 
+  /** An AJ's exclusive this player does not own. */
+  private lockedPremium(s: Sub, o: LookOption): boolean {
+    return !!o.premium && !(s.field && this.deps.owns?.(s.field, o.id));
+  }
+
   private optionButton(s: Sub, o: LookOption): HTMLButtonElement {
-    const locked = o.available === false;
+    const premium = this.lockedPremium(s, o);
+    const locked = o.available === false || premium;
     const selected = this.isSelected(s, o);
-    const b = button('', `cc-opt ${s.kind === 'swatches' ? 'swatch' : 'card'}${selected ? ' on' : ''}${locked ? ' locked' : ''}`, () => {
+    const b = button('', `cc-opt ${s.kind === 'swatches' ? 'swatch' : 'card'}${selected ? ' on' : ''}${locked ? ' locked' : ''}${o.premium ? ' aj' : ''}`, () => {
+      if (premium) {
+        this.deps.openStore?.();
+        return;
+      }
       if (locked) {
         b.classList.remove('shake');
         void b.offsetWidth;
@@ -401,16 +421,17 @@ export class CharacterScreen {
     b.setAttribute('aria-pressed', String(selected));
     if (locked) {
       b.setAttribute('aria-disabled', 'true');
-      b.title = `${o.name} · ${SOON}`;
+      b.title = premium ? `${o.name} · sold at AJ's` : `${o.name} · ${SOON}`;
     }
     if (s.kind === 'swatches') {
       b.style.setProperty('--sw', o.color ?? '#888');
       b.title = o.name;
       b.setAttribute('aria-label', o.name);
       b.append(el('i', 'cc-sw'), el('span', 'cc-swname', o.name));
+      if (premium) b.append(el('span', 'cc-aj', "AJ's"));
     } else {
       b.append(el('span', 'cc-oname', o.name));
-      if (locked) b.append(el('span', 'cc-soon', 'SOON'));
+      if (locked) b.append(el('span', premium ? 'cc-aj' : 'cc-soon', premium ? "AJ's" : 'SOON'));
       if (s.kind === 'details') b.append(el('span', 'cc-check', selected ? '✓' : ''));
     }
     return b;

@@ -837,3 +837,59 @@
   }
 }
 
+
+/* ---------------------------------------------------------------- settings → controls */
+.binds {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bind-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  column-gap: 18px;
+}
+.bind-row .slabel {
+  font-size: 13px;
+}
+.bind-key {
+  min-width: 74px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  cursor: pointer;
+}
+.bind-key:hover,
+.bind-key:focus-visible {
+  border-color: #fff;
+}
+.bind-key.listening {
+  border-color: var(--accent, #ffd23f);
+  background: rgba(255, 210, 63, 0.14);
+  font: 600 12px 'Inter', var(--font);
+  animation: bind-pulse 0.9s ease-in-out infinite;
+}
+@keyframes bind-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+.bind-foot {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+.bind-status {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.btn.small {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 12px;
+}

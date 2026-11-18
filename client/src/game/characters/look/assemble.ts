@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { DEFAULT_APPEARANCE, LOOK_FIELD_KEYS, type Appearance } from '@shared/config/appearance';
+import { BOTTOM_COLORS, DEFAULT_APPEARANCE, LOOK_FIELD_KEYS, SHOE_COLORS, TOP_COLORS, type Appearance, type LookOption } from '@shared/config/appearance';
 import type { CharacterTemplate } from '../../assets';
 import { LIGHTING } from '../../lighting';
 import { buildDetails, buildEarrings, buildFacePiercing, buildFacialHair, buildGlasses, buildLipPiercing, buildMouth } from './face';
 import { buildHair, transferHair, tuckHair } from './hair';
 import { HeadRig, shapeHead, type HeadSurface } from './headRig';
 import { buildHat } from './headwear';
-import { buildCrewBands, buildNecklace, buildWrist, type BodyQuery } from './jewelry';
+import { buildBackpack, buildCrewBands, buildNecklace, buildWrist, type BodyQuery } from './jewelry';
 import { PartLibrary, centroid, components, type Piece, type Rig } from './library';
 import { ProcMesh, SLOT, smoothstep, style, v3, type V3 } from './meshKit';
 import { EXPRESSION_PRESETS, PAINT_STRIDE, pack, type Expression } from './palette';
@@ -25,6 +25,8 @@ export interface Assembled {
   geometry: THREE.BufferGeometry;
   /** Per vertex: slot, slot B, mix, shade, packed fixed color (see palette.ts). */
   paint: Float32Array;
+  /** Bind-pose positions in meters (AJ's prints are drawn from these). */
+  rigPos: Float32Array;
   /** Lips position in the bind pose (meters), for things held in the mouth. */
   mouth: V3;
   /** Heights (bind pose, meters) the Character screen frames its camera on. */
@@ -410,8 +412,21 @@ const HEIGHT_SCALE: Record<string, number> = { short: 0.95, average: 1, tall: 1.
 /** Fields that change the geometry (colors are painted per character and stay out of the key). */
 const COLOR_FIELDS = new Set(['skin', 'eyeColor', 'hairColor', 'facialHairColor', 'topColor', 'bottomColor', 'shoeColor', 'teeth', 'mouthProp', 'height']);
 
+/** AJ's metallic finishes (shine is in the geometry, so they are part of the key). */
+function finishOf(list: readonly LookOption[], id: string): number {
+  return list.find((o) => o.id === id)?.metal ?? 0;
+}
+function finishes(look: Readonly<Appearance>): number[] {
+  const out: number[] = [];
+  out[SLOT.TOP] = finishOf(TOP_COLORS, look.topColor);
+  out[SLOT.BOTTOM] = finishOf(BOTTOM_COLORS, look.bottomColor);
+  out[SLOT.SHOE] = finishOf(SHOE_COLORS, look.shoeColor);
+  return out;
+}
+
 export function geometryKey(look: Readonly<Appearance>, expression = 'neutral'): string {
-  return LOOK_FIELD_KEYS.filter((k) => !COLOR_FIELDS.has(k)).map((k) => look[k]).join('|') + `|${look.details.join(',')}|${expression}`;
+  return LOOK_FIELD_KEYS.filter((k) => !COLOR_FIELDS.has(k)).map((k) => look[k]).join('|') + `|${look.details.join(',')}|${expression}`
+    + `|${look.backpack ?? 'none'}|${finishes(look).filter((x) => x !== undefined).join(',')}`;
 }
 
 export class LookBuilder {
@@ -645,6 +660,7 @@ export class LookBuilder {
     let girth = BUILDS[look.build] ?? {};
     if (look.bodyType === 'neutral') girth = combine(girth, NEUTRAL);
     shapeBody([...body, skin], rig, girth);
+    if (look.wrist === 'gloves') paintGloves(body, rig);
     // streetwear cuts on top of the body shape
     if (look.top === 'puffer') makePuffer(body, rig);
     if (baggy) makeBaggy(legs, rig);
@@ -661,10 +677,15 @@ export class LookBuilder {
     const bq = bodyQuery(rig, [...body, skin]);
     mark('body measure');
     const jew = new ProcMesh({ nearest: true, fallback: 'Chest' });
-    buildNecklace(look.necklace, bq, jew);
-    buildWrist(look.wrist, bq, jew);
+    const fine = new ProcMesh({ nearest: true, fallback: 'Chest' });
+    buildNecklace(look.necklace, bq, jew, fine);
+    buildWrist(look.wrist, bq, jew, fine);
     buildCrewBands(bq, jew);
     pushProc(works, jew, rig, 'jewelry', [...body, skin]);
+    pushProc(works, fine, rig, 'fine', [...body, skin]);
+    const pack = new ProcMesh({ bone: 'Chest' });
+    buildBackpack(look.backpack ?? 'none', bq, pack);
+    pushProc(works, pack, rig, 'backpack', []);
     mark('jewelry');
     const out = this.merge(key, rig, works, h, look);
     mark('merge');
@@ -678,7 +699,10 @@ export class LookBuilder {
       ni += w.index.length;
     }
     const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
-    const paint = new Float32Array(nv * PAINT_STRIDE), pbr = new Float32Array(nv * 2);
+    const paint = new Float32Array(nv * PAINT_STRIDE), pbr = new Float32Array(nv * 2), rigPos = new Float32Array(nv * 3);
+    const shine = finishes(look);
+    // ink line width per vertex (stones and engraving would drown in the full outline)
+    const ink = new Float32Array(nv).fill(1);
     const index = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
     const nm = new THREE.Matrix3().getNormalMatrix(rig.Finv);
     const p = v3();
@@ -691,10 +715,17 @@ export class LookBuilder {
         p.fromArray(w.nrm, i * 3).applyMatrix3(nm).normalize();
         nrm.set([p.x, p.y, p.z], (ov + i) * 3);
       }
+      rigPos.set(w.pos, ov * 3);
+      if (w.tag === 'fine') ink.fill(0.12, ov, ov + n);
       si.set(w.si, ov * 4);
       sw.set(w.sw, ov * 4);
       paint.set(w.paint, ov * PAINT_STRIDE);
       pbr.set(w.pbr, ov * 2);
+      // AJ's metallic cloth (gold foil tops, 24K kicks...)
+      for (let i = 0; i < n; i++) {
+        const m = shine[w.paint[i * PAINT_STRIDE]];
+        if (m) pbr.set([m, 0.42 - m * 0.22], (ov + i) * 2);
+      }
       for (let k = 0; k < w.index.length; k++) index[oi + k] = w.index[k] + ov;
       ov += n;
       oi += w.index.length;
@@ -705,16 +736,33 @@ export class LookBuilder {
     g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     g.setAttribute('pbr', new THREE.BufferAttribute(pbr, 2));
+    g.setAttribute('ink', new THREE.BufferAttribute(ink, 1));
     g.setIndex(new THREE.BufferAttribute(index, 1));
     g.computeBoundingBox();
     g.computeBoundingSphere();
     const shapeLift = look.build === 'heavy' ? 0.01 : 0;
     return {
-      key, rig, geometry: g, paint,
+      key, rig, geometry: g, paint, rigPos,
       mouth: h.mouth.clone(),
       frame: { eyeY: h.eyeY, topY: h.crownY + (look.hat !== 'none' ? 0.04 : 0), chestY: (rig.at.get('Chest')?.y ?? 1.35) + shapeLift },
       heightScale: HEIGHT_SCALE[look.height] ?? 1,
     };
+  }
+}
+
+/** AJ's shooter gloves: the hands (skin on the wrist and finger bones) turn into black leather. */
+function paintGloves(body: Work[], rig: Rig): void {
+  const hand = jointSet(rig, (k) => /^(Wrist|Index|Middle|Ring|Pinky|Thumb)/.test(k));
+  const leather = pack(...lin(0x17171b));
+  for (const w of body) {
+    for (let i = 0; i < w.pos.length / 3; i++) {
+      const a = i * PAINT_STRIDE;
+      if (w.paint[a] !== SLOT.SKIN || weightOnSet(w, i, hand) < 0.5) continue;
+      w.paint[a] = SLOT.FIXED;
+      w.paint[a + 1] = SLOT.FIXED;
+      w.paint[a + 4] = leather;
+      w.pbr.set([0.12, 0.5], i * 2);
+    }
   }
 }
 

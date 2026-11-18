@@ -1,0 +1,293 @@
+/*
+ * One look everywhere: the title screen's style (Inter, frosted dark glass, rounded corners,
+ * pill buttons, gold accent) carried into the character creator, loadout, settings, pause,
+ * lobby, results, AJ's / TRAP and the in-game HUD. Loaded last, so it wins over the older
+ * sketchbook theme without touching any layout.
+ */
+:root {
+  --accent: #f6b73c;
+  --accent-ink: #161208;
+  --accent-2: #ffd977;
+  --good: #36d17a;
+  --panel: rgba(18, 18, 22, 0.72);
+  --line: rgba(255, 255, 255, 0.14);
+  --glass-blur: blur(14px);
+  --font-ui: 'Inter', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  /* the big titles keep the street lettering, in gold */
+  --font-display: 'Inter', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------- no more ink wobble */
+.menu-panel::before,
+.lobby-panel::before,
+.overlay-panel::before,
+.card::before,
+.health::before,
+.ammo::before,
+.minimap-box::before,
+.ph-count::before,
+.ph-mid::before,
+.ph-armor::before,
+.ph-out::before,
+.ph-win::before,
+.porch-mode::before,
+.btn::before,
+.menu-panel::after,
+.lobby-panel::after,
+.overlay-panel::after {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- panels: frosted glass */
+.screen.overlay,
+.screen.lobby {
+  background: rgba(8, 9, 12, 0.55);
+  font-family: var(--font-ui);
+}
+.overlay-panel,
+.lobby-panel {
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: rgba(20, 20, 24, 0.78);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-ui);
+}
+.panel-title,
+.lobby-title {
+  font-family: var(--font-graffiti);
+  color: var(--accent);
+  letter-spacing: 1px;
+  text-shadow: 3px 3px 0 #000;
+}
+.overlay-panel .lbl,
+.lobby-panel .lbl,
+.sgroup .lbl {
+  font: 700 11px var(--font-ui);
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+.card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+  font-family: var(--font-ui);
+}
+.card.on,
+.card.selected,
+.card[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: rgba(246, 183, 60, 0.12);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.card .cname,
+.card h3,
+.card .name {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* ---------------------------------------------------------------- buttons: pills */
+.btn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+  font: 600 14px var(--font-ui);
+  letter-spacing: 0.02em;
+  transform: none;
+}
+.btn:hover:not(:disabled),
+.btn:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: #fff;
+  box-shadow: none;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+.btn.primary {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-ink);
+  transform: none;
+  box-shadow: 0 8px 24px rgba(246, 183, 60, 0.28);
+  font-weight: 700;
+}
+.btn.primary:hover:not(:disabled),
+.btn.primary:focus-visible {
+  background: var(--accent-2);
+  box-shadow: 0 8px 24px rgba(246, 183, 60, 0.4);
+}
+.btn.primary:active:not(:disabled) {
+  transform: scale(0.97);
+  box-shadow: 0 4px 12px rgba(246, 183, 60, 0.3);
+}
+.btn.ghost {
+  background: transparent;
+}
+.btn.danger,
+.btn.ghost.danger {
+  color: #ff8a7a;
+  border-color: rgba(255, 120, 100, 0.45);
+}
+.segmented {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.seg {
+  font: 600 12px var(--font-ui);
+  letter-spacing: 0.04em;
+}
+.seg.on,
+.segmented .seg.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.toggle {
+  border-radius: 999px;
+  font: 700 11px var(--font-ui);
+}
+.toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.slider {
+  accent-color: var(--accent);
+}
+.srow .slabel {
+  font-family: var(--font-ui);
+}
+.nav-focus {
+  outline: 3px solid #fff !important;
+  outline-offset: 3px;
+}
+
+/* ---------------------------------------------------------------- character creator */
+.screen.overlay.creator {
+  background:
+    radial-gradient(ellipse at 50% 80%, rgba(246, 183, 60, 0.1), transparent 55%),
+    linear-gradient(180deg, #17171a, #0f0f11);
+  font-family: var(--font-ui);
+}
+.creator .cc-cat,
+.creator .cc-panel,
+.creator .cc-irow,
+.creator .cc-opt {
+  border-radius: 16px;
+  font-family: var(--font-ui);
+}
+.creator .cc-panel {
+  border: 1px solid var(--line);
+  background: rgba(20, 20, 24, 0.7);
+}
+.creator .cc-cat.on {
+  color: #fff;
+}
+.creator .cc-keep {
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  transform: none;
+}
+
+/* ---------------------------------------------------------------- in-game HUD: glass panels */
+.hud {
+  font-family: var(--font-ui);
+}
+.health,
+.ammo,
+.gunpic,
+.minimap-box,
+.ph-count,
+.ph-mid,
+.ph-armor,
+.ph-slot,
+.respawn,
+.scoreboard,
+.killconfirm,
+.legend {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(14, 14, 18, 0.62);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.health {
+  border-left: 1px solid var(--line);
+}
+.gunpic {
+  border-left: 1px solid var(--line);
+}
+.health .cap,
+.ammo .wname,
+.gunpic .gp-name,
+.ph-armor .cap {
+  font: 700 10px var(--font-ui);
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.62);
+}
+.gunpic .gp-name {
+  font-size: 12px;
+  color: #fff;
+}
+.health .num,
+.ammo .mag,
+.ammo .count {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-shadow: none;
+}
+.health .fill {
+  background: linear-gradient(90deg, #36d17a, #8ef0a8);
+}
+.health.low .fill {
+  background: linear-gradient(90deg, #ff3b30, #ff8a5c);
+}
+.ph-slot.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.ph-out,
+.ph-win {
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: rgba(20, 20, 24, 0.82);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-ui);
+}
+.ph-out-title,
+.respawn .who {
+  font: 800 30px var(--font-ui);
+  letter-spacing: -0.02em;
+}
+.ph-banner,
+.announce {
+  font-family: var(--font-graffiti);
+}
+.ph-banner[data-tone='good'],
+.announce.good {
+  color: var(--accent);
+}
+.air-label span {
+  color: var(--accent);
+}
+.dmg-pop {
+  font-family: var(--font-ui);
+  font-weight: 900;
+}
+.glyph {
+  font-family: var(--font-ui);
+}

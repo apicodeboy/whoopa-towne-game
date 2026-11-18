@@ -4,6 +4,8 @@ export interface PauseActions {
   resume(): void;
   openLoadout(): void;
   openSettings(): void;
+  /** Your items (TRAP): what you put on shows from your next life / match. */
+  openTrap?(): void;
   leave(): void;
   /** Host of a private lobby only. */
   endMatch(): void;
@@ -45,6 +47,7 @@ export class PauseMenu {
       resume,
       button('LOADOUT', 'btn', () => actions.openLoadout()),
       button('SETTINGS', 'btn', () => actions.openSettings()),
+      ...(actions.openTrap ? [button('TRAP', 'btn', () => actions.openTrap!())] : []),
       this.endBtn,
       this.leaveBtn,
       this.noteEl,

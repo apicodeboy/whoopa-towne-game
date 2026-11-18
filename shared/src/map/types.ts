@@ -141,7 +141,7 @@ export interface MapDef {
   /** Big area names shown floating over the map while people are in the air (to call landings). */
   districts?: Array<{ name: string; x: number; z: number }>;
   /** What lies beyond each edge, for the backdrop. Unset sides get a hazy skyline. */
-  backdrop?: Partial<Record<'n' | 's' | 'e' | 'w', 'city' | 'hills' | 'ocean'>>;
+  backdrop?: Partial<Record<'n' | 's' | 'e' | 'w', 'city' | 'hills' | 'ocean' | 'desert'>>;
 }
 
 /** Quaternion (x,y,z,w) for a solid's orientation. */

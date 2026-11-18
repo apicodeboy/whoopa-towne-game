@@ -29,6 +29,12 @@ export interface CharacterPose {
   skydive?: boolean;
   /** Double jump: 0..1 through the front flip (undefined / < 0 = not flipping). */
   flip?: number;
+  /** Using a healing item: 0 bandage, 1 first-aid kit, 2 drink; -1 / undefined = not healing. */
+  heal?: number;
+  /** Rolling (sprint + crouch): 0..1 through the roll; -1 / undefined = not rolling. */
+  roll?: number;
+  /** Pulling up onto a ledge: 0..1 through the climb; -1 / undefined = not climbing. */
+  climb?: number;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { Room, matchMaker, type Client } from '@colyseus/core';
-import { sanitizeAppearance, type Appearance } from '../../../shared/src/config/appearance.ts';
+import { sanitizeAppearance, stripUnowned, type Appearance } from '../../../shared/src/config/appearance.ts';
+import { economy } from '../economy/index.ts';
 import type { TeamId } from '../../../shared/src/config/crews.ts';
 import {
   INVITE_CODE_ALPHABET, INVITE_CODE_LENGTH, MAX_PLAYERS, MIN_PLAYERS, MODE_IDS, SNAPSHOT_EVERY, TEAM_SIZE, TICK_MS,
@@ -23,6 +24,9 @@ const MAX_CATCHUP_TICKS = 5;
 interface Member {
   loadout: Loadout;
   look: Appearance;
+  /** Signed-in account (null = guest) and the AJ's exclusives it may wear ("field:option"). */
+  accountId: string | null;
+  owned: Set<string>;
   /** Player index in the running sim (-1 in the lobby). */
   idx: number;
   joinedAt: number;
@@ -111,7 +115,11 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     // cosmetic; stored for the next match (a running match keeps the look it started with)
     this.onMessage(MSG.LOOK, (client, msg: unknown) => {
       const m = this.members.get(client.sessionId);
-      if (m) m.look = sanitizeAppearance(msg, m.look);
+      if (!m) return;
+      // ownership is re-read (they may have bought something since joining)
+      const acc = m.accountId ? economy()?.store.state.accounts[m.accountId] ?? null : null;
+      if (acc) m.owned = economy()!.ownedKeys(acc);
+      m.look = stripUnowned(sanitizeAppearance(msg, m.look), m.owned, m.look);
     });
 
     this.onMessage(MSG.CONFIG, (client, msg: { mode?: string; fillBots?: boolean; botDifficulty?: string; squads?: string }) => {
@@ -180,7 +188,10 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
   override onJoin(client: Client, options: JoinOptions): void {
     const p = new LobbyPlayer();
     p.id = client.sessionId;
-    p.name = this.uniqueName(sanitizeName(options?.name));
+    // signed in: the account's name and the AJ's exclusives it owns; guests wear free looks only
+    const acc = economy()?.accountFor((options as { token?: unknown } | undefined)?.token) ?? null;
+    const owned = acc ? economy()!.ownedKeys(acc) : new Set<string>();
+    p.name = this.uniqueName(acc ? acc.username : sanitizeName(options?.name));
     p.team = this.teamSize(0) <= this.teamSize(1) ? 0 : 1;
     p.ready = false;
     p.connected = true;
@@ -188,7 +199,8 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     p.primary = loadout.primary;
     p.throwable = loadout.throwable;
     this.state.players.set(client.sessionId, p);
-    this.members.set(client.sessionId, { loadout, look: sanitizeAppearance(options?.look), idx: -1, joinedAt: this.joinCounter++ });
+    const look = stripUnowned(sanitizeAppearance(options?.look ?? acc?.look ?? undefined), owned);
+    this.members.set(client.sessionId, { loadout, look, accountId: acc?.id ?? null, owned, idx: -1, joinedAt: this.joinCounter++ });
     if (!this.state.hostId || !this.state.players.has(this.state.hostId)) this.state.hostId = client.sessionId;
   }
 

@@ -1,4 +1,4 @@
-import { PLAYER, THROW } from '../config/game';
+import { LEDGE, PLAYER, ROLL, THROW } from '../config/game';
 import { HEAL_KINDS, PORCH } from '../config/porch';
 import {
   SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, SLOT_THROWABLE, THROWABLE_IDS, WEAPONS, WEAPON_IDS,
@@ -6,7 +6,7 @@ import {
 } from '../config/weapons';
 import type { SpawnPoint } from '../map/types';
 import { clamp } from '../math';
-import { Q_PROJECTILE, type MoveResult, type PhysicsWorld } from './physics';
+import { Q_CAMERA, Q_PROJECTILE, type MoveResult, type PhysicsWorld } from './physics';
 
 /** Input button bitmask. */
 export const BTN = {
@@ -23,6 +23,8 @@ export const BTN = {
   HEAL: 256,
   /** Drop the weapon in hand. */
   DROP: 512,
+  /** Roll (crouch pressed while sprinting). */
+  ROLL: 1024,
 } as const;
 
 /** PlayerState.air: on the ground, riding the transport, or hanging from a balloon. */
@@ -141,6 +143,18 @@ export interface PlayerState {
   airT: number;
   /** Jumps used up in the air since leaving the ground (the double jump). */
   airJumps: number;
+  /** Rolling: seconds left (> 0), or the cooldown still running (< 0). Roll direction (unit). */
+  rollT: number;
+  rollX: number;
+  rollZ: number;
+  /** Pulling up onto a ledge: seconds left, where it started and where it ends (feet). */
+  climbT: number;
+  climbAX: number;
+  climbAY: number;
+  climbAZ: number;
+  climbBX: number;
+  climbBY: number;
+  climbBZ: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -152,6 +166,7 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'wA', 'wB', 'wH', 'thr', 'magB', 'pool', 'ammoL', 'ammoM', 'ammoS', 'ammoH',
   'bandages', 'medkits', 'drinks', 'healT', 'healKind',
   'air', 'windX', 'windZ', 'riot', 'hp', 'armor', 'airT', 'airJumps',
+  'rollT', 'rollX', 'rollZ', 'climbT', 'climbAX', 'climbAY', 'climbAZ', 'climbBX', 'climbBY', 'climbBZ',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -193,6 +208,7 @@ export function playerStateDiffers(a: PlayerState, b: PlayerState): boolean {
   if (Math.abs(a.fireCd - b.fireCd) > 1e-4 || Math.abs(a.reloadT - b.reloadT) > 1e-4) return true;
   if (Math.abs(a.swapT - b.swapT) > 1e-4 || Math.abs(a.throwCd - b.throwCd) > 1e-4) return true;
   if (Math.abs(a.bloom - b.bloom) > 1e-3) return true;
+  if (Math.abs(a.rollT - b.rollT) > 1e-4 || Math.abs(a.climbT - b.climbT) > 1e-4) return true;
   return false;
 }
 
@@ -301,6 +317,11 @@ export interface StepActions {
   /** Finished using a healing item this step (HEAL_KINDS index, -1 = none). */
   healed: number;
   healStart: boolean;
+  /** Let go of HEAL (or fired) before the item was done. */
+  healCanceled: boolean;
+  /** Started a roll / grabbed a ledge this tick. */
+  rolled: boolean;
+  climbed: boolean;
   /** Touched down from a balloon (or straight out of a skydive) this step. */
   touchdown: boolean;
   /** The balloons went up this step (end of the skydive). */
@@ -314,7 +335,7 @@ export function makeStepActions(): StepActions {
     shot: false, shotSeed: 0, shotSpread: 0, shotSlot: 0, threw: false,
     reloadStart: false, reloadDone: false, dryFire: false,
     jumped: false, landed: false, landSpeed: 0, swapped: false,
-    healed: -1, healStart: false, touchdown: false, deployed: false, doubleJumped: false,
+    healed: -1, healStart: false, healCanceled: false, rolled: false, climbed: false, touchdown: false, deployed: false, doubleJumped: false,
   };
 }
 
@@ -322,7 +343,7 @@ function resetActions(a: StepActions): void {
   a.shot = false; a.shotSeed = 0; a.shotSpread = 0; a.shotSlot = 0; a.threw = false;
   a.reloadStart = false; a.reloadDone = false; a.dryFire = false;
   a.jumped = false; a.landed = false; a.landSpeed = 0; a.swapped = false;
-  a.healed = -1; a.healStart = false; a.touchdown = false; a.deployed = false; a.doubleJumped = false;
+  a.healed = -1; a.healStart = false; a.healCanceled = false; a.rolled = false; a.climbed = false; a.touchdown = false; a.deployed = false; a.doubleJumped = false;
 }
 
 export function eyeHeight(crouching: number | boolean): number {
@@ -449,6 +470,36 @@ function stepSkydive(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWor
 const mv: MoveResult = { x: 0, y: 0, z: 0, grounded: false };
 
 /**
+ * Looks for an edge to grab right in front: a wall at chest height within reach, whose top is
+ * between LEDGE.minUp and LEDGE.maxUp above the feet with room to stand on it. Starts the
+ * pull-up when there is one.
+ */
+function tryGrabLedge(s: PlayerState, phys: PhysicsWorld, sinY: number, cosY: number, act: StepActions): void {
+  const fx = -sinY, fz = -cosY;
+  const wall = phys.raycast(s.x, s.y + 1.15, s.z, fx, 0, fz, PLAYER.radius + LEDGE.reach, Q_CAMERA);
+  if (wall < 0) return;
+  // straight down just past the face of the wall, from above the highest grabbable edge
+  const px = s.x + fx * (wall + 0.25), pz = s.z + fz * (wall + 0.25);
+  const from = s.y + LEDGE.maxUp + 0.35;
+  const down = phys.raycast(px, from, pz, 0, -1, 0, LEDGE.maxUp + 0.35 - LEDGE.minUp, Q_CAMERA);
+  if (down <= 0.02) return; // no edge in reach (or the wall goes higher than that)
+  const top = from - down;
+  // stand a body-width past the edge, with room to stand and nothing over our head on the way up
+  const tx = s.x + fx * (wall + PLAYER.radius + 0.12), tz = s.z + fz * (wall + PLAYER.radius + 0.12);
+  // (cheap rays first; the body-sized test only when everything else says yes)
+  if (phys.raycast(s.x, s.y + 1.5, s.z, 0, 1, 0, Math.max(0.1, top + PLAYER.height - (s.y + 1.5)), Q_CAMERA) >= 0) return;
+  if (phys.raycast(tx, top + 0.05, tz, 0, 1, 0, PLAYER.height, Q_CAMERA) >= 0) return;
+  if (!phys.canStandAt(tx, top + 0.03, tz)) return;
+  s.climbT = LEDGE.time;
+  s.climbAX = s.x; s.climbAY = s.y; s.climbAZ = s.z;
+  s.climbBX = tx; s.climbBY = top + 0.03; s.climbBZ = tz;
+  s.vx = s.vy = s.vz = 0;
+  s.reloadT = 0;
+  s.healT = 0;
+  act.climbed = true;
+}
+
+/**
  * Advances one player by one fixed tick. Pure function of (state, input, static world):
  * the client runs it to predict, the server runs it for the truth, and both get the
  * same answer.
@@ -482,7 +533,30 @@ export function stepPlayer(
     return;
   }
 
-  const btn = frozen ? 0 : cmd.buttons;
+  // ---- pulling up onto a ledge: up the wall first, then over the edge ----------
+  if (s.climbT > 0) {
+    s.climbT = Math.max(0, s.climbT - dt);
+    const t = 1 - s.climbT / LEDGE.time;
+    const ease = (k: number) => k * k * (3 - 2 * k);
+    const up = ease(Math.min(1, t / 0.62)), over = ease(Math.max(0, (t - 0.4) / 0.6));
+    s.x = s.climbAX + (s.climbBX - s.climbAX) * over;
+    s.z = s.climbAZ + (s.climbBZ - s.climbAZ) * over;
+    s.y = s.climbAY + (s.climbBY - s.climbAY) * up;
+    s.vx = s.vy = s.vz = 0;
+    s.crouching = 0;
+    s.sprinting = 0;
+    s.aiming = 0;
+    s.grounded = s.climbT <= 0 ? 1 : 0;
+    s.airJumps = 0;
+    if (s.fireCd > 0) s.fireCd -= dt;
+    if (s.swapT > 0) s.swapT = Math.max(0, s.swapT - dt);
+    s.jumpHeld = (cmd.buttons & BTN.JUMP) !== 0 ? 1 : 0;
+    s.trig = (cmd.buttons & BTN.FIRE) !== 0 ? 1 : 0;
+    s.healHeld = (cmd.buttons & BTN.HEAL) !== 0 ? 1 : 0;
+    return;
+  }
+
+  let btn = frozen ? 0 : cmd.buttons;
   let mx = frozen ? 0 : clamp(cmd.mx, -1, 1);
   let mz = frozen ? 0 : clamp(cmd.mz, -1, 1);
   const inLen = Math.hypot(mx, mz);
@@ -490,25 +564,50 @@ export function stepPlayer(
     mx /= inLen;
     mz /= inLen;
   }
-  const firing = (btn & BTN.FIRE) !== 0;
+  let firing = (btn & BTN.FIRE) !== 0;
+
+  // ---- roll: crouch pressed while sprinting on the ground --------------------
+  const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
+  if (s.rollT < 0) s.rollT = Math.min(0, s.rollT + dt); // cooling down
+  if ((btn & BTN.ROLL) !== 0 && s.rollT === 0 && s.grounded && s.sprinting && s.healT <= 0) {
+    const hs = Math.hypot(s.vx, s.vz);
+    s.rollX = hs > 0.5 ? s.vx / hs : -sinY;
+    s.rollZ = hs > 0.5 ? s.vz / hs : -cosY;
+    s.rollT = ROLL.time;
+    s.reloadT = 0;
+    act.rolled = true;
+  }
+  const rolling = s.rollT > 0;
+  if (rolling) {
+    // committed to the roll: no shooting, aiming, reloading, throwing or jumping out of it
+    btn &= ~(BTN.FIRE | BTN.AIM | BTN.RELOAD | BTN.THROW | BTN.JUMP | BTN.HEAL);
+    firing = false;
+  }
 
   // ---- stance ---------------------------------------------------------------
-  const wantCrouch = (btn & BTN.CROUCH) !== 0;
+  const wantCrouch = (btn & BTN.CROUCH) !== 0 || rolling;
   if (wantCrouch) s.crouching = 1;
   else if (s.crouching && phys.canStandAt(s.x, s.y, s.z)) s.crouching = 0;
 
   let weapon = weaponInSlot(s, s.slot);
-  s.aiming = (btn & BTN.AIM) !== 0 && weapon !== null && weapon.magSize > 0 ? 1 : 0;
+  s.aiming = !rolling && (btn & BTN.AIM) !== 0 && weapon !== null && weapon.magSize > 0 ? 1 : 0;
   s.sprinting =
-    (btn & BTN.SPRINT) !== 0 && mz > 0.5 && Math.abs(mx) < 0.75 && !s.crouching && !s.aiming && !firing ? 1 : 0;
+    !rolling && (btn & BTN.SPRINT) !== 0 && mz > 0.5 && Math.abs(mx) < 0.75 && !s.crouching && !s.aiming && !firing ? 1 : 0;
 
   // ---- horizontal velocity --------------------------------------------------
   const speed = targetSpeed(s, weapon);
-  const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
   // right = (cos, 0, -sin), forward = (-sin, 0, -cos)
   const wishX = (cosY * mx - sinY * mz) * speed;
   const wishZ = (-sinY * mx - cosY * mz) * speed;
-  if (s.grounded || inLen > 0.01) {
+  if (rolling) {
+    // committed: straight along the roll, fast at first and easing off
+    s.rollT = Math.max(0, s.rollT - dt);
+    const k = 1 - s.rollT / ROLL.time;
+    const v = ROLL.speed + (ROLL.endSpeed - ROLL.speed) * k;
+    s.vx = s.rollX * v;
+    s.vz = s.rollZ * v;
+    if (s.rollT <= 0) s.rollT = -ROLL.cooldown;
+  } else if (s.grounded || inLen > 0.01) {
     const maxDv = (s.grounded ? PLAYER.accelGround : PLAYER.accelAir) * dt;
     let dvx = wishX - s.vx, dvz = wishZ - s.vz;
     const dl = Math.hypot(dvx, dvz);
@@ -567,6 +666,12 @@ export function stepPlayer(
     s.vy = 0;
   }
 
+  // ---- ledge grab: in the air, pushing into a wall whose top is within reach ---
+  if (!s.grounded && !frozen && mz > 0.3 && !rolling && s.vy < 4 && s.air === AIR_GROUND) {
+    tryGrabLedge(s, phys, sinY, cosY, act);
+    if (act.climbed) return;
+  }
+
   // ---- weapons --------------------------------------------------------------
   if (s.fireCd > 0) s.fireCd -= dt;
   if (s.swapT > 0) s.swapT = Math.max(0, s.swapT - dt);
@@ -586,11 +691,13 @@ export function stepPlayer(
     act.swapped = true;
   }
 
-  // healing: HEAL starts the best item for the moment; firing or swapping cancels it
+  // healing: HEAL starts the best item for the moment and has to be HELD until it is done.
+  // Letting go, firing or swapping cancels it (nothing is used up).
   const healBtn = !frozen && (btn & BTN.HEAL) !== 0;
   if (s.healT > 0) {
-    if (firing && weapon && weapon.magSize > 0) {
+    if (!healBtn || (firing && weapon && weapon.magSize > 0)) {
       s.healT = 0;
+      act.healCanceled = true;
     } else {
       s.healT -= dt;
       if (s.healT <= 0) {

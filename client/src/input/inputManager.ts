@@ -85,8 +85,10 @@ export class InputManager {
     }
 
     if (this.ctx.gameplay) {
-      // crouch: toggle on press (if enabled), hold always works
-      if (f.crouchPress) {
+      // crouch while sprinting forward rolls; otherwise crouch toggles on press (if enabled), hold always works
+      if (f.crouchPress && (f.sprint || this.sprintLatch) && f.moveZ > 0.5) {
+        f.roll = true;
+      } else if (f.crouchPress) {
         if (this.ctx.settings.crouchToggle) this.crouch = !this.crouch;
       }
       if (f.jump || f.sprint || f.sprintPress) {

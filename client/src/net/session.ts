@@ -6,6 +6,8 @@ import type { Loadout } from '@shared/config/weapons';
 import {
   decodeSnapshot, type BotDifficulty, type MatchEndMsg, type PorchInit, type RosterEntry, type Snapshot, type WireSnapshot,
 } from '@shared/protocol';
+import { AJS, getGreaterTowne } from '@shared/map/greaterTowne';
+import type { MapDef } from '@shared/map/types';
 import { BOT_NAMES } from '@shared/sim/bots';
 import { GameSim } from '@shared/sim/game';
 import type { Rapier } from '@shared/sim/physics';
@@ -31,6 +33,10 @@ export interface Session {
   roster: RosterEntry[];
   /** JUMP OFF THE PORCH: bags, transport route, pickups at the time we joined. */
   porch?: PorchInit;
+  /** Free roam around Greater Whoopa Towne (offline, nobody else around): AJ'S is open. */
+  readonly roam?: boolean;
+  /** The map, when it is not the mode's usual one (free roam). */
+  readonly map?: MapDef;
   handlers: SessionHandlers;
   /** Round-trip time estimate in ms. */
   ping: number;
@@ -59,6 +65,8 @@ export interface LocalSessionOptions {
   latencyMs?: number;
   seed?: number;
   warmup?: number;
+  /** Free roam: Greater Whoopa Towne to yourself, starting at AJ'S. No bots, no clock. */
+  roam?: boolean;
 }
 
 /**
@@ -73,6 +81,8 @@ export class LocalSession implements Session {
   readonly sim: GameSim;
   roster: RosterEntry[];
   porch?: PorchInit;
+  readonly roam: boolean;
+  readonly map?: MapDef;
   handlers: SessionHandlers = {};
   ping = 0;
 
@@ -89,6 +99,18 @@ export class LocalSession implements Session {
     this.mode = opts.mode;
     this.latency = Math.max(0, opts.latencyMs ?? 0);
     this.ping = this.latency * 2;
+    this.roam = !!opts.roam;
+    if (opts.roam) {
+      // free roam: the big map to yourself, out front of AJ'S
+      this.map = getGreaterTowne();
+      const d = AJS.door;
+      this.sim = new GameSim(R, { mode: 'tdm', map: this.map, warmup: 0, maxPlayers: 1, seed: opts.seed, roam: { x: d.x, y: 0, z: d.z, yaw: d.yaw } });
+      const me = this.sim.addPlayer({ id: 'local', name: opts.name, team: 0, loadout: opts.loadout, look: opts.look })!;
+      this.myIdx = me.idx;
+      this.roster = this.sim.roster();
+      this.sim.start();
+      return;
+    }
     this.sim = new GameSim(R, {
       mode: opts.mode, botDifficulty: opts.difficulty ?? 'normal', seed: opts.seed, warmup: opts.warmup,
       squads: opts.squads, maxPlayers: opts.mode === 'porch' ? (opts.lobbySize ?? PORCH.lobbySize) : undefined,

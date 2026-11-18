@@ -18,9 +18,19 @@ export interface LookOption {
   available?: boolean;
   /** Swatch color (CSS hex) for color pickers. */
   color?: string;
+  /**
+   * Sold at AJ's: only players who own the item that unlocks it may wear it (the server strips
+   * it from everyone else's look). Never offered in the free creator or to bots.
+   */
+  premium?: boolean;
+  /** Premium finishes: shiny metal (0..1) and a procedural print (see the client's palette). */
+  metal?: number;
+  pattern?: string;
 }
 
 const opt = (id: string, name: string, extra: Partial<LookOption> = {}): LookOption => ({ id, name, ...extra });
+/** An AJ's exclusive (premium) option. */
+const aj = (id: string, name: string, extra: Partial<LookOption> = {}): LookOption => ({ id, name, premium: true, ...extra });
 const soon = (id: string, name: string): LookOption => ({ id, name, available: false });
 
 // ------------------------------------------------------------------ option lists
@@ -140,6 +150,13 @@ export const TOP_COLORS = [
   opt('pink', 'Pink', { color: '#e86ba7' }),
   opt('brown', 'Brown', { color: '#6f4b30' }),
   opt('beige', 'Beige', { color: '#d7c3a1' }),
+  // AJ's exclusives
+  aj('gold', 'Gold Foil', { color: '#d4a32a', metal: 0.75 }),
+  aj('ice', 'Pearl White', { color: '#eef3f7', metal: 0.25 }),
+  aj('camo', 'Woodland Camo', { color: '#5b6b3a', pattern: 'camo' }),
+  aj('tiedye', 'Tie-Dye', { color: '#d45cc4', pattern: 'tiedye' }),
+  aj('flames', 'Flames', { color: '#1e1e22', pattern: 'flames' }),
+  aj('midnight', 'Midnight Sheen', { color: '#2a2146', metal: 0.45 }),
 ];
 export const BOTTOMS = [
   opt('slimjeans', 'Slim Jeans'),
@@ -164,6 +181,8 @@ export const BOTTOM_COLORS = [
   opt('red', 'Red', { color: '#c52c2c' }),
   opt('green', 'Green', { color: '#2f8c49' }),
   opt('pink', 'Pink', { color: '#e86ba7' }),
+  // AJ's exclusives
+  aj('camo', 'Woodland Camo', { color: '#5b6b3a', pattern: 'camo' }),
 ];
 export const SHOES = [
   soon('barefoot', 'Barefoot'),
@@ -187,6 +206,12 @@ export const SHOE_COLORS = [
   opt('brown', 'Brown', { color: '#6f4b30' }),
   opt('green', 'Green', { color: '#2f8c49' }),
   opt('pink', 'Pink', { color: '#e86ba7' }),
+  // AJ's exclusives
+  aj('gold24k', '24K Gold', { color: '#d4a32a', metal: 0.85 }),
+  aj('bred', 'Bred', { color: '#c0232b', pattern: 'bred' }),
+  aj('icy', 'Icy Blue', { color: '#9fd6f2', metal: 0.35 }),
+  aj('volt', 'Volt', { color: '#c8ff2e' }),
+  aj('galaxy', 'Galaxy', { color: '#3a2a6e', pattern: 'galaxy' }),
 ];
 
 export const HATS = [
@@ -199,13 +224,27 @@ export const GLASSES = [
   opt('none', 'None'), opt('clear', 'Clear Glasses'), opt('sunglasses', 'Black Sunglasses'),
   opt('aviators', 'Aviators'), opt('round', 'Round Glasses'), opt('tinted', 'Tinted Glasses'),
 ];
-export const EARRINGS = [opt('none', 'None'), opt('studs', 'Small Studs'), opt('diamondstuds', 'Diamond Studs'), opt('hoops', 'Hoops'), opt('dangling', 'Dangling Earrings')];
+export const EARRINGS = [
+  opt('none', 'None'), opt('studs', 'Small Studs'), opt('diamondstuds', 'Diamond Studs'), opt('hoops', 'Hoops'), opt('dangling', 'Dangling Earrings'),
+  aj('diamondhoops', 'Diamond Hoops'),
+];
+/** AJ's only: wraps for every gun you hold (cosmetic, no effect on any weapon). */
+export const WEAPON_SKINS = [
+  opt('none', 'Factory'),
+  aj('gold', '24K Gold Wrap'), aj('camo', 'Woodland Wrap'), aj('neon', 'Neon Stripe'), aj('chrome', 'Mirror Chrome'), aj('graffiti', 'Graffiti Wrap'),
+];
+/** AJ's only: something on your back. */
+export const BACKPACKS = [opt('none', 'None'), aj('schoolbag', 'Black School Pack'), aj('designer', 'Monogram Pack'), aj('camopack', 'Camo Pack')];
 export const NECKLACES = [
   opt('none', 'None'), opt('thingold', 'Thin Gold Chain'), opt('thickgold', 'Thick Gold Chain'),
   opt('silver', 'Silver Chain'), opt('diamond', 'Diamond Chain'), opt('pendant', 'Pendant Necklace'),
   opt('choker', 'Choker'),
+  aj('cuban', 'Cuban Link Chain'), aj('wtpendant', 'Iced WT Pendant'),
 ];
-export const WRIST = [opt('none', 'None'), opt('watch', 'Watch'), opt('goldwatch', 'Gold Watch'), opt('bracelet', 'Bracelet'), opt('wristbands', 'Wristbands')];
+export const WRIST = [
+  opt('none', 'None'), opt('watch', 'Watch'), opt('goldwatch', 'Gold Watch'), opt('bracelet', 'Bracelet'), opt('wristbands', 'Wristbands'),
+  aj('icedwatch', 'Iced-Out Watch'), aj('gloves', 'Shooter Gloves'),
+];
 export const FACE_ACCESSORIES = [opt('none', 'None'), opt('nosestud', 'Nose Stud'), opt('nosering', 'Nose Ring'), opt('browpiercing', 'Eyebrow Piercing')];
 
 export const TATTOO_SPOTS = [
@@ -252,6 +291,9 @@ export interface Appearance {
   necklace: string;
   wrist: string;
   faceAcc: string;
+  /** AJ's: weapon wrap (cosmetic only) and backpack. */
+  weaponSkin: string;
+  backpack: string;
   /** One design per body spot (spot id -> design id). */
   tattoos: Record<string, string>;
   /** Freckles / scar / beauty mark (any combination). */
@@ -295,6 +337,41 @@ export const LOOK_FIELDS = {
 export type LookField = keyof typeof LOOK_FIELDS;
 export const LOOK_FIELD_KEYS = Object.keys(LOOK_FIELDS) as LookField[];
 
+/**
+ * Fields added with AJ's. They are written after the original code (so looks saved before
+ * them still read back exactly) and are not rows in the free creator: TRAP equips them.
+ */
+export const EXTRA_FIELDS = { weaponSkin: WEAPON_SKINS, backpack: BACKPACKS } as const;
+export type ExtraField = keyof typeof EXTRA_FIELDS;
+export const EXTRA_FIELD_KEYS = Object.keys(EXTRA_FIELDS) as ExtraField[];
+
+/** Every option list by field, the AJ's extras included. */
+export function optionsOf(field: string): readonly LookOption[] | null {
+  return (LOOK_FIELDS as Record<string, readonly LookOption[]>)[field] ?? (EXTRA_FIELDS as Record<string, readonly LookOption[]>)[field] ?? null;
+}
+
+/** Is this option an AJ's exclusive? */
+export function isPremiumOption(field: string, option: string): boolean {
+  return !!optionsOf(field)?.find((o) => o.id === option)?.premium;
+}
+
+/**
+ * Takes off every AJ's exclusive the player does not own (`owned` = "field:option" keys).
+ * Each stripped field goes back to the fallback look's value (or the default when that is
+ * premium too), so nobody wears what they have not bought.
+ */
+export function stripUnowned(look: Readonly<Appearance>, owned: ReadonlySet<string>, fallback: Readonly<Appearance> = DEFAULT_APPEARANCE): Appearance {
+  const out = cloneAppearance(look);
+  const rec = out as unknown as Record<string, string>;
+  for (const field of [...LOOK_FIELD_KEYS, ...EXTRA_FIELD_KEYS] as string[]) {
+    const v = rec[field];
+    if (!isPremiumOption(field, v) || owned.has(`${field}:${v}`)) continue;
+    const fb = (fallback as unknown as Record<string, string>)[field];
+    rec[field] = fb && (!isPremiumOption(field, fb) || owned.has(`${field}:${fb}`)) ? fb : (DEFAULT_APPEARANCE as unknown as Record<string, string>)[field];
+  }
+  return out;
+}
+
 export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   bodyType: 'masc',
   build: 'average',
@@ -327,6 +404,8 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   necklace: 'diamond',
   wrist: 'none',
   faceAcc: 'none',
+  weaponSkin: 'none',
+  backpack: 'none',
   tattoos: Object.freeze({}) as Record<string, string>,
   details: Object.freeze([]) as unknown as string[],
 });
@@ -363,6 +442,7 @@ export function sanitizeAppearance(raw: unknown, fallback: Readonly<Appearance> 
   }
   if (r.mouth !== undefined && r.mouthProp === undefined && isPick(MOUTH_PROPS, r.mouth)) out.mouthProp = r.mouth;
   for (const key of LOOK_FIELD_KEYS) if (isPick(LOOK_FIELDS[key], r[key])) out[key] = r[key] as string;
+  for (const key of EXTRA_FIELD_KEYS) if (isPick(EXTRA_FIELDS[key], r[key])) out[key] = r[key] as string;
   if (r.tattoos && typeof r.tattoos === 'object' && !Array.isArray(r.tattoos)) {
     out.tattoos = {};
     for (const [spot, design] of Object.entries(r.tattoos as Record<string, unknown>)) {
@@ -395,7 +475,10 @@ export function encodeAppearance(a: Readonly<Appearance>): string {
   BODY_DETAILS.forEach((d, i) => {
     if (a.details.includes(d.id)) mask |= 1 << i;
   });
-  return s + B36[mask];
+  s += B36[mask];
+  // AJ's fields after the original code: old codes simply end before them
+  for (const key of EXTRA_FIELD_KEYS) s += B36[Math.max(0, EXTRA_FIELDS[key].findIndex((o) => o.id === a[key]))];
+  return s;
 }
 
 /** Reads a wire code back; anything malformed or unavailable falls back (field by field). */
@@ -414,8 +497,12 @@ export function decodeAppearance(code: unknown, fallback: Readonly<Appearance> =
     const d = TATTOO_DESIGNS[at(i++) - 1];
     if (d && d.available !== false) out.tattoos[spot.id] = d.id;
   }
-  const mask = at(i);
+  const mask = at(i++);
   out.details = mask > 0 ? BODY_DETAILS.filter((_d, k) => mask & (1 << k)).map((d) => d.id) : [];
+  for (const key of EXTRA_FIELD_KEYS) {
+    const o = EXTRA_FIELDS[key][at(i++)];
+    if (o && o.available !== false) out[key] = o.id;
+  }
   return out;
 }
 
@@ -433,7 +520,8 @@ export function seededRandom(seed: number): () => number {
 }
 
 function pickFrom(list: readonly LookOption[], rand: () => number, weights?: Record<string, number>): string {
-  const ok = list.filter((o) => o.available !== false);
+  // AJ's exclusives are bought, never handed out at random
+  const ok = list.filter((o) => o.available !== false && !o.premium);
   let total = 0;
   for (const o of ok) total += weights?.[o.id] ?? 1;
   let r = rand() * total;

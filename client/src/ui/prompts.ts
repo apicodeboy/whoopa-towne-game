@@ -1,3 +1,4 @@
+import { bindings, keyName, padGlyph, type KeyAction, type PadAction } from '../input/bindings';
 import type { DeviceKind } from '../input/types';
 
 /** Things the player can do that have a button. */
@@ -125,21 +126,47 @@ export const ACTION_LABELS: Record<Action, string> = {
   drop: 'Drop',
 };
 
+/** Which binding an on-screen action reads its key / button from (Settings → Controls). */
+const KEY_OF: Partial<Record<Action, KeyAction>> = {
+  jump: 'jump', crouch: 'crouch', sprint: 'sprint', reload: 'reload', throw: 'throw', shoulder: 'shoulder',
+  use: 'use', heal: 'heal', drop: 'drop', scores: 'scores',
+};
+const PAD_OF: Partial<Record<Action, PadAction>> = {
+  fire: 'fire', aim: 'aim', jump: 'jump', crouch: 'crouch', sprint: 'sprint', reload: 'reload', swap: 'swap', slots: 'swap',
+  throw: 'throw', shoulder: 'shoulder', use: 'use', heal: 'heal', scores: 'scores',
+};
+
+/** The glyph for an action on a device, following the player's own bindings. */
+function glyphOf(device: DeviceKind, action: Action): Glyph | null {
+  const set = SETS[device];
+  if (!set) return null;
+  if (device === 'kbm') {
+    const k = KEY_OF[action];
+    return k ? { t: keyName(bindings.keys[k]) } : set[action];
+  }
+  const pa = PAD_OF[action];
+  if (pa) return padGlyph(device, bindings.pad[pa]);
+  return set[action];
+}
+
 /** HTML for the button glyph of an action on the given device ('' on touch). */
 export function glyphHtml(device: DeviceKind, action: Action): string {
-  const set = SETS[device];
-  if (!set) return '';
-  const g = set[action];
+  const g = glyphOf(device, action);
+  if (!g) return '';
   const kind = device === 'kbm' ? 'key' : 'pad';
   return `<kbd class="glyph ${kind}${g.c ? ` ${g.c}` : ''}">${g.t}</kbd>`;
 }
 
+/** Plain text name of an action's key / button ('' on touch). */
+export function glyphText(device: DeviceKind, action: Action): string {
+  return glyphOf(device, action)?.t ?? '';
+}
+
 /** "glyph Label" pairs for a list of actions. */
 export function legendHtml(device: DeviceKind, actions: readonly Action[]): string {
-  const set = SETS[device];
-  if (!set) return '';
+  if (!SETS[device]) return '';
   // actions without a button on this device are left out
-  return actions.filter((a) => set[a].t).map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
+  return actions.filter((a) => glyphOf(device, a)?.t).map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
 }
 
 export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'swap', 'throw', 'shoulder', 'scores', 'pause'];

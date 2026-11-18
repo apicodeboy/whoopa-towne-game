@@ -472,6 +472,45 @@ test('character looks: sent on join and from the lobby, validated, and seen by e
   await leaveAll();
 });
 
+test("AJ's cosmetics in matches: what you own is worn and seen by everyone; nobody wears what they did not buy", async () => {
+  const api = async (method: string, path: string, body?: unknown, token?: string) => {
+    const r = await fetch(`${URL}${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' });
+    return (await r.json().catch(() => ({}))) as Record<string, any>;
+  };
+  // a player signs up, buys 14 GRAMS (test checkout), buys a gold puffer and a gold wrap, equips them
+  const name = `Drip${Math.floor(Math.random() * 9000 + 1000)}`;
+  const { token } = await api('POST', '/api/account/register', { username: name, password: 'correct horse' });
+  const { orderId } = await api('POST', '/api/grams/checkout', { packageId: 'grams-14' }, token);
+  await fetch(`${URL}/pay/test/${orderId}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'outcome=paid', redirect: 'manual' });
+  await api('GET', `/api/grams/orders/${orderId}`, undefined, token);
+  for (const itemId of ['top-gold-puffer', 'skin-gold']) await api('POST', '/api/store/buy', { itemId, requestId: `r_${itemId}_${name}` }, token);
+  const drip = sanitizeAppearance({ top: 'puffer', topColor: 'gold', weaponSkin: 'gold', backpack: 'designer' });
+  await api('POST', '/api/trap/equip', { look: encodeAppearance({ ...drip, backpack: 'none' }) }, token);
+  // a guest tries to wear AJ's exclusives they never bought
+  const forged = sanitizeAppearance({ top: 'hoodie', topColor: 'flames', shoeColor: 'gold24k', weaponSkin: 'chrome', hair: 'braids' });
+  const hostNet = new NetClient(URL);
+  hostNet.token = token;
+  const host = new Bot().attach(await hostNet.createPrivate('tdm', 'IgnoredName', DEFAULT_LOADOUT, drip));
+  const guest = new Bot().attach(await new NetClient(URL).joinByCode(host.lobby.code, 'Guest', DEFAULT_LOADOUT, forged));
+  await until(() => host.lobby.view().players.length === 2, 'lobby');
+  assert(host.lobby.view().players.some((p) => p.name === name), 'signed-in player plays under their account name');
+  host.lobby.configure({ fillBots: false });
+  guest.lobby.setReady(true);
+  await until(() => host.lobby.view().players.some((p) => p.ready) && host.lobby.view().fillBots === false, 'ready');
+  host.lobby.start();
+  await until(() => host.session !== null && guest.session !== null, 'match start');
+  for (const b of [host, guest]) {
+    const roster = b.session!.roster;
+    const h = decodeAppearance(roster.find((r) => r.name === name)!.look);
+    const g = decodeAppearance(roster.find((r) => r.name === 'Guest')!.look);
+    assert(h.topColor === 'gold' && h.weaponSkin === 'gold', 'owned puffer and wrap are seen by everyone');
+    assert(h.backpack === 'none', 'a backpack they do not own is stripped');
+    assert(g.topColor !== 'flames' && g.shoeColor !== 'gold24k' && g.weaponSkin === 'none', "the guest's forged exclusives are stripped");
+    assert(g.hair === 'braids' && g.top === 'hoodie', "the rest of the guest's look is kept");
+  }
+  await leaveAll();
+});
+
 test('the server shrugs off malformed messages', async () => {
   const [a, b] = await privateMatch(2);
   const room = a.lobby.room;

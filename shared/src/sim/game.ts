@@ -115,6 +115,11 @@ export interface GameSimOptions {
   maxPlayers?: number;
   /** JUMP OFF THE PORCH team size. */
   squads?: SquadMode;
+  /**
+   * Free roam (walk around town, visit AJ'S): everyone spawns here, no clock, no score limit.
+   * Offline only; never used by the server's matches.
+   */
+  roam?: SpawnPoint;
 }
 
 export interface AddPlayerInfo {
@@ -243,8 +248,10 @@ export class GameSim {
   private stateArr: number[] = [];
   private dmgByTarget: Float32Array;
   private headByTarget: Uint8Array;
+  private roam: SpawnPoint | null;
 
   constructor(R: Rapier, opts: GameSimOptions) {
+    this.roam = opts.roam ?? null;
     this.map = opts.map ?? mapForMode(opts.mode);
     this.phys = new PhysicsWorld(R, this.map);
     this.nav = new NavGrid(this.phys, this.map);
@@ -377,7 +384,8 @@ export class GameSim {
 
   private beginPlaying(): void {
     this.phase = PHASE.PLAYING;
-    this.phaseEndsAt = this.time + MODES[this.mode].timeLimit * 1000;
+    // free roam has no clock (a long way off rather than Infinity, so it still fits the wire)
+    this.phaseEndsAt = this.time + (this.roam ? 1e9 : MODES[this.mode].timeLimit * 1000);
     this.porch?.goLive(this.time);
     this.events.push([EV.PHASE, PHASE.PLAYING, -1]);
   }
@@ -680,6 +688,7 @@ export class GameSim {
   }
 
   private pickSpawn(p: SimPlayer): SpawnPoint {
+    if (this.roam) return this.roam;
     const list = this.map.spawns[p.team];
     let best: SpawnPoint[] = [];
     let bestScore = -Infinity;
@@ -902,6 +911,8 @@ export class GameSim {
       if (s.air === 0 && s.airJumps > 0 && !s.grounded) flags |= PF.AIRJUMP;
       else if (s.air !== 0) flags |= PF.BALLOON;
       if (s.healT > 0) flags |= PF.HEALING;
+      if (s.rollT > 0) flags |= PF.ROLL;
+      if (s.climbT > 0) flags |= PF.CLIMB;
       const w = weaponInSlot(s, s.slot);
       const held =
         s.slot === SLOT_THROWABLE ? (s.thr === 1 ? HELD_GRENADE : HELD_SMOKE)

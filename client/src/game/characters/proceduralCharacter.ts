@@ -4,6 +4,7 @@ import { crewColorHex, type TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp, lerpAngle, wrapAngle } from '@shared/math';
 import { BALLOON_GRIP, type CharacterPose, type CharacterVisual, type HeldItem } from './characterTypes';
 import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
+import { applyWeaponSkin } from './weaponSkins';
 
 const DOWN = new THREE.Vector3(0, -1, 0);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -180,6 +181,8 @@ export class ProceduralCharacter implements CharacterVisual {
   private shoulderR = new THREE.Vector3(0.24, 0.46, 0);
 
   private mouth: MouthAccessory | null = null;
+  /** AJ's wrap on whatever gun is held (cosmetic only). */
+  private weaponSkin: string | undefined;
 
   /** The stand-in used when the character models are unavailable; it wears the look's colors. */
   constructor(team: TeamId, seed = 0, look?: Readonly<Appearance>) {
@@ -189,6 +192,7 @@ export class ProceduralCharacter implements CharacterVisual {
     const pants = new THREE.MeshStandardMaterial({ color: hex(BOTTOM_COLORS, look?.bottomColor) ?? [0x23272e, 0x2d3748, 0x3b3b3b, 0x1f2a24][seed % 4], roughness: 0.9, flatShading: true });
     const shoes = new THREE.MeshStandardMaterial({ color: hex(SHOE_COLORS, look?.shoeColor) ?? 0xe8e8e8, roughness: 0.7, flatShading: true });
     const mouth = look?.mouthProp;
+    this.weaponSkin = look?.weaponSkin;
     this.jacketMat = new THREE.MeshStandardMaterial({ color: crewColorHex(team), roughness: 0.85, flatShading: true });
     this.accentMat = new THREE.MeshStandardMaterial({ color: crewColorHex(team, 'dark'), roughness: 0.85, flatShading: true });
     this.mats.push(skin, pants, shoes, this.jacketMat, this.accentMat);
@@ -256,6 +260,7 @@ export class ProceduralCharacter implements CharacterVisual {
     this.weaponMount.remove(this.weaponModel.group);
     disposeTree(this.weaponModel.group);
     this.weaponModel = buildWeaponModel(item);
+    if (item !== 'grenade' && item !== 'smoke') applyWeaponSkin(this.weaponModel.group, this.weaponSkin);
     this.weaponMount.add(this.weaponModel.group);
     this.muzzle.position.set(0, 0.03, this.weaponModel.muzzleZ);
   }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CREWS, type TeamId } from '@shared/config/crews';
+import { LEDGE, ROLL } from '@shared/config/game';
 import { THROWABLE_IDS, WEAPON_IDS, WEAPONS } from '@shared/config/weapons';
 import { lerpAngle } from '@shared/math';
 import { HELD_GRENADE, PF, type SnapPlayer } from '@shared/protocol';
@@ -99,10 +100,9 @@ export class RemotePlayer {
   private reloadDur = 2;
   private wasAlive = true;
   private wasRiding = false;
-  /** Double-jump flip progress (0..1), -1 when not flipping. */
-  private flipT = -1;
-  private wasAirJump = false;
   private friendly: boolean;
+  private rollT = -1;
+  private climbT = -1;
 
   constructor(idx: number, name: string, team: TeamId, isBot: boolean, visual: CharacterVisual, friendly: boolean) {
     this.idx = idx;
@@ -238,14 +238,14 @@ export class RemotePlayer {
     p.held = heldFromCode(this.held);
     p.hanging = alive && (this.flags & PF.BALLOON) !== 0;
     p.skydive = alive && (this.flags & PF.SKYDIVE) !== 0;
-    const airJump = (this.flags & PF.AIRJUMP) !== 0;
-    if (airJump && !this.wasAirJump) this.flipT = 0;
-    this.wasAirJump = airJump;
-    if (this.flipT >= 0) {
-      this.flipT += dt / 0.48;
-      if (this.flipT >= 1 || (this.flags & PF.GROUND) !== 0) this.flipT = -1;
-    }
-    p.flip = this.flipT;
+    p.flip = -1; // the double jump is a straight second hop (no flip)
+    // healing (the item is not sent for other players: they all use the first-aid motion)
+    p.heal = alive && (this.flags & PF.HEALING) !== 0 ? 1 : -1;
+    // roll / ledge progress: timed here from when the flag came on
+    this.rollT = alive && (this.flags & PF.ROLL) !== 0 ? Math.min(1, Math.max(0, this.rollT) + dt / ROLL.time) : -1;
+    this.climbT = alive && (this.flags & PF.CLIMB) !== 0 ? Math.min(1, Math.max(0, this.climbT) + dt / LEDGE.time) : -1;
+    p.roll = this.rollT;
+    p.climb = this.climbT;
     this.visual.update(dt, p, visible);
 
     // on the transport (JUMP OFF THE PORCH) nobody is in the world yet
