@@ -322,6 +322,17 @@ export function buildHair(id: string, h: HeadRig, out: ProcMesh): boolean {
       hairShell(h, out, { thick: () => 0.006, look: () => style(SLOT.HAIR, { shade: 0.8 }) });
       longStrands(h, out, { count: 64, length: [0.26, 0.36], radius: 0.0072, seed: 8 });
       return true;
+    case 'locs':
+      // shoulder-length locs, thicker and fewer than dreads
+      hairShell(h, out, { thick: () => 0.006, look: () => style(SLOT.HAIR, { shade: 0.78 }) });
+      longStrands(h, out, { count: 46, length: [0.17, 0.24], radius: 0.0088, seed: 21 });
+      return true;
+    case 'twists': {
+      // two-strand twists standing up and out: short spiralled strands all over
+      hairShell(h, out, { thick: () => 0.0055, look: () => style(SLOT.HAIR, { shade: 0.8 }) });
+      shortStrands(h, out, 84, 13);
+      return true;
+    }
     default:
       return false;
   }

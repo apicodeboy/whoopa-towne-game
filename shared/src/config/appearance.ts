@@ -92,6 +92,8 @@ export const HAIRSTYLES = [
   opt('bob', 'Bob Cut'),
   opt('spiky', 'Spiky Crop'),
   opt('mohawk', 'Mohawk'),
+  opt('twists', 'Twists'),
+  opt('locs', 'Locs'),
 ];
 export const HAIR_COLORS = [
   opt('black', 'Black', { color: '#1b1714' }),
@@ -129,13 +131,14 @@ export const TOPS = [
   soon('longsleeve', 'Long Sleeve'),
   soon('polo', 'Polo'),
   opt('hoodie', 'Hoodie'),
-  soon('ziphoodie', 'Zip-Up Hoodie'),
+  opt('ziphoodie', 'Zip-Up Hoodie'),
   soon('sweatshirt', 'Sweatshirt'),
   soon('buttonup', 'Button-Up Shirt'),
   opt('crop', 'Crop Top'),
   soon('jersey', 'Jersey'),
   soon('jacket', 'Jacket'),
   opt('puffer', 'Puffer Jacket'),
+  opt('puffervest', 'Puffer Vest'),
 ];
 export const TOP_COLORS = [
   opt('black', 'Black', { color: '#1e1e22' }),
@@ -219,6 +222,7 @@ export const HATS = [
   opt('beanie', 'Beanie'), opt('bucket', 'Bucket Hat'), opt('durag', 'Durag'),
   opt('bandana', 'Bandana'), opt('headband', 'Headband'), opt('cowboy', 'Cowboy Hat'),
   opt('skimask', 'Ski Mask'), opt('hoodup', 'Hood Up'), opt('spikyhood', 'Spiky Hood'),
+  opt('graffitibeanie', 'Graffiti Beanie'), opt('blackbucket', 'Black Bucket Hat'),
 ];
 export const GLASSES = [
   opt('none', 'None'), opt('clear', 'Clear Glasses'), opt('sunglasses', 'Black Sunglasses'),
@@ -240,10 +244,12 @@ export const NECKLACES = [
   opt('silver', 'Silver Chain'), opt('diamond', 'Diamond Chain'), opt('pendant', 'Pendant Necklace'),
   opt('choker', 'Choker'),
   aj('cuban', 'Cuban Link Chain'), aj('wtpendant', 'Iced WT Pendant'),
+  opt('silverstack', 'Stacked Silver Chains'), opt('medallion', 'Silver Medallion'),
 ];
 export const WRIST = [
   opt('none', 'None'), opt('watch', 'Watch'), opt('goldwatch', 'Gold Watch'), opt('bracelet', 'Bracelet'), opt('wristbands', 'Wristbands'),
   aj('icedwatch', 'Iced-Out Watch'), aj('gloves', 'Shooter Gloves'),
+  opt('blackgloves', 'Black Gloves'), opt('silverwatch', 'Silver Watch'),
 ];
 export const FACE_ACCESSORIES = [opt('none', 'None'), opt('nosestud', 'Nose Stud'), opt('nosering', 'Nose Ring'), opt('browpiercing', 'Eyebrow Piercing')];
 
@@ -294,6 +300,12 @@ export interface Appearance {
   /** AJ's: weapon wrap (cosmetic only) and backpack. */
   weaponSkin: string;
   backpack: string;
+  /** Urban Ink: shoulder width, head size, a face covering, something in hand in menus, a pants chain. */
+  shoulders: string;
+  headSize: string;
+  mask: string;
+  carry: string;
+  waistChain: string;
   /** One design per body spot (spot id -> design id). */
   tattoos: Record<string, string>;
   /** Freckles / scar / beauty mark (any combination). */
@@ -341,7 +353,18 @@ export const LOOK_FIELD_KEYS = Object.keys(LOOK_FIELDS) as LookField[];
  * Fields added with AJ's. They are written after the original code (so looks saved before
  * them still read back exactly) and are not rows in the free creator: TRAP equips them.
  */
-export const EXTRA_FIELDS = { weaponSkin: WEAPON_SKINS, backpack: BACKPACKS } as const;
+export const SHOULDERS = [opt('average', 'Average'), opt('narrow', 'Narrow'), opt('broad', 'Broad')];
+export const HEAD_SIZES = [opt('average', 'Average'), opt('small', 'Small'), opt('large', 'Large')];
+export const MASKS = [opt('none', 'None'), opt('facemask', 'Black Face Mask'), opt('bandanamask', 'Bandana Mask')];
+export const CARRY = [opt('none', 'Nothing'), opt('phone', 'Smartphone')];
+export const WAIST_CHAINS = [opt('none', 'None'), opt('silver', 'Silver Pants Chain')];
+
+/**
+ * Fields added after the original creator. They are written after the original code (so looks
+ * saved before them still read back exactly); append new fields at the end, never reorder.
+ * weaponSkin and backpack are AJ's items (equipped in TRAP); the rest are creator rows.
+ */
+export const EXTRA_FIELDS = { weaponSkin: WEAPON_SKINS, backpack: BACKPACKS, shoulders: SHOULDERS, headSize: HEAD_SIZES, mask: MASKS, carry: CARRY, waistChain: WAIST_CHAINS } as const;
 export type ExtraField = keyof typeof EXTRA_FIELDS;
 export const EXTRA_FIELD_KEYS = Object.keys(EXTRA_FIELDS) as ExtraField[];
 
@@ -406,9 +429,43 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   faceAcc: 'none',
   weaponSkin: 'none',
   backpack: 'none',
+  shoulders: 'average',
+  headSize: 'average',
+  mask: 'none',
+  carry: 'none',
+  waistChain: 'none',
   tattoos: Object.freeze({}) as Record<string, string>,
   details: Object.freeze([]) as unknown as string[],
 });
+
+/**
+ * Starter looks (Urban Ink): complete outfits to begin from. Picking one copies it into the
+ * draft; everything stays customizable, nothing is locked and nothing premium is in them.
+ */
+export interface LookPreset {
+  id: string;
+  name: string;
+  blurb: string;
+  look: Partial<Appearance>;
+}
+export const LOOK_PRESETS: readonly LookPreset[] = [
+  {
+    id: 'puffer', name: 'Black Puffer', blurb: 'Bucket hat, face mask, puffer vest, silver medallion, black gloves.',
+    look: {
+      bodyType: 'masc', build: 'athletic', skin: 's08', hair: 'shortdreads', hairColor: 'black', facialHair: 'none',
+      hat: 'blackbucket', mask: 'facemask', top: 'puffervest', topColor: 'black', necklace: 'medallion', wrist: 'blackgloves',
+      bottom: 'cargo', bottomColor: 'black', shoes: 'chunky', shoeColor: 'black', earrings: 'none', glasses: 'none', carry: 'none', waistChain: 'none',
+    },
+  },
+  {
+    id: 'hoodie', name: 'Black Hoodie', blurb: 'Graffiti beanie, braids, zip hoodie, stacked chains, red kicks, phone in hand.',
+    look: {
+      bodyType: 'masc', build: 'average', skin: 's09', hair: 'braids', hairColor: 'black', facialHair: 'goatee', facialHairColor: 'black',
+      hat: 'graffitibeanie', mask: 'none', top: 'ziphoodie', topColor: 'black', necklace: 'silverstack', wrist: 'silverwatch', earrings: 'diamondstuds',
+      bottom: 'baggyjeans', bottomColor: 'black', shoes: 'lowtops', shoeColor: 'red', glasses: 'none', carry: 'phone', waistChain: 'silver',
+    },
+  },
+];
 
 export function cloneAppearance(a: Readonly<Appearance>): Appearance {
   return { ...a, tattoos: { ...a.tattoos }, details: [...a.details] };

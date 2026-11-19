@@ -13,7 +13,7 @@ export function boneKey(name: string): string {
 }
 
 export interface Rig {
-  id: 'male' | 'female';
+  id: 'male' | 'female' | 'ink';
   template: CharacterTemplate;
   /** Merged mesh space -> bind-pose world (meters). */
   F: THREE.Matrix4;
@@ -42,6 +42,11 @@ export interface Piece {
   index: Uint32Array;
   /** Per-vertex brightness relative to the material color (per-vertex tints like faded denim). */
   shade: Float32Array;
+  /**
+   * Urban Ink pieces only: two soft masks per vertex baked by the generator (head skin: lips,
+   * darker skin), or null.
+   */
+  mask: Float32Array | null;
 }
 
 export class PartLibrary {
@@ -56,7 +61,7 @@ export class PartLibrary {
       t.scene.updateMatrixWorld(true);
       const F = mesh.matrixWorld.clone().multiply(mesh.bindMatrix);
       const rig: Rig = {
-        id: t.name === 'punk' ? 'female' : 'male',
+        id: t.name === 'ink' ? 'ink' : t.name === 'punk' ? 'female' : 'male',
         template: t,
         F,
         Finv: F.clone().invert(),
@@ -70,13 +75,23 @@ export class PartLibrary {
         rig.at.set(k, new THREE.Vector3().setFromMatrixPosition(mesh.skeleton.boneInverses[i].clone().invert()).applyMatrix4(F));
       });
       this.rigs.set(t.name, rig);
-      for (const pc of t.merged.pieces) this.pieces.set(`${t.name}:${pc.part}:${pc.material}`, extractPiece(rig, mesh.geometry, pc));
+      for (const pc of t.merged.pieces) this.pieces.set(`${t.name}:${pc.part}:${pc.material}`, extractPiece(rig, mesh.geometry, pc, t.name === 'ink'));
     }
   }
 
-  /** The skeleton a body type is built on (the punk model carries the feminine proportions). */
+  /**
+   * The skeleton a body type is built on: the Urban Ink rig for everyone (body types are shaped
+   * on it), or, without that file, the CC0 models (the punk carries the feminine proportions).
+   */
   rigFor(bodyType: string): Rig | null {
+    const ink = this.rigs.get('ink');
+    if (ink) return ink;
     return (bodyType === 'fem' ? this.rigs.get('punk') : this.rigs.get('hoodie') ?? this.rigs.get('casual')) ?? this.rigs.values().next().value ?? null;
+  }
+
+  /** True when the Urban Ink characters are loaded. */
+  get ink(): boolean {
+    return this.rigs.has('ink');
   }
 
   piece(template: string, part: string, material: string): Piece | null {
@@ -88,9 +103,10 @@ export class PartLibrary {
   }
 }
 
-function extractPiece(rig: Rig, g: THREE.BufferGeometry, pc: CharacterPiece): Piece {
+function extractPiece(rig: Rig, g: THREE.BufferGeometry, pc: CharacterPiece, masked = false): Piece {
   const n = pc.count;
   const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), shade = new Float32Array(n);
+  const mask = masked ? new Float32Array(n * 2) : null;
   const skinIndex = new Uint16Array(n * 4), skinWeight = new Float32Array(n * 4);
   const P = g.attributes.position, N = g.attributes.normal, C = g.attributes.color;
   const SI = g.attributes.skinIndex, SW = g.attributes.skinWeight;
@@ -104,7 +120,14 @@ function extractPiece(rig: Rig, g: THREE.BufferGeometry, pc: CharacterPiece): Pi
     pos.set([v.x, v.y, v.z], i * 3);
     v.fromBufferAttribute(N, s).applyMatrix3(nm).normalize();
     nrm.set([v.x, v.y, v.z], i * 3);
-    shade[i] = C ? Math.min(1.6, lum(C.getX(s), C.getY(s), C.getZ(s)) / base) : 1;
+    if (mask && C) {
+      // Urban Ink: R = baked shading, G / B = masks (the material color is white)
+      shade[i] = C.getX(s) / Math.max(1e-4, pc.color[0]);
+      mask[i * 2] = C.getY(s) / Math.max(1e-4, pc.color[1]);
+      mask[i * 2 + 1] = C.getZ(s) / Math.max(1e-4, pc.color[2]);
+    } else {
+      shade[i] = C ? Math.min(1.6, lum(C.getX(s), C.getY(s), C.getZ(s)) / base) : 1;
+    }
     for (let k = 0; k < 4; k++) {
       skinIndex[i * 4 + k] = SI.getComponent(s, k);
       skinWeight[i * 4 + k] = SW.getComponent(s, k);
@@ -113,7 +136,7 @@ function extractPiece(rig: Rig, g: THREE.BufferGeometry, pc: CharacterPiece): Pi
   const index = new Uint32Array(pc.indexCount);
   const src = g.index!.array;
   for (let i = 0; i < pc.indexCount; i++) index[i] = src[pc.indexStart + i] - pc.start;
-  return { rig, part: pc.part, material: pc.material, color: pc.color, pos, nrm, skinIndex, skinWeight, index, shade };
+  return { rig, part: pc.part, material: pc.material, color: pc.color, pos, nrm, skinIndex, skinWeight, index, shade, mask };
 }
 
 /**

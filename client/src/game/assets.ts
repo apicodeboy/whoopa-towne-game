@@ -94,6 +94,9 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 };
 
 const CHARACTER_SPECS: Array<{ name: string; url: string; tint: string }> = [
+  // Urban Ink: the game's own characters (tools/characters builds this file)
+  { name: 'ink', url: 'characters/ink.glb', tint: '' },
+  // the CC0 models: their skeleton and animations, and a few hairstyles taken from them
   { name: 'hoodie', url: 'characters/hoodie.glb', tint: 'Purple' },
   { name: 'punk', url: 'characters/punk.glb', tint: 'Pink' },
   { name: 'casual', url: 'characters/casual.glb', tint: 'LightBrown' },

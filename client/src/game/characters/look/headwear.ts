@@ -98,6 +98,28 @@ function brim(out: ProcMesh, ring: V3[], thetas: number[], h: HeadRig, len: (the
   out.grid([top[S], bot[S]], () => look, { flat: true, wrap: full, flip: true });
 }
 
+/**
+ * A white graffiti tag stitched on the front of a beanie: a star burst of spray strokes with a
+ * crown on top (the hand-drawn mark in the Urban Ink reference), sitting on the knit's surface.
+ */
+function graffitiEmblem(h: HeadRig, out: ProcMesh, y: number): void {
+  const white = fixed(0xf4f2ec, { rough: 0.9 });
+  const on = (u: number, v: number): V3 => {
+    // u: across the forehead (radians of azimuth), v: up (meters)
+    const yy = y + v;
+    return h.surface(u, phiAt(h, u, yy), 0.0215);
+  };
+  const stroke = (pts: Array<[number, number]>, r = 0.0016) => out.tube(pts.map(([u, v]) => on(u, v)), r, 4, white);
+  // the burst: strokes radiating out from the middle
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.2;
+    stroke([[Math.cos(a) * 0.05, Math.sin(a) * 0.007], [Math.cos(a) * 0.2, Math.sin(a) * 0.026]]);
+  }
+  // a box around the middle, then the crown's three points above it
+  stroke([[-0.12, -0.012], [0.12, -0.012], [0.12, 0.012], [-0.12, 0.012], [-0.12, -0.012]], 0.0014);
+  stroke([[-0.12, 0.016], [-0.07, 0.034], [0, 0.02], [0.07, 0.034], [0.12, 0.016]], 0.0015);
+}
+
 export function buildHat(kind: string, h: HeadRig, out: ProcMesh): HatFit | null {
   const brow = h.browY, eye = h.eyeY;
   const earTop = (h.earL.top + h.earR.top) / 2;
@@ -123,18 +145,21 @@ export function buildHat(kind: string, h: HeadRig, out: ProcMesh): HatFit | null
       out.ellipsoid(h.surface(0, 89 * DEG, 0.019), v3(0.006, 0.0025, 0.006), fixed(col), 8, 3);
       return { covered: (t, y) => y > band(t) - 0.004, room: 0.008 };
     }
-    case 'beanie': {
+    case 'beanie':
+    case 'graffitibeanie': {
       const band = frontBack(brow + 0.013, earTop - 0.006, nape + 0.016);
       const col = 0x1a1a1f;
       // a slouchy knit: taller at the back, a folded cuff, ribs
       crown(h, out, band, (_t, s) => (s < 0.2 ? 0.019 : 0.014) + 0.004 * s, (t, s) => fixed(col, { shade: (s < 0.2 ? 0.8 : 1) * (0.88 + 0.12 * Math.cos(t * 28)) }), {
         lift: (t, s) => (0.018 + 0.016 * Math.max(0, -Math.cos(t))) * s ** 2.5, rows: 14,
       });
+      if (kind === 'graffitibeanie') graffitiEmblem(h, out, band(0) + 0.02);
       return { covered: (t, y) => y > band(t) - 0.004, room: 0.009 };
     }
-    case 'bucket': {
+    case 'bucket':
+    case 'blackbucket': {
       const band = frontBack(brow + 0.017, earTop + 0.006, eye - 0.012);
-      const col = 0xc4b086;
+      const col = kind === 'blackbucket' ? 0x17171b : 0xc4b086;
       const { ring, thetas } = crown(h, out, band, () => 0.014, (_t, s) => fixed(col, { shade: s < 0.15 ? 0.8 : 1 }), { flatTop: h.crownY + 0.024 });
       brim(out, ring, thetas, h, () => 0.047, (_t, s) => 0.022 * s, fixed(col, { shade: 0.9 }), 0.003);
       return { covered: (t, y) => y > band(t) - 0.004, room: 0.01 };

@@ -48,6 +48,13 @@ async function boot(): Promise<void> {
     await runAssetViewer(viewport);
     return;
   }
+  if (q.get('debug') === 'ink') {
+    // developer-only: the raw Urban Ink character GLB (tools/characters)
+    loading.remove();
+    const { runInkViewer } = await import('./debug/inkViewer');
+    await runInkViewer(viewport);
+    return;
+  }
   const num = (key: string): number | undefined => (q.has(key) ? Number(q.get(key)) : undefined);
   const app = new App(viewport, ui, RAPIER, {
     nolock: q.has('nolock'),

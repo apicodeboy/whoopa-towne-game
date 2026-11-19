@@ -1,5 +1,5 @@
 import {
-  DEFAULT_APPEARANCE, GameSim, LOOK_FIELDS, LOOK_FIELD_KEYS, TOPS, botAppearance, decodeAppearance, encodeAppearance,
+  DEFAULT_APPEARANCE, EXTRA_FIELD_KEYS, GameSim, LOOK_FIELDS, LOOK_FIELD_KEYS, LOOK_PRESETS, TOPS, isPremiumOption, botAppearance, decodeAppearance, encodeAppearance,
   randomAppearance, sameAppearance, sanitizeAppearance, seededRandom, type Appearance, type TeamId,
 } from '../src/index';
 import { assert, test } from './harness';
@@ -90,4 +90,30 @@ test('appearance: the roster carries every look and the sim RNG is untouched by 
   // bot looks come from their names, not the match RNG: two sims with the same seed stay in step
   assert(make().rng.next() === sim.rng.next(), 'rng drifted');
   sim.dispose();
+});
+
+test('appearance: Urban Ink fields: codes saved before them decode unchanged, new fields round-trip', () => {
+  // a code exactly as written before the new fields existed (it ends after the AJ's extras)
+  const before: Appearance = { ...DEFAULT_APPEARANCE, tattoos: {}, details: [], hair: 'braids', topColor: 'red', weaponSkin: 'gold', backpack: 'designer' };
+  const full = encodeAppearance(before);
+  const extras = EXTRA_FIELD_KEYS.length;
+  const oldCode = full.slice(0, full.length - (extras - 2)); // only weaponSkin + backpack after the mask
+  const back = decodeAppearance(oldCode);
+  assert(back.hair === 'braids' && back.topColor === 'red' && back.weaponSkin === 'gold' && back.backpack === 'designer', 'old fields read back');
+  assert(back.shoulders === 'average' && back.headSize === 'average' && back.mask === 'none' && back.carry === 'none' && back.waistChain === 'none', 'new fields default');
+  const look: Appearance = { ...before, shoulders: 'broad', headSize: 'large', mask: 'facemask', carry: 'phone', waistChain: 'silver', top: 'puffervest', hat: 'graffitibeanie', hair: 'locs' };
+  assert(sameAppearance(decodeAppearance(encodeAppearance(look)), look), 'new fields round-trip');
+  assert(sanitizeAppearance({ ...look, mask: 'nope', shoulders: 42 }).mask === 'none', 'bad values are cleaned');
+});
+
+test('appearance: the starter looks are complete, valid, and free (nothing from AJ\'S)', () => {
+  assert(LOOK_PRESETS.length >= 2, 'two starter looks');
+  for (const p of LOOK_PRESETS) {
+    const look = sanitizeAppearance({ ...DEFAULT_APPEARANCE, ...p.look });
+    for (const [k, v] of Object.entries(p.look)) {
+      assert((look as unknown as Record<string, unknown>)[k] === v, `${p.id}: ${k}=${String(v)} survives sanitizing`);
+      assert(!isPremiumOption(k, String(v)), `${p.id}: ${k}=${String(v)} is an AJ's item`);
+    }
+    assertValid(look, p.id);
+  }
 });

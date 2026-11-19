@@ -59,13 +59,16 @@ export class CharacterPreview {
     this.canvas.setAttribute('aria-label', 'Character preview: drag to turn, scroll or pinch to zoom');
     this.pose.held = 'none';
 
-    this.scene.add(new THREE.HemisphereLight(0xe6eeff, 0x3a332c, 1.45));
-    const key = new THREE.DirectionalLight(0xfff3e0, 2.5);
-    key.position.set(-1.6, 3, -3);
-    const rim = new THREE.DirectionalLight(crewColorHex(0), 1.8);
+    // a studio for the Urban Ink look: one soft key from the upper left (the cel bands come
+    // from it), a cool kicker behind for separation, a warm low fill
+    this.scene.add(new THREE.HemisphereLight(0xe6eeff, 0x3a332c, 1.3));
+    const key = new THREE.DirectionalLight(0xfff3e0, 2.6);
+    key.position.set(-1.8, 3.2, -2.6);
+    const rim = new THREE.DirectionalLight(0xbfd4ff, 1.0);
     rim.position.set(2.4, 2.2, 2.6);
-    const fill = new THREE.DirectionalLight(0xffd23f, 0.55);
+    const fill = new THREE.DirectionalLight(0xffd8a0, 0.45);
     fill.position.set(2.5, 0.8, -1.5);
+    void crewColorHex;
     this.scene.add(key, rim, fill);
     // a floor disc so the character stands on something
     const floor = new THREE.Mesh(

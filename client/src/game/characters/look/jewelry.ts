@@ -71,7 +71,7 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh, fine: P
     out.torus(c, axis, r + 0.0035, 0.0017, (u) => (Math.floor(u * 22) % 2 ? METAL.gold : fixed(0xc9982f, { metal: 0.65, rough: 0.3 })), 22, 5);
     return;
   }
-  if (kind === 'gloves') {
+  if (kind === 'gloves' || kind === 'blackgloves') {
     // AJ's shooter gloves: the hands are painted in the assembler; this is the cuff
     for (const side of ['L', 'R'] as const) {
       const { A, B, r } = at(side, 0.95);
@@ -82,8 +82,9 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh, fine: P
   // watch on the left wrist: strap plus a face on the back of the wrist
   const iced = kind === 'icedwatch';
   const gold = kind === 'goldwatch' || iced;
+  const silver = kind === 'silverwatch';
   const { A, B, r } = at('L', 0.86);
-  cuff(out, A, B, 0.86, 0.016, r, 0.0026, gold ? METAL.gold : fixed(0x1d1e22, { rough: 0.7 }));
+  cuff(out, A, B, 0.86, 0.016, r, 0.0026, gold ? METAL.gold : silver ? METAL.silver : fixed(0x1d1e22, { rough: 0.7 }));
   const axis = v3().subVectors(B, A).normalize();
   const c = A.clone().lerp(B, 0.86);
   // the back of the wrist: out and up from the body, square to the forearm (works for any arm pose)
@@ -91,9 +92,9 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh, fine: P
   const outward = ref.sub(axis.clone().multiplyScalar(ref.dot(axis))).normalize();
   const base = c.clone().addScaledVector(outward, r + 0.002);
   const top = base.clone().addScaledVector(outward, 0.0045);
-  out.tube([base, top], 0.0095, 12, gold ? METAL.gold : METAL.steel, { flat: true });
+  out.tube([base, top], 0.0095, 12, gold ? METAL.gold : silver ? METAL.silver : METAL.steel, { flat: true });
   const dial = top.clone().addScaledVector(outward, 0.0003);
-  out.tube([top, dial], 0.0075, 12, iced ? fixed(0xbfe6ff, { metal: 0.3, rough: 0.06 }) : gold ? fixed(0x1a1712, { rough: 0.3 }) : fixed(0xe8ecef, { rough: 0.3 }), { flat: true });
+  out.tube([top, dial], 0.0075, 12, iced ? fixed(0xbfe6ff, { metal: 0.3, rough: 0.06 }) : gold || silver ? fixed(0x1a1712, { rough: 0.3 }) : fixed(0xe8ecef, { rough: 0.3 }), { flat: true });
   if (iced) {
     // AJ's: a bezel of stones around the dial and an iced strap
     fine.torus(top.clone().addScaledVector(outward, 0.0006), outward, 0.0098, 0.0019, (u) => (Math.floor(u * 20) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 20, 5);
@@ -103,6 +104,37 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh, fine: P
 
 export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh, fine: ProcMesh = out): void {
   if (kind === 'none') return;
+  if (kind === 'silverstack') {
+    // three silver chains, each a little longer than the last
+    buildNecklace('silver', body, out, fine);
+    buildChainAt(body, out, 0.1, 0.0019, METAL.silver);
+    buildChainAt(body, out, 0.135, 0.0023, fixed(0xc9cfd6, { metal: 0.62, rough: 0.26 }));
+    return;
+  }
+  if (kind === 'medallion') {
+    // a silver rope chain with an oversized round medallion
+    const path = buildChainAt(body, out, 0.115, 0.0026, METAL.silver);
+    const tip = path[Math.round((path.length - 1) / 2)];
+    const c = tip.clone().add(v3(0, -0.03, 0.004));
+    for (const dy of [-0.03, 0, 0.03]) for (const dx of [-0.03, 0, 0.03]) c.z = Math.max(c.z, torsoZ(body, c.x - body.neckAxis.x + dx, c.y + dy, 1) + 0.004);
+    out.tube([tip.clone().add(v3(0, -0.002, 0)), c.clone().add(v3(0, 0.03, 0))], 0.0018, 5, METAL.silver);
+    const disc: V3[] = [];
+    for (let i = 0; i < 20; i++) {
+      const a = (i / 20) * Math.PI * 2;
+      disc.push(c.clone().add(v3(Math.cos(a) * 0.029, Math.sin(a) * 0.029, 0.005)));
+    }
+    out.slab(disc, v3(0, 0, 1), 0.005, METAL.silver);
+    // a raised rim and a star in the middle
+    out.torus(c.clone().add(v3(0, 0, 0.0052)), v3(0, 0, 1), 0.025, 0.0022, fixed(0xdfe4ea, { metal: 0.7, rough: 0.2 }), 20, 5);
+    const star: V3[] = [];
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const r = i % 2 ? 0.0065 : 0.015;
+      star.push(c.clone().add(v3(Math.cos(a) * r, -Math.sin(a) * r, 0.0068)));
+    }
+    fine.slab(star, v3(0, 0, 1), 0.0016, fixed(0xf1f4f8, { metal: 0.75, rough: 0.15 }));
+    return;
+  }
   const neck = body.joint('Neck');
   const ax = body.neckAxis;
   if (kind === 'choker') {
@@ -209,6 +241,45 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh, fine
     // a stone in the middle
     out.ellipsoid(c.clone().add(v3(0, 0, 0.0038)), v3(0.0045, 0.0045, 0.0018), fixed(0xc22a3a, { metal: 0.3, rough: 0.1 }), 6, 3);
   }
+}
+
+/** A plain chain round the neck dropping `drop` meters onto the chest; returns its path. */
+function buildChainAt(body: BodyQuery, out: ProcMesh, drop: number, rad: number, look: Style): V3[] {
+  const neck = body.joint('Neck');
+  const ax = body.neckAxis;
+  const yBack = neck.y + 0.016;
+  const N = 56;
+  const path: V3[] = [];
+  for (let k = 0; k <= N; k++) {
+    const a = (k / N) * Math.PI * 2 - Math.PI;
+    const front = Math.max(0, Math.cos(a)) ** 2.2;
+    const y = yBack - drop * front;
+    const r = body.torso(a, y) + rad + 0.0024;
+    path.push(v3(ax.x + Math.sin(a) * r, y, ax.z + Math.cos(a) * r));
+  }
+  out.tube(path, path.map((_p, i) => rad * (i % 2 ? 0.85 : 1.1)), 5, look, { flat: true, caps: false });
+  return path;
+}
+
+/**
+ * A silver chain hanging from the front belt loop on the right hip round to the back pocket.
+ * `hip` is the outside of the right hip at belt height; `down` how low the loop hangs.
+ */
+export function buildWaistChain(kind: string, hip: V3, front: V3, back: V3, out: ProcMesh): void {
+  if (kind === 'none') return;
+  const pts: V3[] = [];
+  const N = 30;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    // a hanging curve (catenary-like) from front to back past the hip
+    const a = front.clone().lerp(hip, Math.min(1, t * 2)).lerp(back, Math.max(0, t * 2 - 1));
+    a.y -= Math.sin(Math.PI * t) * 0.17;
+    a.x += Math.sin(Math.PI * t) * -0.012;
+    pts.push(a);
+  }
+  out.tube(pts, pts.map((_p, i) => (i % 2 ? 0.0024 : 0.0032)), 5, (i) => (i % 2 ? METAL.silver : fixed(0xb9c0c8, { metal: 0.6, rough: 0.28 })), { flat: true });
+  out.torus(front.clone(), v3(0, 0, 1), 0.006, 0.0016, METAL.silver, 10, 4);
+  out.torus(back.clone(), v3(0, 0, 1), 0.006, 0.0016, METAL.silver, 10, 4);
 }
 
 /** Where the torso surface is for a point `dx` to the side of the neck axis at height y (front +1 / back -1). */

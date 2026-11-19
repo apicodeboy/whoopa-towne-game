@@ -115,6 +115,10 @@ export class App {
     this.R = R;
     this.debug = debug;
     this.stage = new Stage(viewport, R, this.settings);
+    // character ink outlines: off on low quality / performance mode (they double each character's cost)
+    const outlines = () => (SkinnedCharacter.outlines = this.settings.values.quality !== 'low' && !this.settings.values.performanceMode);
+    outlines();
+    this.settings.onChange(outlines);
     this.input = new InputManager(this.settings, viewport);
     this.audio = new AudioEngine(this.settings);
     // browsers only start audio from a user gesture: hook the first one of any kind

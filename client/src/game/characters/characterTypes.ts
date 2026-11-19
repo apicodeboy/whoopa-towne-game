@@ -73,6 +73,8 @@ export interface CharacterVisual {
   dispose(): void;
   /** Menus: relaxed idle, no weapon. */
   setMenuIdle?(on: boolean): void;
+  /** Level of detail: the ink outline is drawn only up close (it doubles the character's cost). */
+  setOutline?(on: boolean): void;
   /** Character screen: shows a facial expression for a moment. */
   previewExpression?(id: string): void;
   /** Bind-pose heights the Character screen frames its camera on (meters, before `scale`). */

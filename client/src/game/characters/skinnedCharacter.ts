@@ -157,7 +157,7 @@ const _wr = new THREE.Vector3();
 const _t = new THREE.Vector3();
 
 /** Ink outline width in meters (the comic-book line around every character). */
-const OUTLINE = 0.011;
+const OUTLINE = 0.0085;
 
 /**
  * The outline: the character's own mesh again, pushed out along its normals and drawn
@@ -358,6 +358,7 @@ export class SkinnedCharacter implements CharacterVisual {
     // the ink line (in the mesh's own units, which are scaled to make the model 1.8 m tall)
     this.outlineMat = outlineMaterial(OUTLINE / this.skin.matrixWorld.getMaxScaleOnAxis());
     this.outline = new THREE.SkinnedMesh(this.geometry, this.outlineMat);
+    this.outline.visible = SkinnedCharacter.outlines;
     this.outline.bind(this.skin.skeleton, this.skin.bindMatrix);
     this.outline.boundingSphere = this.skin.boundingSphere;
     this.outline.castShadow = false;
@@ -381,7 +382,8 @@ export class SkinnedCharacter implements CharacterVisual {
       const au = bone(`UpperArm${side}`), al = bone(`LowerArm${side}`), aw = bone(`Wrist${side}`);
       if (au && al && aw) this.arms[side as 'L' | 'R'] = { upper: au, lower: al, wrist: aw };
       for (const f of ['Index', 'Middle', 'Ring', 'Pinky']) {
-        for (const j of [1, 2, 3]) {
+        // Urban Ink hands: the palm is the wrist's, the fingers bend at their knuckles (2..4)
+        for (const j of built.rig.id === 'ink' ? [2, 3, 4] : [1, 2, 3]) {
           const b = bone(`${f}${j}${side}`);
           if (b) this.fingers[side as 'L' | 'R'].push(b);
         }
@@ -522,6 +524,13 @@ export class SkinnedCharacter implements CharacterVisual {
   setVisible(v: boolean): void {
     this.root.visible = v;
   }
+
+  setOutline(on: boolean): void {
+    this.outline.visible = on && SkinnedCharacter.outlines;
+  }
+
+  /** Off on low graphics quality and in performance mode (set by the app). */
+  static outlines = true;
 
   // ------------------------------------------------------------------ NPCs (AJ behind the counter)
   private lookTarget: THREE.Vector3 | null = null;
@@ -702,8 +711,20 @@ export class SkinnedCharacter implements CharacterVisual {
     }
     if (this.menuIdle) {
       for (const a of this.all) a.setEffectiveWeight(a === this.calm ? 1 : 0);
+      // put back the clean animated pose first: bones the idle clip does not animate would
+      // otherwise keep every frame's procedural turn on top of the last
+      for (const t of this.touched) {
+        t.bone.quaternion.copy(t.q);
+        t.bone.position.copy(t.p);
+      }
       this.mixer.update(dt);
+      for (const t of this.touched) {
+        t.q.copy(t.bone.quaternion);
+        t.p.copy(t.bone.position);
+      }
       this.npcLayer(dt, pose.yaw);
+      if (this.look.carry === 'phone') this.phonePose(dt);
+      else if (this.phone) this.phone.visible = false;
       return;
     }
     if (pose.skydive) {
@@ -995,6 +1016,47 @@ export class SkinnedCharacter implements CharacterVisual {
     }
   }
 
+  // ------------------------------------------------------------------ phone (menus only)
+  private phone: THREE.Group | null = null;
+  private phoneT = 0;
+
+  /** Looking at a phone held in both hands in front of the chest (menus and the creator). */
+  private phonePose(dt: number): void {
+    const R = this.arms.R, L = this.arms.L;
+    if (!R || !L) return;
+    this.phoneT += dt;
+    if (!this.phone) {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.074, 0.152, 0.009), new THREE.MeshStandardMaterial({ color: 0x15161a, roughness: 0.35, metalness: 0.4 }));
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.066, 0.138), new THREE.MeshBasicMaterial({ color: 0x9fd0ff }));
+      screen.position.z = 0.0047;
+      g.add(body, screen);
+      this.phone = g;
+      this.root.add(g);
+    }
+    this.phone.visible = true;
+    const rq = this.root.quaternion;
+    const right = _v5.set(Math.cos(this.root.rotation.y), 0, -Math.sin(this.root.rotation.y));
+    // the phone in front of the chest, screen up toward the face; thumbs scrolling now and then
+    const scroll = Math.max(0, Math.sin(this.phoneT * 1.3)) * 0.006;
+    // (root space: forward is -Z, the character's right hand on +X)
+    const at = new THREE.Vector3(0.01, 1.15 + scroll, -0.25);
+    reach(R, this.root.localToWorld(at.clone().add(new THREE.Vector3(0.045, -0.04, 0.025))), new THREE.Vector3(1, -1.3, 0.5).applyQuaternion(rq));
+    reach(L, this.root.localToWorld(at.clone().add(new THREE.Vector3(-0.045, -0.045, 0.03))), new THREE.Vector3(-1, -1.3, 0.5).applyQuaternion(rq));
+    this.grip('R', WRIST_TWIST * 0.5, 0.55);
+    this.grip('L', -WRIST_TWIST * 0.5, 0.55);
+    if (this.chest) {
+      _q1.setFromAxisAngle(right, -0.06);
+      rotateBoneWorld(this.chest, _q1);
+    }
+    if (this.head) {
+      _q1.setFromAxisAngle(right, -0.4);
+      rotateBoneWorld(this.head, _q1);
+    }
+    this.phone.position.copy(at);
+    this.phone.rotation.set(-1.05, 0, 0);
+  }
+
   // ------------------------------------------------------------------ ledge
   /**
    * Pulling up onto a ledge: both hands up on the edge, the body rising past them, one knee
@@ -1248,6 +1310,13 @@ export class SkinnedCharacter implements CharacterVisual {
     this.geometry.dispose();
     this.outlineMat.dispose();
     this.mouth?.dispose();
+    this.phone?.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+    });
     this.healProp?.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {

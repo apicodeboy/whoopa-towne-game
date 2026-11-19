@@ -246,6 +246,9 @@ export class RemotePlayer {
     this.climbT = alive && (this.flags & PF.CLIMB) !== 0 ? Math.min(1, Math.max(0, this.climbT) + dt / LEDGE.time) : -1;
     p.roll = this.rollT;
     p.climb = this.climbT;
+    // the ink outline only within 28 m (far away it is a few pixels, and it doubles the cost)
+    const dx = this.x - cameraPos.x, dz = this.z - cameraPos.z;
+    this.visual.setOutline?.(dx * dx + dz * dz < 28 * 28);
     this.visual.update(dt, p, visible);
 
     // on the transport (JUMP OFF THE PORCH) nobody is in the world yet

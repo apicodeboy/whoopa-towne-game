@@ -1,8 +1,8 @@
 import {
-  BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BROWS, BUILDS, DEFAULT_APPEARANCE, EARRINGS, EARS, EXPRESSIONS, EYE_COLORS,
+  BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BROWS, BUILDS, CARRY, DEFAULT_APPEARANCE, EARRINGS, EARS, EXPRESSIONS, EYE_COLORS, HEAD_SIZES, MASKS, SHOULDERS, WAIST_CHAINS,
   EYE_SHAPES, FACE_ACCESSORIES, FACE_SHAPES, FACIAL_HAIR, GLASSES, HAIRSTYLES, HAIR_COLORS, HATS, HEAD_SHAPES, HEIGHTS, LIPS,
   MOUTH_ACCESSORIES, MOUTH_PROPS, NECKLACES, NOSES, SHOES, SHOE_COLORS, SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TEETH, TOPS,
-  TOP_COLORS, WRIST, cloneAppearance, randomAppearance, sameAppearance, type Appearance, type LookField, type LookOption,
+  TOP_COLORS, WRIST, LOOK_PRESETS, cloneAppearance, isPremiumOption, randomAppearance, sameAppearance, type Appearance, type LookField, type LookOption,
 } from '@shared/config/appearance';
 import type { Profile } from '../core/profile';
 import { CharacterPreview, PREVIEW_FRAMES, type PreviewFrame } from '../game/characters/characterPreview';
@@ -20,12 +20,12 @@ import { button, clear, el } from './dom';
  * shown locked ("coming soon") and can never be picked.
  */
 
-type Kind = 'cards' | 'swatches' | 'expression' | 'details' | 'locked';
+type Kind = 'cards' | 'swatches' | 'expression' | 'details' | 'locked' | 'presets';
 
 interface Sub {
   id: string;
   name: string;
-  field?: LookField;
+  field?: LookField | 'shoulders' | 'headSize' | 'mask' | 'carry' | 'waistChain';
   kind: Kind;
   options: readonly LookOption[];
   frame: PreviewFrame;
@@ -62,15 +62,22 @@ const UI = {
   turnR: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 3v5h-5"/></svg>',
 };
 
-const sub = (id: string, name: string, field: LookField | undefined, kind: Kind, options: readonly LookOption[], frame: PreviewFrame, note?: string): Sub => ({ id, name, field, kind, options, frame, note });
+const sub = (id: string, name: string, field: Sub['field'], kind: Kind, options: readonly LookOption[], frame: PreviewFrame, note?: string): Sub => ({ id, name, field, kind, options, frame, note });
 
 export const CATEGORIES: Category[] = [
+  {
+    id: 'presets', name: 'Starter Looks', icon: ICONS.ink, subs: [
+      sub('preset', 'Starter Looks', undefined, 'presets', LOOK_PRESETS.map((p) => ({ id: p.id, name: p.name })), 'full', 'A complete fit to start from. Change anything after.'),
+    ],
+  },
   {
     id: 'body', name: 'Body', icon: ICONS.body, subs: [
       sub('bodyType', 'Body Type', 'bodyType', 'cards', BODY_TYPES, 'full', 'Body types are looks only: every outfit and accessory fits all of them.'),
       sub('build', 'Body Build', 'build', 'cards', BUILDS, 'full'),
       sub('height', 'Height', 'height', 'cards', HEIGHTS, 'full', 'Height is visual only: everyone has the same hitbox.'),
+      sub('shoulders', 'Shoulder Width', 'shoulders', 'cards', SHOULDERS, 'full'),
       sub('skin', 'Skin Tone', 'skin', 'swatches', SKIN_TONES, 'upper'),
+      sub('headSize', 'Head Size', 'headSize', 'cards', HEAD_SIZES, 'upper'),
     ],
   },
   {
@@ -135,6 +142,9 @@ export const CATEGORIES: Category[] = [
       sub('necklace', 'Necklaces', 'necklace', 'cards', NECKLACES, 'upper'),
       sub('wrist', 'Wrist', 'wrist', 'cards', WRIST, 'upper'),
       sub('faceAcc', 'Face Accessories', 'faceAcc', 'cards', FACE_ACCESSORIES, 'face'),
+      sub('mask', 'Masks', 'mask', 'cards', MASKS, 'face'),
+      sub('waistChain', 'Pants Chain', 'waistChain', 'cards', WAIST_CHAINS, 'full'),
+      sub('carry', 'In Hand', 'carry', 'cards', CARRY, 'upper', 'Shows in menus and the creator (put away in matches).'),
     ],
   },
   {
@@ -438,6 +448,10 @@ export class CharacterScreen {
   }
 
   private isSelected(s: Sub, o: LookOption): boolean {
+    if (s.kind === 'presets') {
+      const p = LOOK_PRESETS.find((x) => x.id === o.id);
+      return !!p && Object.entries(p.look).every(([k, v]) => (this.draft as unknown as Record<string, unknown>)[k] === v);
+    }
     if (s.kind === 'details') return this.draft.details.includes(o.id);
     if (s.kind === 'locked') return o.id === 'none';
     if (s.kind === 'expression') return o.id === 'neutral';
@@ -445,6 +459,19 @@ export class CharacterScreen {
   }
 
   private choose(s: Sub, o: LookOption): void {
+    if (s.kind === 'presets') {
+      const p = LOOK_PRESETS.find((x) => x.id === o.id);
+      if (!p) return;
+      // only what the player may wear (a preset never contains AJ's items, but be safe)
+      for (const [k, v] of Object.entries(p.look)) {
+        if (isPremiumOption(k, String(v)) && !this.deps.owns?.(k, String(v))) continue;
+        (this.draft as unknown as Record<string, unknown>)[k] = v;
+      }
+      this.changed();
+      this.renderPanel();
+      this.setView('full');
+      return;
+    }
     if (s.kind === 'expression') {
       this.setView('face');
       this.preview.showcaseFace(0.3);
