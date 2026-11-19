@@ -1,34 +1,44 @@
 import { Rng } from '../math';
+import { construct } from './architect';
 import { MapBuilder, type Opening, type Side } from './builder';
 import type { MapDef } from './types';
 import { addWhoopaTowne } from './whoopaTowne';
 
 /**
- * GREATER WHOOPA TOWNE — the JUMP OFF THE PORCH map. The original town sits untouched in
- * the middle (only its boundary walls come down) and four districts are built around it:
+ * GREATER WHOOPA TOWNE — the JUMP OFF THE PORCH map: nine districts in a 3×3 grid, the
+ * original town untouched in the middle (only its boundary walls come down).
  *
- *   x: -200          -86                86               200
- *      +-------------+-----------------+----------------+  z=-150
- *      |             |    THE HILL     |                |
- *      |   JUNGLE    +--- Porch St ----+    DOWNTOWN    |  z=-56
- *   (BABYLON, the desert, lies west of the jungle: x -330..-200)
- *      |  (temple,   |                 |  (towers, bank,|
- *      |  crash site,|   WHOOPA TOWNE  |  garage, plaza,|
- *      |  ranger stn)|   (the classic  |  city hall,    |
- *      |             |    map)         |  hotel row)    |
- *      +----------------------- Ocean Drive -------------+  z=61..71
- *      |                  WHOOPA BEACH (sand)             |
- *      +--------------------------------------------------+  z=118, the ocean beyond
+ *   x: -200            -86                 86              200
+ *      +---------------+------------------+----------------+  z=-150
+ *      |   BABYLON     |    THE HILL      |   HONG KONG    |
+ *      |  (desert)     |  (houses, AJ'S)  | (Chinatown)    |
+ *      +---------------+---- Porch St ----+----------------+  z=-56
+ *      |   JUNGLE      |   WHOOPA TOWNE   |   DOWNTOWN     |
+ *      |               |  (the classic    |                |
+ *      |               |   map)           |                |
+ *      +---------------+-- Ocean Drive ---+----------------+  z=61..71
+ *      |  THE DOCKS    |   WHOOPA BEACH   | THE BOARDWALK  |
+ *      +---------------+------------------+----------------+  z=118, the ocean beyond
  *
- * Everything is generated from a fixed seed, so the server and every client build the
- * exact same map without sending it over the wire.
+ * West Line Rd (x=-86), East Line Rd (x=86), Porch St (z=-56) and Ocean Drive (z=66) are the
+ * borders. Everything is generated from fixed seeds, so the server and every client build
+ * the exact same map without sending it over the wire.
  */
 
-export const GREATER = { minX: -330, maxX: 200, minZ: -150, maxZ: 118 } as const;
-/** Where the map ended before BABYLON was added (the jungle's west edge). */
+export const GREATER = { minX: -200, maxX: 200, minZ: -150, maxZ: 118 } as const;
+/** The jungle's old west edge (now the west edge of the map). */
 const OLD_WEST = -200;
 const SHORE = GREATER.maxZ;
 const SEED = 0x7055;
+/** The grid: column edges (x) and row edges (z), inside the border roads. */
+const CELL = {
+  w: { x0: GREATER.minX, x1: -90.5 },
+  c: { x0: -81.5, x1: 81.5 },
+  e: { x0: 90.5, x1: GREATER.maxX },
+  n: { z0: GREATER.minZ, z1: -60.5 },
+  m: { z0: -51.5, z1: 61 },
+  s: { z0: 71, z1: SHORE },
+} as const;
 
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 const inRect = (r: Rect, x: number, z: number, pad = 0) => x > r.x0 - pad && x < r.x1 + pad && z > r.z0 - pad && z < r.z1 + pad;
@@ -44,46 +54,56 @@ export function buildGreaterTowne(): MapDef {
 
   // ---- one ground slab under everything, and the edges ----
   b.box('ground', GREATER.minX - 12, GREATER.maxX + 12, GREATER.minZ - 12, SHORE + 12, -1, 0);
-  // city backs along the north edge (hood + downtown) and the east edge (downtown)
+  // city backs along the north edge (the hill, Hong Kong) and the east edge
   b.box('perimeter', -86, GREATER.maxX + 3, GREATER.minZ - 3, GREATER.minZ, 0, 10, { meta: { side: 'n' } });
   b.box('perimeter', GREATER.maxX, GREATER.maxX + 3, GREATER.minZ, 61, 0, 10, { meta: { side: 'e', tall: 2.2 } });
-  // rock cliffs where the jungle and the beach meet the edge of the world
+  // rock cliffs where the desert, the jungle and the docks meet the edge of the world
+  // (these draws come first, as they always have, so THE HILL generates exactly as before)
   cliffs(b, rng, 'n', OLD_WEST - 10, -86);
   cliffs(b, rng, 'w', GREATER.minZ - 10, SHORE + 2);
   cliffs(b, rng, 'e', 61, SHORE + 2);
   // the ocean: you can walk to the water's edge and no further
   b.box('bound', GREATER.minX - 6, GREATER.maxX + 6, SHORE, SHORE + 4, 0, 40);
 
-  // ---- connecting roads around the old town ----
+  // ---- the border roads ----
   b.road('road', [{ x: -86, z: GREATER.minZ }, { x: -86, z: 61 }], 9, true); // West Line Rd
   b.road('road', [{ x: 86, z: GREATER.minZ }, { x: 86, z: 61 }], 9, true); // East Line Rd
-  b.road('road', [{ x: -90.5, z: -56 }, { x: 90.5, z: -56 }], 9, true); // Porch St
+  b.road('road', [{ x: GREATER.minX, z: -56 }, { x: GREATER.maxX, z: -56 }], 9, true); // Porch St
   for (const x of [-18, 18]) b.road('road', [{ x, z: 50 }, { x, z: 61 }], 8, true); // the Strips run down to the beach
   b.road('road', [{ x: GREATER.minX, z: 66 }, { x: GREATER.maxX, z: 66 }], 10, true); // Ocean Drive
 
   hood(b, rng);
-  jungle(b, rng);
-  downtown(b, rng);
-  beach(b, rng);
-  // the desert has its own seed: everything above generates exactly as it did before it
+  // every other district has its own seed
   babylon(b, new Rng(SEED ^ 0xbab1));
+  jungle(b, new Rng(SEED ^ 0x1a6));
+  hongKong(b, new Rng(SEED ^ 0x4b6));
+  downtown(b, new Rng(SEED ^ 0xd07));
+  beach(b, new Rng(SEED ^ 0xbea));
+  docks(b, new Rng(SEED ^ 0xd0c));
 
+  b.label('BABYLON', -150, -66);
   b.label('THE HILL', 0, -128);
-  b.label('JUNGLE', -150, -20);
-  b.label('BABYLON', -268, -10);
-  b.label('DOWNTOWN', 150, -75);
+  b.label('HONG KONG', 150, -66);
+  b.label('JUNGLE', -150, 50);
+  b.label('DOWNTOWN', 150, -48);
+  b.label('THE DOCKS', -145, 80);
   b.label('WHOOPA BEACH', 0, 100);
-  b.label('OCEAN DRIVE', -120, 66);
+  b.label('BOARDWALK', 150, 104);
+  b.label('OCEAN DRIVE', -60, 66);
   // the names people call out from the blimp
   b.districts.push(
+    { name: 'BABYLON', x: -145, z: -105 },
     { name: 'THE HILL', x: 0, z: -105 },
-    { name: 'JUNGLE', x: -145, z: -45 },
-    { name: 'BABYLON', x: -268, z: -30 },
-    { name: 'DOWNTOWN', x: 148, z: -50 },
-    { name: 'WHOOPA BEACH', x: 30, z: 97 },
-    { name: 'OCEAN DRIVE', x: -105, z: 66 },
+    { name: 'HONG KONG', x: 145, z: -105 },
+    { name: 'JUNGLE', x: -145, z: 5 },
     { name: 'WHOOPA TOWNE', x: 0, z: 0 },
+    { name: 'DOWNTOWN', x: 145, z: 5 },
+    { name: 'THE DOCKS', x: -145, z: 95 },
+    { name: 'WHOOPA BEACH', x: 0, z: 97 },
+    { name: 'BOARDWALK', x: 145, z: 95 },
   );
+  // JUMP OFF THE PORCH: before the match, everyone warms up in BABYLON
+  b.warmup = { x0: CELL.w.x0 + 4, x1: CELL.w.x1 - 4, z0: CELL.n.z0 + 4, z1: CELL.n.z1 - 4 };
 
   b.backdrop = { n: 'city', e: 'city', w: 'desert', s: 'ocean' };
   return b.build('greater-towne', 'Greater Whoopa Towne', { ...GREATER });
@@ -255,21 +275,29 @@ function houseBlock(b: MapBuilder, rng: Rng, r: Rect, id: string, northEdge: boo
   }
 }
 
+/**
+ * A house on its lot: every one can be walked into now. The ones that used to be walk-in
+ * single rooms are one-floor homes; the others (once solid blocks) have two floors.
+ */
 function house(b: MapBuilder, rng: Rng, id: string, r: Rect, facing: Side): void {
   const style = rng.pick(['siding', 'stucco', 'brick', 'siding'] as const);
   const color = style === 'brick' ? undefined : rng.pick(HOUSE_COLORS);
-  const cx = (r.x0 + r.x1) / 2;
-  const front = facing === 's' ? r.z1 : r.z0;
-  const out = facing === 's' ? 1 : -1;
-  if (rng.chance(0.34)) {
-    // a house you can walk into (and through, out the back)
-    room(b, id, r, 3.8, style, [...frontage(facing, r), { side: opposite(facing), at: cx + 1.5, w: 1.5 }, { side: 'e', at: (r.z0 + r.z1) / 2, w: 1.4, sill: 1.0, top: 2.2 }], { color, loot: rng.chance(0.5) ? 2 : 1 });
-    b.prop('shelf', r.x0 + 0.8, (r.z0 + r.z1) / 2, 0, rng.int(4));
-  } else {
-    b.building({ id, ...r, h: rng.pick([6.2, 6.5, 7.0]), style, color, roofStyle: 'pitched' });
-  }
-  // the porch out front
-  b.box('stoop', cx - 1.7, cx + 1.7, Math.min(front, front + out * 1.7), Math.max(front, front + out * 1.7), 0, 0.34, { color: 0xb9b4a8 });
+  const oneFloor = rng.chance(0.34);
+  // (the same draws the old houses made, so everything generated after them stays put)
+  if (oneFloor) {
+    rng.chance(0.5);
+    rng.int(4);
+  } else rng.pick([6.2, 6.5, 7.0]);
+  // two-floor brick houses are flat-roofed townhouses
+  const type = oneFloor ? 'house1' : style === 'brick' ? 'townhouse' : 'house2';
+  construct(b, { id, type, ...r, facing, style, color, roofColor: ROOF_COLORS[hashStr(id) % ROOF_COLORS.length] });
+}
+
+const ROOF_COLORS = [0x4a4442, 0x5a3f38, 0x3d4650, 0x4d4a3c, 0x6b3a2e];
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
 }
 
 function school(b: MapBuilder, r: Rect): void {
@@ -341,14 +369,8 @@ function church(b: MapBuilder, r: Rect): void {
 
 function foodMart(b: MapBuilder, r: Rect): void {
   const M = { x0: 25, x1: 41, z0: -74, z1: -63 };
-  room(b, 'foodmart', M, 4.4, 'store', [
-    { side: 's', at: 33, w: 2.6, top: 2.5 }, { side: 's', at: 28, w: 3, sill: 1.0, top: 2.4 }, { side: 's', at: 38, w: 3, sill: 1.0, top: 2.4 },
-    { side: 'n', at: 37, w: 1.6 }, { side: 'w', at: -68.5, w: 1.6 },
-  ], { awning: { side: 's', color: 0xb3261e }, loot: 2 });
-  b.prop('shelf', 29, -69.5, Math.PI / 2, 1);
-  b.prop('shelf', 36, -69.5, Math.PI / 2, 2);
-  b.box('counter', 39, 40.4, -72, -66, 0, 1.05);
-  signOn(b, 'TOWNE FOOD MART', M, 's', 3.45, 8, '#ffe14d', '#b3261e');
+  // the corner store: aisles, the cooler, the register, a stock room out back
+  construct(b, { id: 'foodmart', type: 'store', ...M, facing: 's', color: 0xe3d2ac, sign: { text: 'TOWNE FOOD MART', color: '#ffe14d', bg: '#b3261e' } });
   b.prop('dumpster', 44.5, -72, 0, 0);
   b.prop('busstop', 46.5, -62, -Math.PI / 2, 0);
   // the court out back
@@ -367,15 +389,12 @@ function foodMart(b: MapBuilder, r: Rect): void {
 }
 
 function projects(b: MapBuilder, r: Rect): void {
-  const A = { x0: -46, x1: -24, z0: -146, z1: -134 };
-  b.building({ id: 'projectsA', ...A, h: 9, style: 'apartment', parapet: { h: 1, gaps: [{ side: 's', at: -31.4, w: 1.7 }] } });
-  b.ramp({ kind: 'stairs', x: -44, z: -133.15, y0: 0, dir: 'e', run: 12.6, rise: 9, width: 1.7, fill: true, rails: 'right', style: 'concrete', group: 'projectsA' });
-  b.prop('acunit', -40, -140, 0, 0, 9);
-  b.loot(-35, -140, 9);
-  room(b, 'laundry', { x0: -46, x1: -30, z0: -124, z1: -114 }, 4, 'brickdark', [
-    ...frontage('s', { x0: -46, x1: -30, z0: -124, z1: -114 }, 2), { side: 'n', at: -34, w: 1.6 }, { side: 'e', at: -119, w: 1.6 },
-  ], { loot: 2 });
-  signOn(b, 'SUDS LAUNDRY', { x0: -46, x1: -30, z0: -124, z1: -114 }, 's', 3.2, 6, '#ffffff', '#2a6f97');
+  // two walk-up apartment blocks (three floors, a unit on each), the old outside stairs still
+  // running up the front to the east block's roof
+  construct(b, { id: 'projectsA', type: 'apartment', x0: -46, x1: -35, z0: -146, z1: -134, facing: 's', floors: 3, story: 3.0, style: 'apartment' });
+  construct(b, { id: 'projectsB', type: 'apartment', x0: -35, x1: -24, z0: -146, z1: -134, facing: 's', floors: 3, story: 3.0, style: 'apartment', fireEscape: false, gaps: [{ side: 's', at: -31.4, w: 1.7 }] });
+  b.ramp({ kind: 'stairs', x: -44, z: -133.15, y0: 0, dir: 'e', run: 12.6, rise: 9, width: 1.7, rails: 'right', style: 'concrete', group: 'projectsA' });
+  construct(b, { id: 'laundry', type: 'laundromat', x0: -46, x1: -30, z0: -124, z1: -114, facing: 's', style: 'brickdark', sign: { text: 'SUDS LAUNDRY', color: '#ffffff', bg: '#2a6f97' } });
   b.area('lot', -46, -24, -132.5, -126, 1);
   b.prop('car', -42, -129, Math.PI / 2, 3);
   b.prop('dumpster', -26.5, -129, 0, 1);
@@ -555,26 +574,26 @@ function ajsStore(b: MapBuilder, r: Rect): void {
 }
 
 // =================================================================================== JUNGLE
+/** The jungle (west, middle row): the temple, the crash site, the huts, the ranger station. */
 function jungle(b: MapBuilder, rng: Rng): void {
-  const J: Rect = { x0: OLD_WEST, x1: -90.5, z0: GREATER.minZ, z1: 61 };
+  const J: Rect = { x0: CELL.w.x0, x1: CELL.w.x1, z0: CELL.m.z0, z1: CELL.m.z1 };
   b.area('jungle', J.x0, J.x1, J.z0, J.z1, 1);
   const trails: Array<Array<{ x: number; z: number }>> = [
-    [{ x: -90.5, z: 0 }, { x: -100, z: 1 }, { x: -112, z: -6 }, { x: -124, z: -18 }, { x: -138, z: -28 }, { x: -150, z: -40 }, { x: -152, z: -54 }, { x: -150, z: -64 }],
-    [{ x: -124, z: -18 }, { x: -128, z: -2 }, { x: -127, z: 14 }, { x: -122, z: 28 }, { x: -118, z: 34 }],
-    [{ x: -138, z: -28 }, { x: -152, z: -22 }, { x: -166, z: -10 }, { x: -174, z: 2 }],
-    [{ x: -90.5, z: -56 }, { x: -100, z: -58 }, { x: -108, z: -70 }, { x: -112, z: -90 }, { x: -113, z: -110 }],
-    [{ x: -90.5, z: -103 }, { x: -104, z: -100 }, { x: -112, z: -92 }],
-    [{ x: -127, z: 14 }, { x: -140, z: 30 }, { x: -150, z: 48 }, { x: -152, z: 61 }],
-    [{ x: -108, z: -70 }, { x: -125, z: -76 }, { x: -136, z: -80 }],
+    [{ x: J.x1, z: 0 }, { x: -104, z: 2 }, { x: -120, z: 8 }, { x: -136, z: 11 }, { x: -150, z: 9 }],
+    [{ x: -104, z: 2 }, { x: -108, z: -12 }, { x: -112, z: -20 }],
+    [{ x: -120, z: 8 }, { x: -123, z: 22 }, { x: -119, z: 33 }],
+    [{ x: -150, z: 9 }, { x: -158, z: 18 }, { x: -164, z: 26 }],
+    [{ x: -112, z: -36 }, { x: -110, z: J.z0 }],
+    [{ x: -136, z: 11 }, { x: -140, z: 34 }, { x: -146, z: 52 }, { x: -148, z: J.z1 }],
   ];
   for (const t of trails) b.road('trail', t, 3.4, false);
-  const creek = [{ x: -200, z: -40 }, { x: -186, z: -47 }, { x: -172, z: -58 }, { x: -170, z: -74 }, { x: -179, z: -95 }, { x: -186, z: -116 }, { x: -183, z: -136 }, { x: -177, z: -150 }];
-  b.road('creek', creek, 5, false);
+  const creek = [{ x: J.x0, z: -38 }, { x: -188, z: -30 }, { x: -177, z: -14 }, { x: -170, z: 2 }, { x: -160, z: 0 }, { x: -146, z: -46 }, { x: -140, z: J.z0 }];
+  b.road('creek', creek, 4.5, false);
   const keep: Rect[] = [];
 
-  // ---- the temple: a stepped ruin with a shrine on top ----
+  // ---- the temple: a stepped ruin with a shrine on top, its stairs facing the trail ----
   {
-    const cx = -150, cz = -88;
+    const cx = -150, cz = -18;
     b.box('ruin', cx - 13, cx + 13, cz - 13, cz + 13, 0, 2.6);
     b.box('ruin', cx - 9, cx + 9, cz - 9, cz + 9, 2.6, 5.2);
     b.box('ruin', cx - 5.5, cx + 5.5, cz - 5.5, cz + 5.5, 5.2, 7.8);
@@ -586,7 +605,6 @@ function jungle(b: MapBuilder, rng: Rng): void {
     b.loot(cx - 1.5, cz, 7.8);
     b.loot(cx + 1.5, cz, 7.8);
     for (const [dx, dz] of [[-11, -11], [11, -11], [-11, 11], [11, 11]]) b.loot(cx + dx, cz + dz, 2.6);
-    // fallen columns around the base
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2 + rng.range(-0.2, 0.2), d = rng.range(16, 19);
       if (Math.abs(Math.cos(a) * d) < 4.5 && Math.sin(a) > 0) continue; // keep the stairs clear
@@ -603,7 +621,7 @@ function jungle(b: MapBuilder, rng: Rng): void {
     const R = { x0: -124, x1: -114, z0: 36, z1: 44 };
     room(b, 'ranger', R, 3.6, 'wood', [...frontage('n', R), { side: 's', at: -119, w: 1.6 }, { side: 'w', at: 40, w: 1.4, sill: 1.0, top: 2.2 }], { loot: 2 });
     signOn(b, 'RANGER STATION', R, 'n', 3.0, 6, '#f4ead2', '#3d5a2c');
-    const tx = -108, tz = 40;
+    const tx = -104, tz = 40;
     for (const [dx, dz] of [[-1.8, -1.8], [1.8, -1.8], [-1.8, 1.8], [1.8, 1.8]]) {
       b.box('post', tx + dx - 0.15, tx + dx + 0.15, tz + dz - 0.15, tz + dz + 0.15, 0, 8.4, { color: 0x6b5238 });
     }
@@ -611,34 +629,34 @@ function jungle(b: MapBuilder, rng: Rng): void {
     b.box('woodplat', tx - 2.3, tx + 2.3, tz - 2.3, tz + 2.3, 8.4, 8.6, { color: 0x5c4630 });
     b.box('rail', tx - 2, tx + 2, tz - 2, tz - 1.93, 6, 7, { col: 'fence' });
     b.box('rail', tx - 2, tx + 2, tz + 1.93, tz + 2, 6, 7, { col: 'fence' });
-    b.box('rail', tx - 2, tx - 1.93, tz - 2, tz + 2, 6, 7, { col: 'fence' });
-    b.ramp({ kind: 'stairs', x: tx + 10, z: tz, y0: 0, dir: 'w', run: 8, rise: 6, width: 1.4, rails: 'both', style: 'wood', group: 'lookout', thickness: 0.2 });
+    b.box('rail', tx + 1.93, tx + 2, tz - 2, tz + 2, 6, 7, { col: 'fence' });
+    b.ramp({ kind: 'stairs', x: tx - 10, z: tz, y0: 0, dir: 'e', run: 8, rise: 6, width: 1.4, rails: 'both', style: 'wood', group: 'lookout', thickness: 0.2 });
     b.loot(tx, tz, 6);
-    keep.push({ x0: -128, x1: -96, z0: 31, z1: 49 });
+    keep.push({ x0: -128, x1: -94, z0: 31, z1: 49 });
     b.label('RANGER STN', -116, 40);
     b.hotspot(-116, 32);
   }
 
   // ---- crash site: a cargo plane that never made it to the airport ----
   {
-    const cx = -172, cz = 20, ry = 0.5;
+    const cx = -180, cz = 36, ry = 0.5;
     const sx = Math.sin(ry), cz2 = Math.cos(ry);
     b.rbox('wreck', cx, cz, 3.6, 20, 0, 3.6, ry, { color: 0xd5d9de });
     b.rbox('wreck', cx + sx * 1, cz + cz2 * 1, 22, 3.2, 1.2, 0.5, ry, { color: 0xc4c9cf });
     b.rbox('wreck', cx - sx * 15, cz - cz2 * 15, 3.2, 7, 0, 3.2, ry + 0.35, { color: 0xd5d9de });
     b.rbox('wreck', cx - sx * 17.5, cz - cz2 * 17.5, 0.5, 3, 3.2, 3.4, ry + 0.35, { color: 0xb3261e });
-    for (let i = 0; i < 6; i++) b.prop(i % 2 ? 'crate' : 'crate_big', cx + rng.range(-9, 9), cz + rng.range(-9, 9), rng.range(0, 3), i % 2);
+    for (let i = 0; i < 6; i++) b.prop(i % 2 ? 'crate' : 'crate_big', cx + rng.range(-8, 8), cz + rng.range(-8, 8), rng.range(0, 3), i % 2);
     b.loot(cx + 5, cz - 6);
     b.loot(cx - 6, cz + 4);
     b.loot(cx + 3, cz + 9);
-    keep.push({ x0: cx - 20, x1: cx + 16, z0: cz - 22, z1: cz + 16 });
+    keep.push({ x0: cx - 18, x1: cx + 16, z0: cz - 22, z1: cz + 16 });
     b.label('CRASH SITE', cx, cz);
     b.hotspot(cx + 6, cz);
   }
 
   // ---- a little village of huts around a fire pit ----
   {
-    const cx = -113, cz = -122;
+    const cx = -115, cz = -30;
     b.area('dirt', cx - 13, cx + 13, cz - 13, cz + 13, 2);
     const huts: Array<[number, number, Side]> = [[-7, -7, 's'], [7, -7, 's'], [-7, 7, 'n'], [7, 7, 'n']];
     huts.forEach(([dx, dz, side], i) => {
@@ -668,8 +686,8 @@ function jungle(b: MapBuilder, rng: Rng): void {
         if (near > 2.2 && r < 0.25) b.prop('bush', px, pz, rng.range(0, 6), rng.int(3));
         continue;
       }
-      if (px > J.x1 - 4 || pz > J.z1 - 4) continue;
-      if (distToLine(creek, px, pz) < 3.2) continue;
+      if (px > J.x1 - 4 || pz > J.z1 - 4 || pz < J.z0 + 2) continue;
+      if (distToLine(creek, px, pz) < 3) continue;
       if (r < 0.42) b.prop('tree', px, pz, rng.range(0, 6), rng.int(3));
       else if (r < 0.56) b.prop('palm', px, pz, rng.range(0, 6), rng.int(3));
       else if (r < 0.6) b.prop('boulder', px, pz, rng.range(0, 6), rng.int(3));
@@ -678,39 +696,35 @@ function jungle(b: MapBuilder, rng: Rng): void {
       else if (r < 0.9) b.prop('bush', px, pz, rng.range(0, 6), rng.int(3));
     }
   }
-  // a few stashes out in the trees
-  for (let i = 0; i < 10; i++) b.loot(rng.range(-190, -100), rng.range(-140, 50));
-  for (const [x, z] of [[-112, -6], [-138, -28], [-150, -40], [-127, 14], [-166, -10], [-108, -70], [-112, -92], [-140, 30], [-150, 48], [-180, -60], [-185, -120], [-100, -30]] as const) b.hotspot(x, z);
+  for (let i = 0; i < 8; i++) b.loot(rng.range(J.x0 + 8, J.x1 - 8), rng.range(J.z0 + 6, J.z1 - 6));
+  for (const [x, z] of [[-104, 2], [-136, 11], [-123, 22], [-164, 26], [-112, -36], [-146, 52], [-185, 0], [-100, -40]] as const) b.hotspot(x, z);
 }
 
 // =================================================================================== BABYLON
 /**
- * BABYLON: the desert past the jungle. A walled city with a blue-tiled gate, a ziggurat you
- * can climb, terraced hanging gardens, a bazaar, an oasis, mud-brick houses and ruins, with
- * open sand and rock out to the edge of the world.
+ * BABYLON (northwest): a walled desert city. The blue-tiled gate faces West Line Rd; inside are
+ * the ziggurat you can climb, the terraced hanging gardens, the bazaar, an oasis and mud-brick
+ * houses. JUMP OFF THE PORCH warms up here before the blimp takes off.
  */
-const SAND = 0xd9b77e;
 const SANDSTONE = 0xc9a46b;
 const GLAZE = 0x2e5aa8;
 const GOLD_TRIM = 0xd4a32a;
 
 function babylon(b: MapBuilder, rng: Rng): void {
-  const D: Rect = { x0: GREATER.minX, x1: OLD_WEST, z0: GREATER.minZ, z1: 61 };
+  const D: Rect = { x0: CELL.w.x0, x1: CELL.w.x1, z0: CELL.n.z0, z1: CELL.n.z1 };
   b.area('desert', D.x0 - 12, D.x1, D.z0 - 12, D.z1, 1);
-  cliffs(b, rng, 'n', GREATER.minX - 10, OLD_WEST - 10);
   const keep: Rect[] = [];
   const stone = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, color = SANDSTONE) =>
     b.box('sandstone', x0, x1, z0, z1, y0, y1, { color });
 
-  // ---- the city wall along the jungle, with the blue gate and a few breaches ----
-  const WX = -214;
-  const gateZ = -20;
-  const wallSegs: Array<[number, number]> = [[-140, -96], [-90, -42], [-8, 22], [28, 52]];
+  // ---- the city wall along West Line Rd, with the blue gate and a few breaches ----
+  const WX = -99;
+  const gateZ = -105;
+  const wallSegs: Array<[number, number]> = [[-146, -128], [-124, -114.5], [-95.5, -82], [-77, -64]];
   for (const [z0, z1] of wallSegs) {
     stone(WX - 1.2, WX + 1.2, z0, z1, 0, 6.5);
     for (let z = z0 + 1; z < z1 - 0.5; z += 2.4) stone(WX - 1.25, WX + 1.25, z, z + 1.2, 6.5, 7.4); // crenellations
   }
-  // the gate: two blue towers, a glazed arch, gold bands, a lion on each side
   for (const side of [-1, 1]) {
     const z = gateZ + side * 6.5;
     b.box('glazed', WX - 3, WX + 3, z - 3, z + 3, 0, 13, { color: GLAZE });
@@ -729,7 +743,7 @@ function babylon(b: MapBuilder, rng: Rng): void {
 
   // ---- the ziggurat: three tiers, a long stair up the east face, a shrine on top ----
   {
-    const cx = -268, cz = -48;
+    const cx = -150, cz = -124;
     stone(cx - 20, cx + 20, cz - 20, cz + 20, 0, 4, 0xc29a62);
     stone(cx - 14.5, cx + 14.5, cz - 14.5, cz + 14.5, 4, 8, 0xcda772);
     stone(cx - 9, cx + 9, cz - 9, cz + 9, 8, 12, 0xd6b27d);
@@ -750,8 +764,8 @@ function babylon(b: MapBuilder, rng: Rng): void {
 
   // ---- the hanging gardens: green terraces stepping up, palms on every level ----
   {
-    const cx = -296, cz = -112;
-    const tiers: Array<[number, number]> = [[16, 3], [11, 6], [6.5, 9]];
+    const cx = -180, cz = -82;
+    const tiers: Array<[number, number]> = [[13, 3], [9, 6], [5, 9]];
     tiers.forEach(([half, top], i) => {
       const y0 = i === 0 ? 0 : tiers[i - 1][1];
       stone(cx - half, cx + half, cz - half, cz + half, y0, top, i % 2 ? 0xcfa871 : 0xbf9a62);
@@ -760,22 +774,21 @@ function babylon(b: MapBuilder, rng: Rng): void {
       b.box('planter', cx - half, cx - half + 1.2, cz - half + 1.2, cz + half - 3, top, top + 0.7);
       for (const dx of [-half + 2.5, half - 2.5]) b.prop('palm', cx + dx, cz - half + 2.5, rng.range(0, 6), rng.int(3), top);
       b.prop('bush', cx + half - 3, cz + half - 3, 0, rng.int(3), top);
+      // the flight up from the terrace below (or the sand) to this terrace's front edge
+      const below = i === 0 ? half + 5 : tiers[i - 1][0];
+      b.ramp({ kind: 'stairs', x: cx + (i === 1 ? -5 : i === 2 ? 3 : 0), z: cz + below, y0, dir: 'n', run: below - half, rise: top - y0, width: i === 2 ? 2.4 : 3, fill: true, style: 'ruin', group: 'gardens' });
     });
-    b.ramp({ kind: 'stairs', x: cx, z: cz + 16 + 6, y0: 0, dir: 'n', run: 6, rise: 3, width: 3, fill: true, style: 'ruin', group: 'gardens' });
-    // each flight starts on the terrace below and runs up to the next one's edge
-    b.ramp({ kind: 'stairs', x: cx - 6, z: cz + 11 + 4.5, y0: 3, dir: 'n', run: 4.5, rise: 3, width: 3, fill: true, style: 'ruin', group: 'gardens' });
-    b.ramp({ kind: 'stairs', x: cx + 4, z: cz + 6.5 + 4.5, y0: 6, dir: 'n', run: 4.5, rise: 3, width: 2.5, fill: true, style: 'ruin', group: 'gardens' });
     b.loot(cx, cz, 9);
-    b.loot(cx - 9, cz - 9, 6);
-    b.loot(cx + 13, cz - 13, 3);
-    keep.push({ x0: cx - 20, x1: cx + 20, z0: cz - 20, z1: cz + 26 });
+    b.loot(cx - 7, cz - 7, 6);
+    b.loot(cx + 10, cz - 10, 3);
+    keep.push({ x0: cx - 16, x1: cx + 16, z0: cz - 16, z1: cz + 19 });
     b.label('HANGING GARDENS', cx, cz);
-    b.hotspot(cx, cz + 22);
+    b.hotspot(cx, cz + 19);
   }
 
   // ---- the bazaar: rows of stalls under colored cloth ----
   {
-    const cx = -246, cz = 18;
+    const cx = -128, cz = -80;
     b.area('dirt', cx - 18, cx + 18, cz - 12, cz + 12, 2);
     const cloth = [0xb3261e, 0xd4a32a, 0x2e5aa8, 0x3d7a4a, 0x7a3fa0, 0xe07a2a];
     let n = 0;
@@ -796,24 +809,23 @@ function babylon(b: MapBuilder, rng: Rng): void {
 
   // ---- the oasis: water, palms, a well ----
   {
-    const cx = -300, cz = 22;
-    b.area('grass', cx - 15, cx + 15, cz - 11, cz + 11, 2);
-    b.area('oasis', cx - 9, cx + 9, cz - 6, cz + 6, 3);
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2 + rng.range(-0.15, 0.15);
-      b.prop('palm', cx + Math.cos(a) * rng.range(11, 13.5), cz + Math.sin(a) * rng.range(8, 10), rng.range(0, 6), rng.int(3));
+    const cx = -185, cz = -133;
+    b.area('grass', cx - 13, cx + 13, cz - 10, cz + 10, 2);
+    b.area('oasis', cx - 8, cx + 8, cz - 5, cz + 5, 3);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + rng.range(-0.15, 0.15);
+      b.prop('palm', cx + Math.cos(a) * rng.range(9.5, 11.5), cz + Math.sin(a) * rng.range(7, 8.5), rng.range(0, 6), rng.int(3));
     }
-    stone(cx + 12, cx + 14, cz + 7, cz + 9, 0, 0.9, 0xb89262);
-    b.loot(cx + 13, cz - 9);
-    keep.push({ x0: cx - 16, x1: cx + 16, z0: cz - 12, z1: cz + 12 });
+    stone(cx + 10, cx + 12, cz + 6, cz + 8, 0, 0.9, 0xb89262);
+    b.loot(cx + 11, cz - 8);
+    keep.push({ x0: cx - 14, x1: cx + 14, z0: cz - 11, z1: cz + 11 });
     b.label('OASIS', cx, cz);
-    b.hotspot(cx + 14, cz);
+    b.hotspot(cx + 12, cz);
   }
 
-  // ---- mud-brick houses inside the walls (walk-in, loot inside) ----
+  // ---- mud-brick houses (walk-in, loot inside) ----
   const houses: Array<[number, number, number, number, Side]> = [
-    [-238, -112, 9, 7, 's'], [-226, -88, 8, 7, 'w'], [-240, -18, 8, 8, 'e'], [-228, 2, 7, 6, 'n'],
-    [-290, -14, 9, 7, 's'], [-310, -60, 8, 8, 'e'], [-312, -30, 7, 7, 'n'], [-228, 44, 8, 7, 's'], [-275, 40, 9, 7, 'n'],
+    [-109, -140, 8, 7, 'w'], [-109, -126, 7, 6, 'w'], [-152, -91, 8, 6, 's'], [-158, -69, 8, 6, 's'], [-112, -96, 7, 6, 'n'],
   ];
   houses.forEach(([x, z, w, d, side], i) => {
     const R = { x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2 };
@@ -823,13 +835,13 @@ function babylon(b: MapBuilder, rng: Rng): void {
   });
 
   // ---- broken columns and ruined walls ----
-  for (let i = 0; i < 16; i++) {
-    const x = rng.range(D.x0 + 12, D.x1 - 22), z = rng.range(D.z0 + 12, D.z1 - 8);
+  for (let i = 0; i < 9; i++) {
+    const x = rng.range(D.x0 + 8, D.x1 - 20), z = rng.range(D.z0 + 8, D.z1 - 6);
     if (keep.some((k) => inRect(k, x, z, 3))) continue;
     if (rng.chance(0.5)) {
       for (let c = 0; c < 4; c++) stone(x + c * 3 - 0.6, x + c * 3 + 0.6, z - 0.6, z + 0.6, 0, rng.range(1, 4.5), 0xd0b17e);
     } else {
-      const len = rng.range(5, 11);
+      const len = rng.range(5, 9);
       stone(x, x + len, z, z + 1, 0, rng.range(1.2, 3), 0xbf9a62);
     }
     keep.push({ x0: x - 2, x1: x + 14, z0: z - 2, z1: z + 3 });
@@ -837,40 +849,201 @@ function babylon(b: MapBuilder, rng: Rng): void {
 
   // ---- trails across the sand ----
   const trails: Array<Array<{ x: number; z: number }>> = [
-    [{ x: OLD_WEST + 2, z: -20 }, { x: -225, z: -22 }, { x: -235, z: -40 }, { x: -230, z: -48 }],
-    [{ x: -235, z: -40 }, { x: -246, z: 6 }, { x: -270, z: 22 }, { x: -286, z: 22 }],
-    [{ x: -246, z: 30 }, { x: -250, z: 61 }],
-    [{ x: -268, z: -72 }, { x: -280, z: -92 }, { x: -296, z: -90 }],
-    [{ x: -230, z: -64 }, { x: -232, z: -100 }, { x: -238, z: -105 }],
+    [{ x: WX + 2, z: gateZ }, { x: -108, z: -106 }, { x: -114, z: -114 }, { x: -116, z: -122 }],
+    [{ x: -108, z: -106 }, { x: -120, z: -96 }, { x: -128, z: -92 }],
+    [{ x: -146, z: -80 }, { x: -158, z: -76 }, { x: -170, z: -62 }],
+    [{ x: -170, z: -102 }, { x: -176, z: -118 }],
   ];
-  for (const t of trails) b.road('trail', t, 3.6, false);
+  for (const t of trails) b.road('trail', t, 3.4, false);
 
   // ---- open desert: rocks, boulders, a few dry palms ----
-  for (let x = D.x0 + 4; x < D.x1 - 3; x += 9) {
-    for (let z = D.z0 + 4; z < D.z1 - 4; z += 9) {
-      const px = x + rng.range(-3, 3), pz = z + rng.range(-3, 3);
+  for (let x = D.x0 + 4; x < D.x1 - 3; x += 8) {
+    for (let z = D.z0 + 4; z < D.z1 - 4; z += 8) {
+      const px = x + rng.range(-2.5, 2.5), pz = z + rng.range(-2.5, 2.5);
       const r = rng.next();
       if (keep.some((k) => inRect(k, px, pz, 1))) continue;
       if (Math.min(...trails.map((t) => distToLine(t, px, pz))) < 3.5) continue;
       if (Math.abs(px - WX) < 3) continue;
-      if (r < 0.12) b.prop('boulder', px, pz, rng.range(0, 6), rng.int(3));
-      else if (r < 0.32) b.prop('rock', px, pz, rng.range(0, 6), rng.int(3));
-      else if (r < 0.36) b.prop('palm', px, pz, rng.range(0, 6), rng.int(3));
-      else if (r < 0.42) b.prop('bush', px, pz, rng.range(0, 6), 2);
+      if (r < 0.1) b.prop('boulder', px, pz, rng.range(0, 6), rng.int(3));
+      else if (r < 0.28) b.prop('rock', px, pz, rng.range(0, 6), rng.int(3));
+      else if (r < 0.32) b.prop('palm', px, pz, rng.range(0, 6), rng.int(3));
+      else if (r < 0.38) b.prop('bush', px, pz, rng.range(0, 6), 2);
     }
   }
-  for (let i = 0; i < 8; i++) b.loot(rng.range(D.x0 + 10, D.x1 - 20), rng.range(D.z0 + 10, D.z1 - 10));
-  for (const [x, z] of [[-240, -70], [-300, -80], [-320, 0], [-260, 50], [-305, -140], [-230, 20]] as const) b.hotspot(x, z);
-  void SAND;
+  for (let i = 0; i < 6; i++) b.loot(rng.range(D.x0 + 8, D.x1 - 14), rng.range(D.z0 + 8, D.z1 - 8));
+  for (const [x, z] of [[-120, -140], [-190, -110], [-130, -100], [-168, -96], [-104, -70]] as const) b.hotspot(x, z);
+}
+
+// =================================================================================== HONG KONG
+/**
+ * HONG KONG (northeast): Chinatown. Through the paifang gate off East Line Rd, Lantern Street
+ * runs east between tall tenements (shops below, balconies above, neon signs), a dim sum
+ * restaurant and an herbal shop, under strings of red lanterns. North of the street a pagoda
+ * temple in its courtyard; south of it the night market and a koi garden.
+ */
+const HK_RED = 0xb3261e;
+const HK_JADE = 0x2f7a5a;
+const HK_GOLD = 0xd4a32a;
+
+function hongKong(b: MapBuilder, rng: Rng): void {
+  const K: Rect = { x0: CELL.e.x0, x1: CELL.e.x1, z0: CELL.n.z0, z1: CELL.n.z1 };
+  b.area('plaza', K.x0, K.x1, K.z0, K.z1, 1, 0xc9c2b4);
+  const SZ = -105; // Lantern Street
+  b.road('road', [{ x: 81.5, z: SZ }, { x: K.x1 - 2, z: SZ }], 8, false);
+  b.area('sidewalk', K.x0, K.x1, SZ - 7, SZ - 4, 1);
+  b.area('sidewalk', K.x0, K.x1, SZ + 4, SZ + 7, 1);
+  // a lane down to Porch St
+  b.road('road', [{ x: 160, z: SZ }, { x: 160, z: K.z1 }], 6, false);
+
+  // ---- the paifang: a red gate over the street with a jade-tiled roof ----
+  {
+    const gx = 95.5;
+    for (const z of [SZ - 5.2, SZ + 5.2]) {
+      b.box('pillar', gx - 0.45, gx + 0.45, z - 0.45, z + 0.45, 0, 6.4, { color: HK_RED });
+      b.box('trim', gx - 0.6, gx + 0.6, z - 0.6, z + 0.6, 0, 0.6, { color: 0x8a8378, col: 'solid' });
+    }
+    for (const z of [SZ - 7.6, SZ + 7.6]) b.box('pillar', gx - 0.3, gx + 0.3, z - 0.3, z + 0.3, 0, 4.4, { color: HK_RED });
+    b.box('beam', gx - 0.35, gx + 0.35, SZ - 5.8, SZ + 5.8, 5.2, 5.7, { color: HK_RED, col: 'none' });
+    b.box('beam', gx - 0.4, gx + 0.4, SZ - 5.8, SZ + 5.8, 6.4, 6.9, { color: HK_GOLD, col: 'none' });
+    b.box('roofplane', gx - 1.4, gx + 1.4, SZ - 7.2, SZ + 7.2, 6.9, 7.2, { color: HK_JADE, col: 'none', style: 'tile' });
+    b.box('roofplane', gx - 0.9, gx + 0.9, SZ - 6.2, SZ + 6.2, 7.2, 7.6, { color: HK_JADE, col: 'none', style: 'tile' });
+    // the upturned ends of the eaves
+    for (const z of [SZ - 7.2, SZ + 7.2]) b.rbox('roofplane', gx, z, 2.8, 0.9, 6.95, 0.25, 0, { rx: z < SZ ? 0.45 : -0.45, color: HK_JADE, col: 'none', style: 'tile' });
+    for (const z of [SZ - 7.6, SZ + 7.6]) b.box('roofplane', gx - 0.8, gx + 0.8, z - 1.2, z + 1.2, 4.4, 4.7, { color: HK_JADE, col: 'none', style: 'tile' });
+    b.sign({ text: '唐人街 HONG KONG', x: gx + 0.42, y: 5.95, z: SZ, yaw: -Math.PI / 2, width: 7.6, height: 0.9, style: 'store', color: '#ffd977', bg: '#8c1414' });
+    b.sign({ text: '唐人街 HONG KONG', x: gx - 0.42, y: 5.95, z: SZ, yaw: Math.PI / 2, width: 7.6, height: 0.9, style: 'store', color: '#ffd977', bg: '#8c1414' });
+    b.hotspot(gx + 4, SZ);
+  }
+
+  const neon = ['#ff3fa4', '#3ff0ff', '#ffe14d', '#7dff6b', '#ff8a3d'];
+  const blades = ['龍', '福', '茶', '麻雀', '當', '酒店', '金', '藥'];
+  /** A sign out front of a building facing the street, and a neon blade sign at the corner. */
+  const signs = (x0: number, x1: number, front: number, facing: 'n' | 's', text: string, i: number) => {
+    const out = facing === 's' ? 1 : -1;
+    b.sign({ text, x: (x0 + x1) / 2, y: 3.35, z: front + out * 0.08, yaw: facing === 's' ? Math.PI : 0, width: Math.min(x1 - x0 - 1.5, 7.5), height: 0.9, style: 'store', color: neon[i % neon.length], bg: '#1a1416' });
+    const bx = x1 - 0.8;
+    b.sign({ text: blades[i % blades.length], x: bx, y: 6.2, z: front + out * 0.9, yaw: Math.PI / 2, width: 1.0, height: 2.6, style: 'store', color: neon[(i + 2) % neon.length], bg: '#24101a' });
+    b.sign({ text: blades[i % blades.length], x: bx, y: 6.2, z: front + out * 0.9, yaw: -Math.PI / 2, width: 1.0, height: 2.6, style: 'store', color: neon[(i + 2) % neon.length], bg: '#24101a' });
+  };
+
+  // ---- north side of Lantern Street (fronts face south onto it) ----
+  const north = SZ - 7.5;
+  const tenementsN: Array<[number, number, number]> = [[99, 110, 5], [111.5, 122.5, 6], [166, 177, 4]];
+  tenementsN.forEach(([x0, x1, F], i) => {
+    construct(b, { id: `hkN${i}`, type: 'tenement', x0, x1, z0: north - 11, z1: north, facing: 's', floors: F, color: [0xd8c7a6, 0xc9b8a0, 0xb8c4b0][i % 3] });
+    signs(x0, x1, north, 's', ['金龍 GOLD DRAGON', '福 LUCKY MART', '麻雀 MAHJONG'][i], i);
+  });
+  construct(b, {
+    id: 'dimsum', type: 'restaurant', x0: 179, x1: 196, z0: north - 12, z1: north, facing: 's', floors: 2, color: 0xe8dcc0,
+    sign: { text: '茶樓 DIM SUM PALACE', color: '#ffd977', bg: '#8c1414' },
+  });
+
+  // ---- the pagoda temple in its courtyard ----
+  {
+    const C = { x0: 126, x1: 160, z0: K.z0 + 3, z1: north };
+    b.area('concrete', C.x0, C.x1, C.z0, C.z1, 2, 0xb8b0a2);
+    // a red wall around the courtyard, open to the street through a moon gate
+    const wall = (x0: number, x1: number, z0: number, z1: number) => b.box('lowwall', x0, x1, z0, z1, 0, 2.4, { color: HK_RED });
+    wall(C.x0, C.x0 + 0.4, C.z0, C.z1);
+    wall(C.x1 - 0.4, C.x1, C.z0, C.z1);
+    wall(C.x0, (C.x0 + C.x1) / 2 - 2, C.z1 - 0.4, C.z1);
+    wall((C.x0 + C.x1) / 2 + 2, C.x1, C.z1 - 0.4, C.z1);
+    const cx = (C.x0 + C.x1) / 2, cz = (C.z0 + C.z1) / 2 - 3;
+    // the plinth and five storeys, each with a wide jade roof; you can walk into the ground floor
+    b.box('plinth', cx - 8, cx + 8, cz - 8, cz + 8, 0, 0.8, { color: 0xb9b4a8 });
+    b.ramp({ kind: 'stairs', x: cx, z: cz + 10.5, y0: 0, dir: 'n', run: 2.5, rise: 0.8, width: 4, fill: true, style: 'concrete', group: 'pagoda' });
+    b.shell({
+      id: 'pagoda', x0: cx - 5, x1: cx + 5, z0: cz - 5, z1: cz + 5, y0: 0.8, h: 4.4, style: 'stucco', color: HK_RED,
+      openings: (['n', 's', 'e', 'w'] as Side[]).map((side) => ({ side, at: side === 'n' || side === 's' ? cx : cz, w: 2, top: 2.6 })),
+    });
+    b.box('altar', cx - 0.8, cx + 0.8, cz - 3.9, cz - 3.2, 0.8, 1.85, { color: 0x8c1f1f });
+    b.rbox('furn', cx, cz - 3.5, 1.6, 0.7, 0.8, 1.05, Math.PI, { col: 'solid', meta: { t: 'altar', int: 1 } });
+    b.loot(cx - 2.5, cz, 0.8);
+    b.loot(cx + 2.5, cz + 2, 0.8);
+    let y = 4.4;
+    for (let t = 0; t < 5; t++) {
+      const half = 5 - t * 0.75, eave = half + 1.6 - t * 0.15;
+      b.box('roofplane', cx - eave, cx + eave, cz - eave, cz + eave, y, y + 0.35, { color: HK_JADE, style: 'tile' });
+      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) b.box('trim', cx + dx * eave - 0.3, cx + dx * eave + 0.3, cz + dz * eave - 0.3, cz + dz * eave + 0.3, y + 0.35, y + 0.75, { color: HK_GOLD, col: 'none' });
+      if (t < 4) {
+        b.box('sandstone', cx - half + 0.75, cx + half - 0.75, cz - half + 0.75, cz + half - 0.75, y + 0.35, y + 3.1, { color: t % 2 ? 0xc23a2a : HK_RED });
+        y += 3.1;
+      }
+    }
+    b.box('trim', cx - 0.15, cx + 0.15, cz - 0.15, cz + 0.15, y + 0.35, y + 3.2, { color: HK_GOLD, col: 'none' });
+    // incense burner and stone lions by the gate
+    b.box('plinth', cx - 0.8, cx + 0.8, cz + 13.5, cz + 15.1, 0, 1.1, { color: 0x6b5a3a });
+    for (const dx of [-3.4, 3.4]) b.box('plinth', cx + dx - 0.7, cx + dx + 0.7, C.z1 - 2.4, C.z1 - 1, 0, 1.6, { color: 0x9a948a });
+    for (let i = 0; i < 6; i++) b.rbox('furn', cx - 12 + i * 4.8, C.z0 + 2.5, 0.4, 0.4, 0.5, 0.5, 0, { col: 'none', meta: { t: 'lantern' } });
+    b.loot(cx + 10, cz + 8);
+    b.label('PAGODA', cx, cz);
+    b.hotspot(cx, cz + 12);
+  }
+
+  // ---- south side of Lantern Street (fronts face north onto it) ----
+  const south = SZ + 7.5;
+  construct(b, { id: 'herbal', type: 'store', x0: 99, x1: 110, z0: south, z1: south + 10, facing: 'n', color: 0xd9cdb0, sign: { text: '藥行 HERBAL MEDICINE', color: '#7dff6b', bg: '#14281c' } });
+  const tenementsS: Array<[number, number, number]> = [[111.5, 122.5, 5], [165, 176, 6], [177.5, 188.5, 4]];
+  tenementsS.forEach(([x0, x1, F], i) => {
+    construct(b, { id: `hkS${i}`, type: 'tenement', x0, x1, z0: south, z1: south + 11, facing: 'n', floors: F, color: [0xc7d0c4, 0xd6c3b6, 0xcfc7aa][i % 3] });
+    signs(x0, x1, south, 'n', ['當 PAWN', '酒店 HOTEL', '金 GOLD'][i], i + 3);
+  });
+  construct(b, { id: 'hkbarber', type: 'barbershop', x0: 190, x1: 199, z0: south, z1: south + 10, facing: 'n', color: 0xe3d2ac, sign: { text: '剪 BARBER', color: '#ffffff', bg: '#1d3f80' } });
+
+  // ---- the night market: rows of stalls under lanterns ----
+  {
+    const M = { x0: 126, x1: 157, z0: south + 1, z1: south + 24 };
+    b.area('concrete', M.x0, M.x1, M.z0, M.z1, 2, 0xa9a39a);
+    for (const row of [M.z0 + 4, M.z0 + 12, M.z0 + 20]) {
+      for (let x = M.x0 + 3; x < M.x1 - 2; x += 5.2) {
+        b.rbox('furn', x, row, 2.4, 1.2, 0, 1.0, row === M.z0 + 12 ? Math.PI : 0, { col: 'solid', meta: { t: 'stall' } });
+        if (rng.chance(0.35)) b.loot(x, row + (row === M.z0 + 12 ? -1.3 : 1.3));
+      }
+    }
+    b.label('NIGHT MARKET', (M.x0 + M.x1) / 2, (M.z0 + M.z1) / 2);
+    b.hotspot((M.x0 + M.x1) / 2, M.z0 + 8);
+    b.hotspot((M.x0 + M.x1) / 2, M.z0 + 16);
+  }
+
+  // ---- the koi garden: a pond, a bridge, a little pavilion ----
+  {
+    const G = { x0: 166, x1: 197, z0: south + 14, z1: K.z1 - 2 };
+    b.area('grass', G.x0, G.x1, G.z0, G.z1, 2);
+    const pcx = (G.x0 + G.x1) / 2, pcz = (G.z0 + G.z1) / 2;
+    b.area('oasis', pcx - 9, pcx + 9, pcz - 4, pcz + 4, 3);
+    b.box('deck', pcx - 1.2, pcx + 1.2, pcz - 5, pcz + 5, 0, 0.35, { color: HK_RED });
+    b.box('rail', pcx - 1.2, pcx - 1.13, pcz - 4.5, pcz + 4.5, 0.35, 1.2, { col: 'fence' });
+    b.box('rail', pcx + 1.13, pcx + 1.2, pcz - 4.5, pcz + 4.5, 0.35, 1.2, { col: 'fence' });
+    const px = G.x1 - 5, pz = G.z0 + 4;
+    for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) b.box('pillar', px + dx - 0.15, px + dx + 0.15, pz + dz - 0.15, pz + dz + 0.15, 0, 2.8, { color: HK_RED });
+    b.box('roofplane', px - 3, px + 3, pz - 3, pz + 3, 2.8, 3.1, { color: HK_JADE, style: 'tile' });
+    for (let i = 0; i < 6; i++) b.prop('tree', G.x0 + 2 + rng.range(0, G.x1 - G.x0 - 4), rng.chance(0.5) ? G.z0 + 1.5 : G.z1 - 1.5, 0, rng.int(3));
+    b.loot(px, pz);
+    b.label('KOI GARDEN', pcx, pcz);
+    b.hotspot(pcx, pcz + 6);
+  }
+
+  // ---- lanterns strung across the street ----
+  for (let x = 101; x < K.x1 - 4; x += 6.5) {
+    b.box('wire', x - 0.02, x + 0.02, SZ - 7.3, SZ + 7.3, 4.95, 4.99, { col: 'none', color: 0x222222 });
+    for (const dz of [-4.5, -1.5, 1.5, 4.5]) b.rbox('furn', x, SZ + dz, 0.4, 0.4, 2.55, 0.5, 0, { col: 'none', meta: { t: 'lantern' } });
+  }
+  // parked scooters and cars, a few crates
+  for (let x = 102; x < K.x1 - 6; x += rng.range(10, 18)) if (rng.chance(0.5)) b.prop('car', x, SZ + (rng.chance(0.5) ? 2.2 : -2.2), Math.PI / 2, rng.int(8));
+  for (let i = 0; i < 5; i++) b.prop(rng.chance(0.5) ? 'crate' : 'pallet', rng.range(126, 157), north - rng.range(12, 30), rng.range(0, 3), 0);
+  for (const [x, z] of [[105, SZ], [130, SZ], [175, SZ], [190, SZ], [160, -75]] as const) b.hotspot(x, z);
 }
 
 // =================================================================================== DOWNTOWN
+/**
+ * DOWNTOWN (east, middle row): the bank, the parking garage, WHOOPA TOWER, the plaza, a hotel
+ * row, and a block of explorable offices, a restaurant and a store.
+ */
 function downtown(b: MapBuilder, rng: Rng): void {
   const xs: Array<[number, number]> = [[90.5, 125], [135, 165], [175, 200]];
-  const zs: Array<[number, number]> = [[-150, -105], [-95, -55], [-45, -5], [5, 61]];
+  const zs: Array<[number, number]> = [[-45, -5], [5, 61]];
   b.road('road', [{ x: 81.5, z: 0 }, { x: GREATER.maxX, z: 0 }], 10, true); // Main Ave
-  for (const z of [-100, -50]) b.road('road', [{ x: 90.5, z }, { x: GREATER.maxX, z }], 10, true);
-  for (const x of [130, 170]) b.road('road', [{ x, z: GREATER.minZ }, { x, z: 61 }], 10, true);
+  for (const x of [130, 170]) b.road('road', [{ x, z: -51.5 }, { x, z: 61 }], 10, true);
 
   xs.forEach(([x0, x1], xi) => {
     zs.forEach(([z0, z1], zi) => {
@@ -878,24 +1051,22 @@ function downtown(b: MapBuilder, rng: Rng): void {
       sidewalkRing(b, r, 3);
       const inner = { x0: x0 + 3, x1: x1 - 3, z0: z0 + 3, z1: z1 - 3 };
       const key = `${xi},${zi}`;
-      if (key === '1,2') garage(b, inner);
-      else if (key === '1,3') plaza(b, rng, inner);
-      else if (key === '0,2') bank(b, inner);
-      else if (key === '2,1') cityHall(b, inner);
-      else if (key === '1,1') {
-        b.building({ id: 'whoopatower', x0: 139, x1: 161, z0: -91, z1: -59, h: 64, style: 'glass', color: 0x6f8fa8 });
-        b.sign({ text: 'WHOOPA TOWER', x: 150, y: 8, z: -58.94, yaw: Math.PI, width: 14, height: 2, style: 'store', color: '#ffffff', bg: '#1b2a3a' });
-        b.label('WHOOPA TOWER', 150, -75);
-      } else if (zi === 3) hotelRow(b, rng, inner, xi);
-      else towers(b, rng, inner, `dt${xi}${zi}`);
-      // street furniture
+      if (key === '1,0') garage(b, inner);
+      else if (key === '1,1') plaza(b, rng, inner);
+      else if (key === '0,0') bank(b, inner);
+      else if (key === '2,0') {
+        b.building({ id: 'whoopatower', x0: 179, x1: 197, z0: -41, z1: -12, h: 64, style: 'glass', color: 0x6f8fa8 });
+        b.sign({ text: 'WHOOPA TOWER', x: 188, y: 8, z: -11.94, yaw: Math.PI, width: 13, height: 2, style: 'store', color: '#ffffff', bg: '#1b2a3a' });
+        b.label('WHOOPA TOWER', 188, -26);
+      } else if (key === '0,1') hotelRow(b, rng, inner, xi);
+      else offices(b, inner);
       b.prop('lamp', x0 + 1.4, z1 - 1.4, 0, 0);
       b.prop('lamp', x1 - 1.4, z0 + 1.4, 0, 0);
       if (rng.chance(0.6)) b.prop('busstop', x1 - 1.2, (z0 + z1) / 2, -Math.PI / 2, 0);
       b.prop('trashcan', x0 + 1.6, z0 + 1.6, 0, 0);
       b.prop('hydrant', x1 - 1.3, z1 - 1.3, 0, 0);
       for (let x = x0 + 4; x < x1 - 4; x += rng.range(8, 14)) {
-        if (z0 > GREATER.minZ + 1 && rng.chance(0.4)) b.prop('car', x, z0 - 1.7, Math.PI / 2, rng.int(8));
+        if (rng.chance(0.4)) b.prop('car', x, z0 - 1.7, Math.PI / 2, rng.int(8));
         if (rng.chance(0.4)) b.prop('car', x, z1 + 1.7, -Math.PI / 2, rng.int(8));
       }
       b.hotspot((x0 + x1) / 2, z1 + 2);
@@ -903,40 +1074,14 @@ function downtown(b: MapBuilder, rng: Rng): void {
   });
 }
 
-/** Office towers filling a block, split by service alleys. Ground-floor shops on some. */
-function towers(b: MapBuilder, rng: Rng, r: Rect, id: string): void {
-  const alongX = r.x1 - r.x0 >= r.z1 - r.z0;
-  const len = alongX ? r.x1 - r.x0 : r.z1 - r.z0;
-  const n = len > 30 ? 2 : 1;
-  const gap = 3;
-  const w = (len - gap * (n - 1)) / n;
-  for (let i = 0; i < n; i++) {
-    const a = (alongX ? r.x0 : r.z0) + i * (w + gap);
-    const lot = alongX ? { x0: a, x1: a + w, z0: r.z0, z1: r.z1 } : { x0: r.x0, x1: r.x1, z0: a, z1: a + w };
-    if (rng.chance(0.3)) {
-      // a shop you can walk into, with the rest of the lot paved
-      const shop = alongX ? { ...lot, z1: lot.z0 + Math.min(12, lot.z1 - lot.z0) } : { ...lot, x1: lot.x0 + Math.min(12, lot.x1 - lot.x0) };
-      const side: Side = alongX ? 'n' : 'w';
-      const name = rng.pick(['PAWN SHOP', 'KICKS', 'CELL PHONES', 'WINGS', 'BARBER', 'NAILS', 'CHECKS CASHED', 'GOLD & GRILLZ']);
-      room(b, `${id}_${i}`, shop, 4.4, 'store', [...frontage(side, shop, 2.4), { side: opposite(side), at: side === 'n' ? (shop.x0 + shop.x1) / 2 : (shop.z0 + shop.z1) / 2, w: 1.6 }], {
-        color: rng.pick(PASTELS), awning: { side, color: rng.pick([0x1d6b3a, 0x7a1f1f, 0x22384f, 0x6b3a7a]) }, loot: 2,
-      });
-      signOn(b, name, shop, side, 3.45, Math.min(8, (alongX ? shop.x1 - shop.x0 : shop.z1 - shop.z0) * 0.7), '#ffffff', rng.pick(['#1d6b3a', '#7a1f1f', '#22384f', '#6b3a7a']));
-      const rest = alongX ? { ...lot, z0: shop.z1 } : { ...lot, x0: shop.x1 };
-      if ((alongX ? rest.z1 - rest.z0 : rest.x1 - rest.x0) > 4) {
-        b.area('lot', rest.x0, rest.x1, rest.z0, rest.z1, 1);
-        b.prop('car', (rest.x0 + rest.x1) / 2, (rest.z0 + rest.z1) / 2, alongX ? 0 : Math.PI / 2, rng.int(8));
-      }
-    } else {
-      b.building({ id: `${id}_${i}`, ...lot, h: Math.round(rng.range(18, 50)), style: rng.pick(['glass', 'office', 'concrete', 'brickdark', 'glass']), color: rng.chance(0.4) ? rng.pick([0x6f8fa8, 0x8a94a0, 0xa69c8c, 0x5f7086]) : undefined });
-    }
-    if (i < n - 1) {
-      // the alley between
-      const al = alongX ? { x0: a + w, x1: a + w + gap, z0: r.z0, z1: r.z1 } : { x0: r.x0, x1: r.x1, z0: a + w, z1: a + w + gap };
-      b.area('alley', al.x0, al.x1, al.z0, al.z1, 1);
-      b.prop('dumpster', (al.x0 + al.x1) / 2, (al.z0 + al.z1) / 2, alongX ? 0 : Math.PI / 2, rng.int(2));
-    }
-  }
+/** Explorable downtown: an office block on Main Ave, a store, a restaurant on Ocean Drive. */
+function offices(b: MapBuilder, r: Rect): void {
+  construct(b, { id: 'dtoffice', type: 'office', x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z0 + 16, facing: 'n', floors: 5, color: 0x8497ab });
+  b.sign({ text: 'WHOOPA OFFICES', x: (r.x0 + r.x1) / 2, y: 3.9, z: r.z0 - 0.08, yaw: 0, width: 9, height: 1.0, style: 'store', color: '#ffffff', bg: '#22384f' });
+  construct(b, { id: 'dtstore', type: 'store', x0: r.x0, x1: r.x1, z0: r.z0 + 19, z1: r.z0 + 30, facing: 'w', color: 0xe8d6b8, sign: { text: 'KICKS', color: '#ffffff', bg: '#7a1f1f' } });
+  construct(b, { id: 'dtfood', type: 'restaurant', x0: r.x0, x1: r.x1, z0: r.z1 - 14, z1: r.z1, facing: 's', floors: 2, color: 0xf2b8c6, sign: { text: 'WINGS & THINGS', color: '#ffe14d', bg: '#b3261e' } });
+  b.label('OFFICES', (r.x0 + r.x1) / 2, r.z0 + 8);
+  b.hotspot((r.x0 + r.x1) / 2, r.z0 + 17.5);
 }
 
 /** A three-level parking garage: ramps up the sides, open decks, a roof to fight on. */
@@ -1026,27 +1171,6 @@ function bank(b: MapBuilder, r: Rect): void {
   void r;
 }
 
-function cityHall(b: MapBuilder, r: Rect): void {
-  const C = { x0: 180, x1: 197, z0: -90, z1: -60 };
-  b.shell({
-    id: 'cityhall', ...C, h: 9, style: 'concrete', color: 0xe6e1d3,
-    openings: [
-      { side: 'w', at: -75, w: 3.4, top: 3.6 }, { side: 'w', at: -85, w: 1.8, sill: 1.0, top: 3 }, { side: 'w', at: -65, w: 1.8, sill: 1.0, top: 3 },
-      { side: 'n', at: 188, w: 1.8 }, { side: 's', at: 188, w: 1.8 },
-    ],
-  });
-  b.box('counter', 190, 191, -80, -70, 0, 1.1);
-  for (const z of [-88, -83.5, -66.5, -62]) b.box('pillar', 178.2, 178.9, z - 0.35, z + 0.35, 0, 8.6);
-  b.box('stoop', 176.5, 180, -79, -71, 0, 0.34, { color: 0xd8d4c8 });
-  b.loot(185, -80);
-  b.loot(185, -68);
-  b.loot(194, -75);
-  b.sign({ text: 'CITY HALL', x: 179.94, y: 6.2, z: -75, yaw: Math.PI / 2, width: 9, height: 1.4, style: 'store', color: '#2b2b2b', bg: '#e6e1d3' });
-  b.label('CITY HALL', 188, -75);
-  b.hotspot(176, -75);
-  void r;
-}
-
 /** Pastel hotels facing the beach, lobbies on the street, parking behind. */
 function hotelRow(b: MapBuilder, rng: Rng, r: Rect, xi: number): void {
   const names = ['SEABREEZE HOTEL', 'THE PALMS', 'CORAL INN', 'OCEAN VIEW', 'SUNSET SUITES'];
@@ -1068,14 +1192,16 @@ function hotelRow(b: MapBuilder, rng: Rng, r: Rect, xi: number): void {
 }
 
 // =================================================================================== BEACH
+/** WHOOPA BEACH (south middle) and the BOARDWALK (southeast): sand, towers, a tiki bar. */
 function beach(b: MapBuilder, rng: Rng): void {
-  const PROM0 = 71, PROM1 = 76, SAND0 = 76.5;
+  const PROM0 = 71, PROM1 = 76;
+  const W0 = CELL.c.x0 - 4.5; // the docks have the shore west of here
   b.area('sidewalk', OLD_WEST, GREATER.maxX, PROM0, PROM1, 1);
-  b.area('sand', GREATER.minX - 12, GREATER.maxX + 12, PROM1, SHORE + 0.5, 1);
+  b.area('sand', W0, GREATER.maxX + 12, PROM1, SHORE + 0.5, 1);
   b.area('surf', -1500, 1500, SHORE - 1.2, SHORE + 1.4, 3);
   b.area('ocean', -1500, 1500, SHORE + 0.5, 1500, 2);
   // the sea wall, with steps down to the sand every so often
-  let x = OLD_WEST;
+  let x = W0;
   while (x < GREATER.maxX) {
     const len = rng.range(18, 28);
     b.box('lowwall', x, Math.min(GREATER.maxX, x + len), PROM1, PROM1 + 0.5, 0, 0.7);
@@ -1097,12 +1223,11 @@ function beach(b: MapBuilder, rng: Rng): void {
   signOn(b, 'ICE CREAM', IC, 's', 2.6, 4.4, '#ffffff', '#e05a8a', 0.7);
   room(b, 'surfshop', SURF, 4, 'stucco', [...frontage('s', SURF, 2.2), { side: 'n', at: 46, w: 1.6 }], { color: 0x8fd3e8, loot: 2 });
   signOn(b, 'SURF SHOP', SURF, 's', 3.2, 6, '#ffffff', '#1e7f86');
-  // parked along Ocean Drive in front of the old town (downtown parks its own)
-  for (let px = -190; px < 80; px += rng.range(14, 24)) if (rng.chance(0.5) && Math.abs(Math.abs(px) - 86) > 6 && Math.abs(Math.abs(px) - 18) > 6) b.prop('car', px, 62.6, Math.PI / 2, rng.int(8));
+  for (let px = -190; px < 190; px += rng.range(14, 24)) if (rng.chance(0.5) && Math.abs(Math.abs(px) - 86) > 6 && Math.abs(Math.abs(px) - 18) > 6) b.prop('car', px, 62.6, Math.PI / 2, rng.int(8));
 
   const keep: Rect[] = [];
   // ---- lifeguard towers ----
-  for (const cx of [-160, -80, 20, 100, 170]) {
+  for (const cx of [-70, 20, 96, 172]) {
     const cz = 100;
     for (const [dx, dz] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]]) b.box('post', cx + dx - 0.12, cx + dx + 0.12, cz + dz - 0.12, cz + dz + 0.12, 0, 4.6, { color: 0xe8e2d4 });
     b.box('woodplat', cx - 1.6, cx + 1.6, cz - 1.6, cz + 1.6, 2.2, 2.4, { color: 0xc9b48a });
@@ -1138,29 +1263,88 @@ function beach(b: MapBuilder, rng: Rng): void {
     b.label('LIFEGUARD HQ', 60, 88);
     b.hotspot(60, 80);
   }
+  // ---- the boardwalk: a deck along the sea wall with a seafood restaurant and a rental shop ----
+  {
+    b.box('woodplat', 90.5, GREATER.maxX - 2, 77, 81.5, 0, 0.25, { color: 0x9a7b55 });
+    construct(b, { id: 'shack', type: 'restaurant', x0: 104, x1: 117, z0: 83, z1: 94, facing: 'n', floors: 2, color: 0x9fd8d0, sign: { text: 'SHRIMP SHACK', color: '#ffffff', bg: '#1e7f86' } });
+    construct(b, { id: 'rentals', type: 'store', x0: 121, x1: 132, z0: 83, z1: 93, facing: 'n', color: 0xf6d7a0, sign: { text: 'BEACH RENTALS', color: '#1a1a1a', bg: '#ffe14d' } });
+    // a beach duplex: two homes side by side
+    construct(b, { id: 'beachduplex', type: 'duplex', x0: 158, x1: 172, z0: 83, z1: 91.8, facing: 'n', style: 'siding', color: 0xa8d8f0, roofColor: 0x3d4650 });
+    keep.push({ x0: 100, x1: 136, z0: 80, z1: 97 }, { x0: 156, x1: 174, z0: 80, z1: 93 });
+    b.label('SHRIMP SHACK', 110, 88);
+    b.hotspot(118, 80);
+  }
   // ---- volleyball ----
-  for (const vx of [-115, 135]) {
+  for (const vx of [-60, 150]) {
     for (const vz of [91, 101]) b.box('post', vx - 0.1, vx + 0.1, vz - 0.1, vz + 0.1, 0, 2.5, { color: 0xe8e2d4 });
     b.box('fence_chain', vx - 0.03, vx + 0.03, 91, 101, 1.5, 2.45, { col: 'fence' });
     keep.push({ x0: vx - 9, x1: vx + 9, z0: 88, z1: 104 });
     b.hotspot(vx, 96);
   }
-  // ---- boats pulled up on the sand, rocks at the ends ----
-  b.prop('boat', 150, 109, 0.3, 0);
-  b.prop('boat', 156, 106, -0.25, 1);
-  b.prop('boat', -172, 108, 0.5, 2);
-  for (let i = 0; i < 14; i++) {
-    const side = i % 2 ? 1 : -1;
-    b.prop(rng.chance(0.5) ? 'boulder' : 'rock', side * rng.range(186, 197), rng.range(80, 116), rng.range(0, 6), rng.int(3));
-  }
+  // ---- boats pulled up on the sand, rocks at the east end ----
+  b.prop('boat', 166, 110, 0.3, 0);
+  b.prop('boat', 180, 107, -0.25, 1);
+  b.prop('boat', 40, 110, 0.5, 2);
+  for (let i = 0; i < 7; i++) b.prop(rng.chance(0.5) ? 'boulder' : 'rock', rng.range(186, 197), rng.range(84, 116), rng.range(0, 6), rng.int(3));
   // ---- umbrellas and towels ----
-  for (let i = 0; i < 46; i++) {
-    const ux = rng.range(-185, 185), uz = rng.range(84, 112);
-    if (keep.some((k) => inRect(k, ux, uz, 2))) continue;
+  for (let i = 0; i < 40; i++) {
+    const ux = rng.range(-78, 185), uz = rng.range(84, 112);
+    if (keep.some((kk) => inRect(kk, ux, uz, 2))) continue;
     b.prop('umbrella', ux, uz, rng.range(0, 6), rng.int(5));
     const tx = ux + 1.4, tz = uz + rng.range(-0.6, 0.6);
     b.area('towel', tx - 0.55, tx + 0.55, tz - 1, tz + 1, 2, rng.pick([0xe05a8a, 0x2a9d8f, 0xf4a261, 0x457b9d, 0xe9c46a, 0xffffff]));
     if (rng.chance(0.18)) b.loot(ux - 1, uz);
   }
-  for (let px = -180; px <= 180; px += 45) b.hotspot(px, 95);
+  for (let px = -70; px <= 180; px += 45) b.hotspot(px, 95);
+}
+
+// =================================================================================== THE DOCKS
+/**
+ * THE DOCKS (southwest): the industrial waterfront. A fenced concrete yard with warehouses,
+ * a workshop, a storage depot and a garage you can go into, stacked containers along the
+ * quay and a gantry crane over them.
+ */
+function docks(b: MapBuilder, rng: Rng): void {
+  const Y: Rect = { x0: CELL.w.x0 + 2, x1: CELL.c.x0 - 4.5, z0: 76.5, z1: SHORE };
+  b.area('lot', Y.x0, Y.x1, Y.z0, Y.z1, 1);
+  b.area('concrete', Y.x0, Y.x1, SHORE - 6, SHORE + 0.5, 2, 0x9a958c);
+  // the yard fence along the promenade, gates by each building
+  const gates = [-176, -150, -126, -103];
+  let fx = Y.x0;
+  for (const g of gates) {
+    b.box('fence_chain', fx, g - 3, 76.46, 76.54, 0, 2.6, { col: 'fence' });
+    fx = g + 3;
+  }
+  b.box('fence_chain', fx, Y.x1, 76.46, 76.54, 0, 2.6, { col: 'fence' });
+  construct(b, { id: 'warehouse1', type: 'warehouse', x0: -196, x1: -177, z0: 82, z1: 98, facing: 'n', color: 0x8f9aa3 });
+  construct(b, { id: 'workshop', type: 'workshop', x0: -171, x1: -157, z0: 82, z1: 94, facing: 'n', color: 0x9a8a6a });
+  construct(b, { id: 'storage', type: 'storage', x0: -151, x1: -134, z0: 82, z1: 96, facing: 'n', color: 0x7f8a7a });
+  construct(b, { id: 'dockgarage', type: 'garage', x0: -128, x1: -117, z0: 82, z1: 93, facing: 'n', color: 0xa0a6ac });
+  construct(b, { id: 'warehouse2', type: 'warehouse', x0: -111, x1: -94, z0: 82, z1: 97, facing: 'n', color: 0x6f7f8f });
+  for (const [x, t, c] of [[-186.5, 'PIER 9 WAREHOUSE', '#2a6f97'], [-164, 'TOWNE WELDING', '#7a1f1f'], [-142.5, 'SELF STORAGE', '#3d5a2c'], [-122.5, 'AUTO BODY', '#22384f'], [-102.5, 'COLD STORAGE', '#2a6f97']] as const) {
+    b.sign({ text: t, x, y: x === -122.5 ? 4.6 : 4.9, z: 81.9, yaw: 0, width: 7, height: 1.0, style: 'store', color: '#ffffff', bg: c });
+  }
+  // containers along the quay, two high in places
+  const colors = 4;
+  for (let x = Y.x0 + 4; x < Y.x1 - 8; x += 7.2) {
+    if (rng.chance(0.2)) continue;
+    const z = rng.chance(0.5) ? 104 : 108;
+    b.prop('container', x, z, Math.PI / 2, rng.int(colors));
+    if (rng.chance(0.35)) b.prop('container', x, z, Math.PI / 2, rng.int(colors), 2.6);
+  }
+  // a gantry crane straddling the container row
+  {
+    const cx = -150, z0 = 101, z1 = 112;
+    for (const dx of [-7, 7]) for (const z of [z0, z1]) b.box('pillar', cx + dx - 0.4, cx + dx + 0.4, z - 0.4, z + 0.4, 0, 13, { color: 0xd4a32a });
+    for (const dx of [-7, 7]) b.box('beam', cx + dx - 0.5, cx + dx + 0.5, z0 - 0.4, z1 + 0.4, 13, 14, { color: 0xd4a32a });
+    b.box('beam', cx - 7.5, cx + 7.5, z0 + 4.5, z0 + 6.5, 14, 15, { color: 0xd4a32a });
+    b.box('beam', cx - 1, cx + 1, z0 + 4.5, z0 + 6.5, 11, 14, { color: 0x3a3e44, col: 'none' });
+    b.loot(cx, (z0 + z1) / 2 + 2.5, 0);
+  }
+  b.prop('boat', -60, 111, 0.5, 2);
+  for (let i = 0; i < 8; i++) b.prop(rng.pick(['pallet', 'crate', 'crate_big', 'tires', 'barrier'] as const), rng.range(Y.x0 + 4, Y.x1 - 4), rng.range(99, 101.5), rng.range(0, 3), 0);
+  for (let i = 0; i < 4; i++) b.loot(rng.range(Y.x0 + 4, Y.x1 - 4), rng.range(100, 114));
+  b.label('WAREHOUSES', -170, 90);
+  b.label('CRANE', -150, 106);
+  for (const [x, z] of [[-186, 80], [-164, 80], [-142, 80], [-122, 80], [-102, 80], [-150, 106], [-115, 112]] as const) b.hotspot(x, z);
 }

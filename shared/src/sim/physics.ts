@@ -16,6 +16,8 @@ type Ray = InstanceType<Rapier['Ray']>;
 export const GROUP_SOLID = 0x0001;
 export const GROUP_FENCE = 0x0002;
 export const GROUP_PLAYER = 0x0004;
+/** Window glass: stops people, grenades and the camera, not bullets (a shot breaks it). */
+export const GROUP_GLASS = 0x0008;
 
 function groups(membership: number, filter: number): number {
   return ((membership << 16) | filter) >>> 0;
@@ -23,9 +25,11 @@ function groups(membership: number, filter: number): number {
 
 /** Query masks. */
 export const Q_BULLET = groups(0xffff, GROUP_SOLID);
-export const Q_MOVE = groups(GROUP_PLAYER, GROUP_SOLID | GROUP_FENCE);
-export const Q_CAMERA = groups(0xffff, GROUP_SOLID);
-export const Q_PROJECTILE = groups(0xffff, GROUP_SOLID | GROUP_FENCE);
+export const Q_MOVE = groups(GROUP_PLAYER, GROUP_SOLID | GROUP_FENCE | GROUP_GLASS);
+export const Q_CAMERA = groups(0xffff, GROUP_SOLID | GROUP_GLASS);
+export const Q_PROJECTILE = groups(0xffff, GROUP_SOLID | GROUP_FENCE | GROUP_GLASS);
+/** Just the world's solid parts (ledges: glass is not something to grab). */
+export const Q_SOLID = groups(0xffff, GROUP_SOLID);
 
 export interface MoveResult {
   x: number;
@@ -80,7 +84,7 @@ export class PhysicsWorld {
       this.world.createCollider(desc);
     }
 
-    const probeGroups = groups(GROUP_PLAYER, GROUP_SOLID | GROUP_FENCE);
+    const probeGroups = groups(GROUP_PLAYER, GROUP_SOLID | GROUP_FENCE | GROUP_GLASS);
     this.standProbe = this.world.createCollider(
       R.ColliderDesc.capsule(STAND_HALF, PLAYER.radius).setTranslation(0, -100, 0).setCollisionGroups(probeGroups),
     );
@@ -104,6 +108,39 @@ export class PhysicsWorld {
     this.world.step();
   }
 
+  /** Set when a collider was switched on or off; the next query refreshes the scene first. */
+  private dirty = false;
+  private toggles: Collider[] = [];
+
+  /**
+   * Adds a box that can be switched on and off (doors, window panes). Returns its handle for
+   * `setEnabled`. `glass` boxes stop movement, grenades and the camera but not bullets.
+   */
+  addToggleBox(x: number, y: number, z: number, sx: number, sy: number, sz: number, ry: number, glass: boolean, enabled: boolean): number {
+    const desc = this.R.ColliderDesc.cuboid(sx / 2, sy / 2, sz / 2)
+      .setTranslation(x, y, z)
+      .setRotation(solidQuat({ ry }))
+      .setCollisionGroups(groups(glass ? GROUP_GLASS : GROUP_SOLID, 0xffff));
+    const c = this.world.createCollider(desc);
+    c.setEnabled(enabled);
+    this.toggles.push(c);
+    this.dirty = true;
+    return this.toggles.length - 1;
+  }
+
+  setEnabled(handle: number, on: boolean): void {
+    const c = this.toggles[handle];
+    if (!c || c.isEnabled() === on) return;
+    c.setEnabled(on);
+    this.dirty = true;
+  }
+
+  private refresh(): void {
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.world.step();
+  }
+
   /**
    * Slides a character capsule from feet position (x,y,z) by the desired delta.
    * Writes the resulting feet position and grounded flag into `out`.
@@ -113,6 +150,7 @@ export class PhysicsWorld {
     dx: number, dy: number, dz: number,
     crouching: boolean, out: MoveResult,
   ): void {
+    this.refresh();
     const probe = crouching ? this.crouchProbe : this.standProbe;
     const center = (crouching ? PLAYER.crouchHeight : PLAYER.height) / 2;
     const p = this.vTmp;
@@ -130,6 +168,7 @@ export class PhysicsWorld {
 
   /** True if a standing capsule fits at this feet position (used to stand up from a crouch and by the nav grid). */
   canStandAt(x: number, y: number, z: number): boolean {
+    this.refresh();
     const p = this.vTmp;
     p.x = x; p.y = y + PLAYER.height / 2 + 0.06; p.z = z;
     return this.world.intersectionWithShape(p, IDENTITY_ROT, this.standShape, undefined, Q_MOVE) === null;
@@ -144,6 +183,7 @@ export class PhysicsWorld {
     dx: number, dy: number, dz: number,
     maxDist: number, mask: number, wantNormal = false,
   ): number {
+    this.refresh();
     const r = this.ray;
     r.origin.x = ox; r.origin.y = oy; r.origin.z = oz;
     r.dir.x = dx; r.dir.y = dy; r.dir.z = dz;
@@ -173,6 +213,7 @@ export class PhysicsWorld {
     dx: number, dy: number, dz: number,
     radius: number, maxDist: number, mask: number,
   ): number {
+    this.refresh();
     const key = Math.round(radius * 1000);
     let ball = this.ballCache.get(key);
     if (!ball) {

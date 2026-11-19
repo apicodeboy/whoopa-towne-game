@@ -1,7 +1,7 @@
 import type { TeamId } from '../config/crews';
 import { propSolids } from './props';
 import type {
-  AreaDef, CollisionKind, LabelDef, MapDef, Prop, PropType, RoadDef, SignDef, Solid, SpawnPoint, ZoneDef,
+  AreaDef, CollisionKind, DoorDef, LabelDef, MapDef, Prop, PropType, RoadDef, SignDef, Solid, SpawnPoint, WindowDef, ZoneDef,
 } from './types';
 
 /** Compass sides. North is -Z, east is +X. */
@@ -77,6 +77,9 @@ export class MapBuilder {
   hotspots: Array<{ x: number; z: number }> = [];
   lootSpots: Array<{ x: number; y: number; z: number }> = [];
   districts: Array<{ name: string; x: number; z: number }> = [];
+  doors: DoorDef[] = [];
+  windows: WindowDef[] = [];
+  warmup: MapDef['warmup'];
   backdrop: MapDef['backdrop'];
   spawns: [SpawnPoint[], SpawnPoint[]] = [[], []];
   zones: ZoneDef[] = [];
@@ -151,16 +154,19 @@ export class MapBuilder {
       const railH = 1.0;
       // right-hand side when facing the direction of ascent: d x up = (-dz, 0, dx)
       const rxv = -dz, rzv = dx;
+      // a tilted box overhangs its own slope by sin(a) * height at each end, so it is shortened
+      // to stay over the steps (a rail poking out past the bottom step snags people)
+      const railLen = Math.max(0.3, (o.run - sa * railH) / ca);
       const mid = {
-        x: o.x + dx * (o.run / 2) - dx * sa * (railH / 2),
+        x: o.x + dx * (o.run / 2),
         y: o.y0 + o.rise / 2 + ca * (railH / 2),
-        z: o.z + dz * (o.run / 2) - dz * sa * (railH / 2),
+        z: o.z + dz * (o.run / 2),
       };
       const off = o.width / 2 - 0.04;
       const add = (sign: number) => {
         this.solids.push({
           kind: 'rail', x: mid.x + rxv * off * sign, y: mid.y, z: mid.z + rzv * off * sign,
-          sx: 0.07, sy: railH, sz: len, ry, rx: -a, col: 'fence', group: o.group,
+          sx: 0.07, sy: railH, sz: railLen, ry, rx: -a, col: 'fence', group: o.group,
         });
       };
       if (rails === 'right' || rails === 'both') add(1);
@@ -314,6 +320,9 @@ export class MapBuilder {
       ...(this.lootSpots.length ? { lootSpots: this.lootSpots } : {}),
       ...(this.districts.length ? { districts: this.districts } : {}),
       ...(this.backdrop ? { backdrop: this.backdrop } : {}),
+      ...(this.doors.length ? { doors: this.doors } : {}),
+      ...(this.windows.length ? { windows: this.windows } : {}),
+      ...(this.warmup ? { warmup: this.warmup } : {}),
     };
   }
 }

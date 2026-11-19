@@ -178,6 +178,16 @@ export class PorchHud {
     this.bannerTimer = seconds;
   }
 
+  /** A short note in the toast stack ("NAME JOINED"). */
+  toast(text: string, kind: number): void {
+    const t = el('div', 'ph-toast', escapeHtml(text));
+    t.dataset.kind = String(kind);
+    this.toastsEl.prepend(t);
+    while (this.toastsEl.children.length > 5) this.toastsEl.lastElementChild!.remove();
+    setTimeout(() => t.classList.add('fade'), 2200);
+    setTimeout(() => t.remove(), 2900);
+  }
+
   /** "+ Kingpin AR" style pickup notes. */
   loot(kind: number, code: number, count: number): void {
     let text = '';
@@ -199,7 +209,13 @@ export class PorchHud {
     const snap = s.snap;
     // ---- top bar ----
     if (snap) {
-      this.set('alive', snap.alive, () => (this.aliveEl.textContent = String(snap.alive)));
+      // the warm-up counts who has turned up so far
+      const warming = snap.stage === 0 && snap.stageLeft > 0 && s.air !== 1;
+      const count = warming ? s.total : snap.alive;
+      this.set('alive', `${count}|${warming}`, () => {
+        this.aliveEl.textContent = String(count);
+        (this.aliveEl.nextElementSibling as HTMLElement).textContent = warming ? 'PLAYERS' : 'ALIVE';
+      });
       let stage = stageName(snap.stage);
       let timer = '';
       if (snap.stage === STAGE_DEPLOY) timer = `RIOT STARTS IN ${fmt(snap.stageLeft + PORCH.earlySeconds)}`;
@@ -208,6 +224,10 @@ export class PorchHud {
         if (snap.shrinking) timer = `RIOT SPREADING ${fmt(snap.stageLeft)}`;
         else if (snap.stageLeft > 0) timer = `RIOT APPROACHING ${fmt(snap.stageLeft)}`;
         else timer = 'THE RIOT IS EVERYWHERE';
+      } else if (snap.stage === 0 && snap.stageLeft > 0 && s.air !== 1) {
+        // the warm-up (on foot in BABYLON): shoot around until the blimp boards
+        stage = 'WARM-UP';
+        timer = `BLIMP BOARDS IN ${fmt(snap.stageLeft)}`;
       } else if (snap.stage === 0) {
         stage = 'GET ON THE PORCH';
         timer = snap.takeoff < 0 ? 'TAKING OFF…' : '';

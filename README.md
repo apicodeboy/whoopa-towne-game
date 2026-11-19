@@ -87,6 +87,8 @@ headshot multipliers and damage falloff. In Turf War, standing in a zone alone c
 | Switch weapon | 1 / 2 / 3 | △ | Y | SWAP |
 | Throw grenade / smoke | G | L1 | LB | THROW |
 | Swap camera shoulder | Q | R1 | RB | ⇄ |
+| Use (doors, windows, bags; hold to lock a door from inside) | E | D-pad down | D-pad down | USE / tap the prompt |
+| Climb through an open window | Space toward it | ✕ | A | JUMP |
 | Scoreboard (hold) | Tab | Create | View | SCORES |
 | Pause / menu | Esc | Options | Menu | II |
 
@@ -131,6 +133,9 @@ list positions), then teach the matching builder in `look/` to draw it. `?debug=
 The map is `shared/src/map/whoopaTowne.ts` (collision and layout; shop names such as
 "S-Curve Liquor" are place names and live here) and `client/src/game/world/worldBuilder.ts`
 (how it looks). `npx tsx tools/map-preview.ts map.svg` draws a top-down plan of the map.
+JUMP OFF THE PORCH plays on Greater Whoopa Towne (`shared/src/map/greaterTowne.ts`): nine
+districts around the classic map, with explorable multi-floor buildings, working doors and
+windows. See [docs/BUILDINGS.md](docs/BUILDINGS.md).
 
 To replace a 3D model, drop a new `.glb` over the old one in `client/public/assets/`. If a
 model is missing the game draws a simple built-in stand-in instead of failing.
@@ -155,7 +160,7 @@ uses roughly 9 KB/s of download per player.
 ## Tests
 
 ```bash
-npm test                 # 30 simulation + 8 client-logic + 12 network tests
+npm test                 # 67 simulation + 8 client-logic + 23 economy/network tests
 npm run typecheck
 ```
 
@@ -179,6 +184,15 @@ It expects Google Chrome at the default macOS path; set `CHROME_PATH` otherwise.
 land in `tools/out/`.
 
 ---
+
+## Buildings and the big map
+
+Houses, apartments, shops, offices and warehouses you can walk into: rooms on every floor,
+stairs, roofs, fire escapes, doors that open, close and lock, windows that open, break and can
+be climbed through, all synced by the server. The JUMP OFF THE PORCH map is a 3×3 grid of
+districts (Babylon, The Hill, Hong Kong, Jungle, Whoopa Towne, Downtown, the Docks, the beach,
+the Boardwalk), and the match now warms up in Babylon. How it works, how to add buildings:
+[docs/BUILDINGS.md](docs/BUILDINGS.md).
 
 ## Characters (Urban Ink)
 

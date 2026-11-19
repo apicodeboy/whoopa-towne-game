@@ -25,7 +25,7 @@ export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
   swap: 'Next weapon',
   throw: 'Throw',
   shoulder: 'Swap shoulder',
-  use: 'Search / pick up / talk',
+  use: 'Use: doors, windows, search, pick up, talk',
   heal: 'Heal (hold)',
   drop: 'Drop weapon',
   scores: 'Scoreboard',

@@ -8,6 +8,7 @@ const TRACER_SPEED = 190;
 const TRACER_LEN = 7;
 const SPARK_CAP = 512;
 const DUST_CAP = 384;
+const SHARD_CAP = 700;
 const DECAL_CAP = 128;
 const FLASH_CAP = 12;
 
@@ -176,6 +177,8 @@ export class Effects {
   private tracerMesh: THREE.InstancedMesh;
   private tracerHeads: THREE.Points;
   private sparks: ParticlePool;
+  /** Broken window glass. */
+  private shards: ParticlePool;
   private dust: ParticlePool;
   private decalMesh: THREE.InstancedMesh;
   private decalHead = 0;
@@ -247,7 +250,12 @@ export class Effects {
       }),
       -0.6, 2.6,
     );
-    this.group.add(this.sparks.points, this.dust.points);
+    this.shards = new ParticlePool(
+      SHARD_CAP,
+      new THREE.PointsMaterial({ size: 0.11, map: this.dotTex, vertexColors: true, transparent: true, depthWrite: false, sizeAttenuation: true }),
+      11, 0.3,
+    );
+    this.group.add(this.sparks.points, this.dust.points, this.shards.points);
 
     // bullet holes
     const dGeo = new THREE.PlaneGeometry(0.16, 0.16);
@@ -350,6 +358,26 @@ export class Effects {
     this.decalMesh.setMatrixAt(i, _m);
     this.decalMesh.instanceMatrix.needsUpdate = true;
     this.decalAge[i] = 0;
+  }
+
+  /**
+   * A window pane shatters: glinting shards over the whole pane, thrown away from `dir` (the
+   * side the hit came from) and falling.
+   */
+  glassBreak(cx: number, cy: number, cz: number, w: number, h: number, a: number, dir: number): void {
+    const ux = Math.sin(a), uz = Math.cos(a), nx = Math.cos(a) * dir, nz = -Math.sin(a) * dir;
+    const n = Math.max(30, Math.round(140 * this.density * Math.min(2.5, w * h)));
+    for (let i = 0; i < n; i++) {
+      const s = (Math.random() - 0.5) * w, t = (Math.random() - 0.5) * h;
+      // most fly on through; some spill back out and tumble down the near side
+      const sp = (Math.random() < 0.3 ? -0.5 : 1) * (0.6 + Math.random() * 3);
+      const glint = 0.75 + Math.random() * 0.25;
+      this.shards.emit(
+        cx + ux * s, cy + t, cz + uz * s,
+        nx * sp + (Math.random() - 0.5) * 1.2, Math.random() * 1.6 - 0.4, nz * sp + (Math.random() - 0.5) * 1.2,
+        0.6 + Math.random() * 0.7, 0.78 * glint, 0.9 * glint, glint,
+      );
+    }
   }
 
   /** Bullet hitting a player: a short dark-red burst (stylized, not gory). */
@@ -463,6 +491,7 @@ export class Effects {
     }
 
     this.sparks.update(dt);
+    this.shards.update(dt);
     this.dust.update(dt);
 
     for (const f of this.flashes) {
@@ -530,6 +559,7 @@ export class Effects {
     this.clear();
     this.sparks.dispose();
     this.dust.dispose();
+    this.shards.dispose();
     for (const d of this.disposables) d.dispose();
     this.group.removeFromParent();
   }

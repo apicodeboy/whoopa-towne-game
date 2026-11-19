@@ -288,19 +288,22 @@ export class PorchRules {
 
   // ------------------------------------------------------------------ per input
   /** Called for every input command before the player is stepped. */
-  onInput(p: SimPlayer, cmd: InputCmd): void {
+  /** Returns true when USE went to something here (a bag, a pickup), not to a door. */
+  onInput(p: SimPlayer, cmd: InputCmd): boolean {
     const prev = this.prevButtons[p.idx];
     const pressed = cmd.buttons & ~prev;
     this.prevButtons[p.idx] = cmd.buttons;
-    if (!p.alive || this.sim.phase !== PHASE.PLAYING) return;
+    if (!p.alive || this.sim.phase !== PHASE.PLAYING) return false;
     const s = p.state;
     if (s.air === AIR_RIDING) {
       if (pressed & BTN.JUMP && this.sim.time >= this.takeoff + PORCH.transport.doorsOpen * 1000) this.jumpOut(p);
-      return;
+      return false;
     }
-    if (s.air !== AIR_GROUND) return;
-    if (pressed & BTN.USE) this.interact(p);
+    if (s.air !== AIR_GROUND) return false;
+    let used = false;
+    if (pressed & BTN.USE) used = this.interact(p);
     if (pressed & BTN.DROP) this.dropHeld(p);
+    return used;
   }
 
   private jumpOut(p: SimPlayer): void {
@@ -339,8 +342,9 @@ export class PorchRules {
     return { bag, pickup };
   }
 
-  private interact(p: SimPlayer): void {
+  private interact(p: SimPlayer): boolean {
     const { bag, pickup } = this.reachable(p.state);
+    if (!bag && !pickup) return false;
     if (bag) {
       bag.opened = true;
       this.sim.pushEvent([EV.BAG_OPEN, bag.id, p.idx]);
@@ -355,6 +359,7 @@ export class PorchRules {
       const left = this.give(p, pickup);
       if (left) this.drop(left, pickup.x, pickup.y, pickup.z, 0);
     }
+    return true;
   }
 
   private dropHeld(p: SimPlayer): void {
@@ -641,6 +646,8 @@ export class PorchRules {
   /** Seconds until the current stage step changes. */
   get stepLeft(): number {
     const st = this.steps[this.stepI];
+    // the pregame: time until everyone boards
+    if (!st && this.sim.phase === PHASE.WARMUP) return this.sim.timeLeft;
     if (!st) return Math.max(0, (this.takeoff - this.sim.time) / 1000);
     return Number.isFinite(st.end) ? Math.max(0, (st.end - this.sim.time) / 1000) : 0;
   }

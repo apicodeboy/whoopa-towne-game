@@ -9,11 +9,12 @@ import { DEG, Rng, clamp, wrapAngle, type Vec3 } from '@shared/math';
 import {
   EV, PF, PHASE, quantizeInput, type MatchEndMsg, type RosterEntry, type SnapPlayer, type Snapshot,
 } from '@shared/protocol';
+import { WIN_BROKEN, WIN_OPEN, type UseTarget } from '@shared/sim/buildings';
 import { STAGE_RIOT, transportAt } from '@shared/sim/porch';
 import {
   HIT_PLAYER, HIT_WORLD, makeShotResult, shotSeed, spreadDirection, traceShot, type ShotTarget,
 } from '@shared/sim/combat';
-import { stepProjectile, type Projectile } from '@shared/sim/game';
+import { playersFrozen, stepProjectile, type Projectile } from '@shared/sim/game';
 import type { PhysicsWorld } from '@shared/sim/physics';
 import {
   AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, pickHeal, playerStateFromArray, reserveOf, weaponInSlot,
@@ -67,6 +68,11 @@ export interface GameAudio {
   loot?(): void;
   riot?(): void;
   crowd?(level: number): void;
+  door?(open: boolean, pos: THREE.Vector3): void;
+  lock?(pos: THREE.Vector3): void;
+  rattle?(pos: THREE.Vector3): void;
+  windowSlide?(pos: THREE.Vector3): void;
+  glass?(pos: THREE.Vector3): void;
 }
 
 export interface GameDeps {
@@ -175,6 +181,13 @@ export class Game {
   private myBalloon: THREE.Group | null = null;
   private promptTarget = '';
   private fireWas = false;
+  /** The door or window in reach (same rule as the server), its prompt, a tap on that prompt. */
+  private bldTarget: UseTarget | null = null;
+  private usePrompt: HTMLButtonElement;
+  /** JUMP OFF THE PORCH on a map with a warm-up area: the pregame is played on foot there. */
+  private readonly arena: boolean;
+  private usePromptHtml = '';
+  private tapUse = 0;
 
   private deps: GameDeps;
   private stage: Stage;
@@ -266,6 +279,14 @@ export class Game {
 
     this.session.handlers.onSnapshot = (s) => this.handleSnapshot(s);
     this.session.handlers.onRoster = (r) => this.setRoster(r);
+    this.arena = this.session.mode === 'porch' && !!this.map.warmup;
+    // doors and windows as they are in this match right now
+    this.stage.buildings.decode(this.session.bld);
+    this.stage.bldVisual.snap();
+    this.usePrompt = document.createElement('button');
+    this.usePrompt.className = 'aj-prompt use-prompt hidden';
+    this.usePrompt.addEventListener('click', () => (this.tapUse = 2));
+    this.hud.root.append(this.usePrompt);
 
     if (this.session.mode === 'porch' && this.session.porch) {
       this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
@@ -339,6 +360,10 @@ export class Game {
 
   // ------------------------------------------------------------------ roster
   setRoster(list: RosterEntry[]): void {
+    // the warm-up: people turning up one by one
+    if (this.porchHud && this.snap?.phase === PHASE.WARMUP) {
+      for (const r of list) if (!this.roster.has(r.idx) && r.idx !== this.session.myIdx) this.porchHud.toast(`${r.name} JOINED`, 0);
+    }
     const fresh = list.filter((r) => r.look && this.roster.get(r.idx)?.look !== r.look);
     this.roster.clear();
     for (const r of list) this.roster.set(r.idx, r);
@@ -402,7 +427,7 @@ export class Game {
     }
 
     if (snap.self && this.me) {
-      const frozen = snap.phase !== PHASE.PLAYING;
+      const frozen = playersFrozen(snap.phase, this.arena);
       playerStateFromArray(snap.self, this.serverState);
       const aliveNow = (this.me.flags & PF.ALIVE) !== 0;
       if (snap.life !== this.myLife) {
@@ -628,6 +653,43 @@ export class Game {
       case EV.HEALED:
         if (e[1] === myIdx) audio?.reloadDone();
         break;
+      case EV.DOOR: {
+        const b = this.stage.buildings;
+        const i = e[1];
+        const was = b.open[i], wasLocked = b.locked[i];
+        b.applyEvent(e);
+        const d = b.doors[i];
+        if (!d) break;
+        _v.set(d.x + Math.sin(d.a) * d.w / 2, d.y + 1.1, d.z + Math.cos(d.a) * d.w / 2);
+        if (b.open[i] !== was) audio?.door?.(b.open[i] === 1, _v);
+        else if (b.locked[i] !== wasLocked) audio?.lock?.(_v);
+        break;
+      }
+      case EV.WINDOW: {
+        const b = this.stage.buildings;
+        const i = e[1];
+        const was = b.win[i];
+        b.applyEvent(e);
+        const w = b.windows[i];
+        if (!w || b.win[i] === was) break;
+        _v.set(w.x, w.y + w.h / 2, w.z);
+        if (b.win[i] === WIN_BROKEN) {
+          audio?.glass?.(_v);
+          // shards fly away from whoever broke it
+          const by = this.remotes.get(e[3]);
+          const from = e[3] === this.session.myIdx ? this.predictor.state : by ? { x: by.x, z: by.z } : null;
+          const nx = Math.cos(w.a), nz = -Math.sin(w.a);
+          const dir = from ? ((w.x - from.x) * nx + (w.z - from.z) * nz >= 0 ? 1 : -1) : (w.out ?? 1);
+          this.effects.glassBreak(w.x, w.y + w.h / 2, w.z, w.w, w.h, w.a, dir);
+        } else audio?.windowSlide?.(_v);
+        break;
+      }
+      case EV.DENIED: {
+        const d = this.stage.buildings.doors[e[1]];
+        if (d) audio?.rattle?.(_v.set(d.x + Math.sin(d.a) * d.w / 2, d.y + 1.0, d.z + Math.cos(d.a) * d.w / 2));
+        if (e[2] === this.session.myIdx) this.hud.announce('LOCKED', 'bad', 0.9);
+        break;
+      }
       case EV.RELOAD: {
         if (e[1] !== myIdx) {
           const rp = this.remotes.get(e[1]);
@@ -707,7 +769,7 @@ export class Game {
       this.renderPos.y = this.visY = pi.altitude + 4.2;
     }
     let spectating = false;
-    if (this.porchWorld && !this.alive && this.myLife >= 0) {
+    if (this.porchWorld && !this.alive && this.myLife >= 0 && snap?.phase === PHASE.PLAYING) {
       const t = this.spectateTarget();
       if (t) {
         spectating = true;
@@ -829,6 +891,8 @@ export class Game {
     this.effects.update(dt);
     this.updateZoneMarkers();
     this.stage.world.update(dt, this.time, camPos);
+    this.stage.bldVisual.update(dt);
+    this.updateUsePrompt(st);
     if (this.porchWorld && snap?.porch) {
       this.porchWorld.zone = snap.porch.zone;
       this.porchWorld.next = snap.porch.next;
@@ -894,7 +958,7 @@ export class Game {
     const cmd = this.cmd;
     const st = this.predictor.state;
     const snap = this.snap;
-    const frozen = !snap || snap.phase !== PHASE.PLAYING;
+    const frozen = !snap || playersFrozen(snap.phase, this.arena);
     const active = !this.paused;
 
     cmd.seq = ++this.predictor.seq;
@@ -993,13 +1057,19 @@ export class Game {
     if (f.reload) b |= BTN.RELOAD;
     if (f.throwBtn) b |= BTN.THROW;
     if (f.roll) b |= BTN.ROLL;
+    const tapped = this.tapUse > 0;
+    if (this.tapUse > 0) this.tapUse--;
     if (this.porchWorld) {
-      // one controller button can do both: pick up when something is in reach, heal otherwise
-      // (and once a heal has started, keeping it held keeps healing)
+      // one controller button can do both: pick up (or open a door) when something is in reach,
+      // heal otherwise (and once a heal has started, keeping it held keeps healing)
       const healing = this.predictor.state.healT > 0;
-      if (f.use || (f.useOrHeal && this.promptTarget && !healing)) b |= BTN.USE;
-      if (f.heal || (f.useOrHeal && (!this.promptTarget || healing))) b |= BTN.HEAL;
+      const target = this.promptTarget || this.bldTarget;
+      if (f.use || tapped || (f.useOrHeal && target && !healing)) b |= BTN.USE;
+      if (f.heal || (f.useOrHeal && (!target || healing))) b |= BTN.HEAL;
       if (f.drop) b |= BTN.DROP;
+    } else if (this.stage.buildings.doorCount + this.stage.buildings.windowCount > 0) {
+      // doors and windows in every mode
+      if (f.use || f.useOrHeal || tapped) b |= BTN.USE;
     }
     return b;
   }
@@ -1210,7 +1280,7 @@ export class Game {
     let prompt = '';
     this.promptTarget = '';
     let card: { kind: number; code: number; count: number; x: number; y: number; z: number } | null = null;
-    if (this.alive && st.air === 0) {
+    if (this.alive && st.air === 0 && snap?.phase === PHASE.PLAYING) {
       let best = PORCH.reach * PORCH.reach;
       for (const [id, b] of world.allBags) {
         if (b.opened || Math.abs(b.y - st.y) > 1.8) continue;
@@ -1266,7 +1336,7 @@ export class Game {
           : 'LOW HEALTH — FIND A MED KIT'
         : '',
       // a pickup gets a card floating over it instead of the plain prompt
-      prompt: prompt && !card ? `[${key}] ${prompt}` : '',
+      prompt: !this.alive && snap?.phase === PHASE.WARMUP && this.arena ? 'BACK IN A MOMENT…' : prompt && !card ? `[${key}] ${prompt}` : '',
       card: card ? this.pickupCard(card, device) : null,
       doorsIn: Math.max(0, (doorsAt - this.session.serverTime()) / 1000),
       spectating: spectating ? this.remotes.get(this.spectateIdx)?.name ?? '' : '',
@@ -1283,6 +1353,43 @@ export class Game {
       return { name: r.name, bot: r.bot, me, mate: (r.squad ?? r.team) === this.mySquad, alive: me ? this.alive : !!rp?.alive, kills: me ? this.me?.kills ?? 0 : rp?.kills ?? 0 };
     });
     hud.board(this.deps.input.frame.scoreboard, rows);
+  }
+
+  /**
+   * The door or window in reach and what USE would do with it (the server applies the same
+   * rule): open, close, locked, hold to lock; climb through an open window.
+   */
+  private updateUsePrompt(st: PlayerState): void {
+    const b = this.stage.buildings;
+    let html = '';
+    this.bldTarget = null;
+    if (this.alive && !this.paused && st.air === AIR_GROUND && st.climbT <= 0 && !this.promptTarget && !this.canTalkToAj && b.doorCount + b.windowCount > 0) {
+      const t = b.target(st.x, st.y, st.z, st.yaw);
+      this.bldTarget = t;
+      if (t) {
+        const device = this.deps.input.device;
+        const key = device === 'touch' ? '' : glyphHtml(device as never, 'use');
+        const press = (what: string) => (device === 'touch' ? `Tap to <b>${what}</b>` : `${key} <b>${what}</b>`);
+        const hold = (what: string) => (device === 'touch' ? '' : ` <span class="use-hold">hold: ${what}</span>`);
+        if (t.kind === 'door') {
+          const d = b.doors[t.i];
+          const inside = b.insideOf(t.i, st.x, st.z);
+          if (b.open[t.i]) html = press('Close door');
+          else if (b.locked[t.i] && !(inside && d.lockable)) html = `<b class="use-locked">Locked</b>`;
+          else if (d.lockable && inside) html = press(b.locked[t.i] ? 'Unlock & open' : 'Open door') + hold(b.locked[t.i] ? 'unlock' : 'lock');
+          else html = press('Open door');
+        } else {
+          const open = b.win[t.i] === WIN_OPEN;
+          const jump = device === 'touch' ? 'JUMP' : glyphHtml(device as never, 'jump');
+          html = press(open ? 'Close window' : 'Open window') + (open ? ` <span class="use-hold">${jump} climb through</span>` : '');
+        }
+      }
+    }
+    if (html !== this.usePromptHtml) {
+      this.usePromptHtml = html;
+      this.usePrompt.innerHTML = html;
+      this.usePrompt.classList.toggle('hidden', !html);
+    }
   }
 
   /** The card floating over a pickup in reach: what it is, a few numbers, the button. */

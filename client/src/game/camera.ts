@@ -9,6 +9,9 @@ const DIST_HIP = 2.6;
 const DIST_AIM = 1.7;
 const SHOULDER_HIP = 0.85;
 const SHOULDER_AIM = 0.78;
+/** Indoors (a ceiling overhead) the boom comes in this much, so rooms and halls stay readable. */
+const INDOOR_DIST = 0.7;
+const INDOOR_SHOULDER = 0.82;
 const PIVOT_STAND = 1.5;
 const PIVOT_CROUCH = 1.02;
 const RISE = 0.2;
@@ -51,6 +54,8 @@ export class CameraRig {
   private crouchT = 0;
   private sprintT = 0;
   private shoulderNow = SHOULDER_HIP;
+  /** 0 outdoors .. 1 under a ceiling (eased). */
+  private indoorT = 0;
   private pivotH = PIVOT_STAND;
   private shakeAmp = 0;
   private shakeT = 0;
@@ -108,8 +113,12 @@ export class CameraRig {
     const aimE = this.aimT * this.aimT * (3 - 2 * this.aimT);
     const mode = this.mode;
     this.pivotH = mode ? mode.height - RISE : lerp(PIVOT_STAND, PIVOT_CROUCH, this.crouchT);
-    const wantShoulder = mode ? 0 : lerp(SHOULDER_HIP, SHOULDER_AIM, aimE) * this.sideT;
-    const wantDist = mode ? mode.dist : lerp(DIST_HIP, DIST_AIM, aimE);
+    // a ceiling within a floor's height above the head: indoors
+    const ceiling = mode ? -1 : phys.raycast(px, py + 1.2, pz, 0, 1, 0, 2.6, Q_CAMERA);
+    this.indoorT = approach(this.indoorT, ceiling >= 0 ? 1 : 0, dt * 3);
+    const indoorE = this.indoorT * this.indoorT * (3 - 2 * this.indoorT);
+    const wantShoulder = mode ? 0 : lerp(SHOULDER_HIP, SHOULDER_AIM, aimE) * this.sideT * lerp(1, INDOOR_SHOULDER, indoorE);
+    const wantDist = mode ? mode.dist : lerp(DIST_HIP, DIST_AIM, aimE) * lerp(1, INDOOR_DIST, indoorE * (1 - aimE * 0.6));
 
     forwardFromYawPitch(yaw, pitch, _fwd);
     rightFromYaw(yaw, _right);

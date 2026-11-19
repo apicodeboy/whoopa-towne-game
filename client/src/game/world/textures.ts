@@ -349,7 +349,8 @@ export function makeTextures(): TextureSet {
   // hand-rail: a top bar and thin vertical balusters with gaps
   const bars = make(64, 25, (g, s) => {
     g.clearRect(0, 0, s, s);
-    g.fillStyle = 'rgba(40,44,50,1)';
+    // painted steel, light enough to be tinted (railings take their color from the batch)
+    g.fillStyle = 'rgba(205,208,212,1)';
     g.fillRect(0, 0, s, 7);
     g.fillRect(0, s - 5, s, 5);
     g.fillRect(4, 0, 5, s);

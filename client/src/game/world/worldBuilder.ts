@@ -53,7 +53,11 @@ const STYLES: Record<string, { tex: string; color: number; tile: number }> = {
   // BABYLON
   mudbrick: { tex: 'stucco', color: 0xc49a6c, tile: 3 },
   sandstone: { tex: 'concrete', color: 0xc9a46b, tile: 3 },
+  // inside walls of the explorable buildings
+  plaster: { tex: 'smooth', color: 0xe9e2d6, tile: 3 },
 };
+/** Building interiors are drawn within this distance of the camera (meters). */
+const INTERIOR_RANGE = 70;
 const FACADES = ['brickdark', 'brick', 'apartment', 'stucco', 'concrete', 'metal', 'brickdark', 'brick'];
 const CAR_COLORS = [0xb33a3a, 0x2f5f9e, 0xd9d9d9, 0x26282c, 0x3d7a4a, 0xc9a227, 0x7a4fa3, 0x8a8a8a];
 const BOXCAR_COLORS = [0x9a4a38, 0x4f6e48, 0x44607e];
@@ -82,6 +86,11 @@ const AREA_STYLE: Record<string, { tex: string; color: number; tile: number }> =
   ocean: { tex: 'water', color: 0x2a86b0, tile: 1 },
   plaza: { tex: 'concrete', color: 0xd9d6cf, tile: 3 },
   towel: { tex: 'paint', color: 0xffffff, tile: 1 },
+  // floors inside the explorable buildings
+  floor_wood: { tex: 'wood', color: 0xb58d62, tile: 1.6 },
+  floor_tile: { tex: 'concrete', color: 0xe6e1d6, tile: 0.9 },
+  floor_carpet: { tex: 'paint', color: 0x7d8a99, tile: 1 },
+  floor_concrete: { tex: 'concrete', color: 0xa9a7a2, tile: 3 },
 };
 
 /** Deterministic pseudo-random in [0,1) from an integer (same world every load). */
@@ -90,6 +99,8 @@ function hash(n: number): number {
   t = Math.imul(t ^ (t >>> 13), 1274126177);
   return ((t ^ (t >>> 16)) >>> 0) / 4294967296;
 }
+
+const _gp = new THREE.Vector3();
 
 function shade(hex: number, k: number): number {
   return new THREE.Color(hex).multiplyScalar(k).getHex();
@@ -131,9 +142,17 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
 
   // ---- batches: one merged mesh per material ----
   const boxes: Record<string, BoxBatch> = {};
-  const box = (key: string): BoxBatch => (boxes[key] ??= new BoxBatch());
+  /**
+   * Inside the explorable buildings (furniture, floors, inside walls, lights) things are batched
+   * per chunk of the map and only drawn near the camera. While `inChunk` is set, box() and geo()
+   * add to that chunk's batches.
+   */
+  const CHUNK = 48;
+  let inChunk: string | null = null;
+  const chunkOf = (x: number, z: number): string => `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
+  const box = (key: string): BoxBatch => (boxes[inChunk ? `${key}@${inChunk}` : key] ??= new BoxBatch());
   const geos: Record<string, GeoBatch> = {};
-  const geo = (key: string): GeoBatch => (geos[key] ??= new GeoBatch());
+  const geo = (key: string): GeoBatch => (geos[inChunk ? `${key}@${inChunk}` : key] ??= new GeoBatch());
   /** Placed CC0 models (cars, dumpsters...), baked into a few merged meshes. */
   const models = new StaticModelBatch();
   /** Every sign and graffiti tag shares one texture atlas. */
@@ -223,7 +242,50 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     if (s.prop !== undefined) continue; // props are painted below
     const spec = { x: s.x, y: s.y, z: s.z, sx: s.sx, sy: s.sy, sz: s.sz, q: solidQuat(s) };
     const onGround = !s.rx && s.y - s.sy / 2 <= 0.02;
+    inChunk = s.meta?.int ? chunkOf(s.x, s.z) : null;
     switch (s.kind) {
+      case 'attic':
+        break; // collision only
+      case 'furn':
+        furniture(s, solidIndex);
+        break;
+      case 'floorslab':
+        // the ceiling of the floor below (the floor finish lies on top). Indoors only the sky's
+        // ambient light reaches a ceiling, so it is drawn evenly lit rather than in the dark
+        box('lit').add({ ...spec, y: spec.y - 0.001 }, { color: 0x9c978e, skipTop: true });
+        break;
+      case 'floorfinish': {
+        const f = String(s.meta?.f ?? 'wood');
+        const st = AREA_STYLE[`floor_${f}`] ?? AREA_STYLE.floor_wood;
+        const color = f === 'carpet' ? [0x7d8a99, 0x8f7a6b, 0x6f7f6a, 0x8a6f7d][Math.floor(hash(solidIndex) * 4)] : st.color;
+        box(`ground:${st.tex}`).addQuad(s.x - s.sx / 2, s.z - s.sz / 2, s.x + s.sx / 2, s.z + s.sz / 2, s.y + s.sy / 2, { color, tile: st.tile });
+        break;
+      }
+      case 'lamp':
+        box('lit').add(spec, { color: 0xfff1d6 });
+        lights.push({ x: s.x, y: s.y - 0.3, z: s.z, kind: 'interior' });
+        break;
+      case 'roofplane':
+        // glazed tiles (Hong Kong) are a clean color; shingles take the texture
+        if (s.style === 'tile') {
+          box('smooth').add(spec, { color: s.color ?? 0x2f7a5a });
+          break;
+        }
+        box('shingle').add(spec, { color: s.color ?? [0x4a4442, 0x5a3f38, 0x3d4650, 0x4d4a3c][Math.floor(hash(solidIndex) * 4)], tile: 2.5 });
+        break;
+      case 'gable': {
+        const st = STYLES[s.style ?? 'siding'] ?? STYLES.siding;
+        gable(s, st.tex, shade(s.color ?? st.color, 0.95), st.tile);
+        break;
+      }
+      case 'awningroof':
+        box('flat').add({ ...spec, sy: spec.sy * 0.5, y: spec.y + spec.sy * 0.25 }, { color: s.color ?? 0x6b4a3a, skipBottom: true });
+        // a light painted soffit underneath
+        box('lit').add({ ...spec, sy: spec.sy * 0.5, y: spec.y - spec.sy * 0.25 }, { color: 0x8f8a80, skipTop: true });
+        break;
+      case 'antenna':
+        box('flat').add(spec, { color: s.color ?? 0x9aa1a8 });
+        break;
       case 'building': {
         const st = STYLES[s.style ?? 'brick'] ?? STYLES.brick;
         const color = s.color ?? st.color;
@@ -239,12 +301,20 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       case 'wall': {
         const st = STYLES[s.style ?? 'brick'] ?? STYLES.brick;
         box(st.tex).add(spec, { color: s.color ?? st.color, tile: st.tile, skipBottom: onGround });
+        // an outside wall of an explorable building: plaster on the inside face
+        if (typeof s.meta?.liner === 'number' && typeof s.meta?.side === 'string') liner(s, s.meta.liner, s.meta.side);
         break;
       }
       case 'roof': {
         // flat roofs: gravel on concrete (packed earth on BABYLON's mud-brick houses)
         const mud = s.style === 'mudbrick' || s.style === 'sandstone';
-        box('concrete').add(spec, { color: mud ? 0xa98457 : 0x77777a, tile: 4, skipTop: true });
+        box('concrete').add(spec, { color: mud ? 0xa98457 : 0x77777a, tile: 4, skipTop: true, skipBottom: !!s.meta?.arch });
+        if (s.meta?.arch) {
+          // an explorable building's top floor ceiling (evenly lit, like the floors below)
+          inChunk = chunkOf(s.x, s.z);
+          box('lit').add({ ...spec, y: spec.y - spec.sy / 2 + 0.01, sy: 0.02 }, { color: 0x9c978e, skipTop: true });
+          inChunk = null;
+        }
         box('ground:gravel').addQuad(s.x - s.sx / 2, s.z - s.sz / 2, s.x + s.sx / 2, s.z + s.sz / 2, s.y + s.sy / 2, { color: mud ? 0xc29a68 : 0x6a6a6e, tile: 3 });
         break;
       }
@@ -272,7 +342,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       case 'plinth':
       case 'bleacher':
         box('concrete').add(spec, {
-          color: s.kind === 'bleacher' ? 0xaab0b6 : s.kind === 'planter' || s.kind === 'lowwall' ? 0xb7b2a6 : 0xbdbdb8,
+          color: s.color ?? (s.kind === 'bleacher' ? 0xaab0b6 : s.kind === 'planter' || s.kind === 'lowwall' ? 0xb7b2a6 : 0xbdbdb8),
           tile: 3, skipBottom: onGround,
         });
         if (s.kind === 'planter') box('ground:grass').addQuad(s.x - s.sx / 2 + 0.15, s.z - s.sz / 2 + 0.15, s.x + s.sx / 2 - 0.15, s.z + s.sz / 2 - 0.15, s.y + s.sy / 2 + 0.01, { tile: 3 });
@@ -288,9 +358,18 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       case 'fireescape':
         box('flat').add(spec, { color: 0x353a41 });
         break;
-      case 'rail':
-        box('bars').add(spec, { tile: 0.5, color: 0xffffff });
+      case 'rail': {
+        // balusters, and a handrail along the top (it follows a stair's slope)
+        const inside = !!s.meta?.int || !!s.group;
+        box('bars').add(spec, { tile: 0.5, color: inside ? 0x4a4f56 : 0x2e3238 });
+        const q = new THREE.Quaternion(spec.q.x, spec.q.y, spec.q.z, spec.q.w);
+        _gp.set(0, s.sy / 2 - 0.025, 0).applyQuaternion(q);
+        box(inside ? 'wood' : 'flat').add(
+          { ...spec, x: s.x + _gp.x, y: s.y + _gp.y, z: s.z + _gp.z, sx: s.sx + 0.05, sy: 0.05, sz: s.sz + 0.02 },
+          { color: inside ? 0x6f4f33 : 0x2e3238, tile: 1.3 },
+        );
         break;
+      }
       case 'fence_chain':
         box('chain').add(spec, { tile: 0.35, color: 0xffffff });
         fencePosts(s);
@@ -337,6 +416,11 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         box('flat').add(spec, { color: s.color ?? 0x808080, skipBottom: onGround });
     }
   }
+  inChunk = null;
+
+  // window frames and sills, door casings (the doors and the glass themselves move: see BuildingVisual)
+  for (const w of map.windows ?? []) windowFrame(w);
+  for (const d of map.doors ?? []) doorCasing(d);
 
   // storefront awnings on the enterable shops
   awning('cornerstore', 0x1d6b3a, 's');
@@ -347,7 +431,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   }
 
   // ceiling lights in the buildings you can walk into (every shell has a roof)
-  for (const r of map.solids) if (r.kind === 'roof' && r.group) ceilingLights(r.group);
+  // (the explorable buildings hang their own lights)
+  for (const r of map.solids) if (r.kind === 'roof' && r.group && !r.meta?.arch) ceilingLights(r.group);
 
   // ================================================================== perimeter facades + skyline
   perimeterFacades();
@@ -401,7 +486,11 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   for (const m of Object.values(materials)) disposables.push(m);
 
   const noShadowCast = new Set(['asphalt', 'paint', 'lit', 'chain', 'bars', 'glass', 'glassDark']);
-  const addMesh = (g: THREE.BufferGeometry, key: string): void => {
+  /** Interior chunks: drawn only within INTERIOR_RANGE of the camera. */
+  const chunks = new Map<string, { group: THREE.Group; x: number; z: number }>();
+  const addMesh = (g: THREE.BufferGeometry, fullKey: string): void => {
+    const at = fullKey.indexOf('@');
+    const key = at < 0 ? fullKey : fullKey.slice(0, at);
     const mat = materials[key] ?? materials.flat;
     const mesh = new THREE.Mesh(g, mat);
     const groundish = key.startsWith('ground:') || key === 'asphalt' || key === 'paint';
@@ -409,8 +498,21 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     mesh.receiveShadow = key !== 'lit' && key !== 'glass';
     if (key === 'glass') mesh.renderOrder = 5;
     mesh.matrixAutoUpdate = false;
-    group.add(mesh);
     disposables.push(g);
+    if (at < 0) {
+      group.add(mesh);
+      return;
+    }
+    const id = fullKey.slice(at + 1);
+    let c = chunks.get(id);
+    if (!c) {
+      const [cx, cz] = id.split(',').map(Number);
+      c = { group: new THREE.Group(), x: (cx + 0.5) * CHUNK, z: (cz + 0.5) * CHUNK };
+      c.group.name = `interior ${id}`;
+      chunks.set(id, c);
+      group.add(c.group);
+    }
+    c.group.add(mesh);
   };
   for (const [key, batch] of Object.entries(boxes)) if (!batch.empty) addMesh(batch.build(), key);
   for (const [key, batch] of Object.entries(geos)) {
@@ -494,6 +596,11 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     lights,
     update(_dt: number, time: number, camera?: THREE.Vector3) {
       if (camera) sky.position.copy(camera);
+      // building interiors only near the camera
+      if (camera) {
+        const r = INTERIOR_RANGE + CHUNK * 0.71;
+        for (const c of chunks.values()) c.group.visible = Math.hypot(c.x - camera.x, c.z - camera.z) < r;
+      }
       // the clouds drift slowly across the sky
       const clouds = sky.getObjectByName('clouds');
       if (clouds) clouds.rotation.y = time * 0.004;
@@ -507,6 +614,279 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   // =====================================================================================
   // helpers (hoisted function declarations)
   // =====================================================================================
+
+  /** A box in a solid's own frame (x across, y up from its base, z toward its front). */
+  function fpart(s: Solid, key: string, lx: number, y0: number, lz: number, sx: number, sy: number, sz: number, color: number, opts: BoxOptions = {}): void {
+    const ry = s.ry ?? 0, sn = Math.sin(ry), c = Math.cos(ry);
+    const base = s.y - s.sy / 2;
+    box(key).add({ x: s.x + lz * sn + lx * c, y: base + y0 + sy / 2, z: s.z + lz * c - lx * sn, sx, sy, sz, q: yawQ(ry) }, { color, ...opts });
+  }
+
+  /** Furniture and fittings, from simple shapes that read at a glance. */
+  function furniture(s: Solid, seed: number): void {
+    const t = String(s.meta?.t ?? '');
+    const W = s.sx, D = s.sz, H = s.sy;
+    const r = hash(seed);
+    const fabric = [0x5b6b7d, 0x7a5c4a, 0x4f6650, 0x8a7b6a, 0x3f4a5c, 0x7d4b4b, 0x6b6f75][Math.floor(r * 7)];
+    const woodC = [0x8a6240, 0x6f4f33, 0xa47a52, 0x5a4232][Math.floor(r * 4)];
+    const white = 0xf1efe9, dark = 0x2c2f33, metal = 0x8d959d;
+    const legs = (h: number, inset = 0.06, c = dark, k = 'flat') => {
+      for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) fpart(s, k, a * (W / 2 - inset), 0, b * (D / 2 - inset), 0.05, h, 0.05, c);
+    };
+    const table = (top: number, c: number) => {
+      fpart(s, 'wood', 0, H - 0.05, 0, W, 0.05, D, c, { tile: 1.3 });
+      legs(H - 0.05, 0.08, shade(c, 0.7), 'wood');
+      void top;
+    };
+    switch (t) {
+      case 'couch':
+      case 'armchair': {
+        fpart(s, 'flat', 0, 0, 0, W - 0.08, 0.12, D - 0.08, dark);
+        fpart(s, 'smooth', 0, 0.12, 0.06, W - 0.36, 0.3, D - 0.2, fabric);
+        const n = t === 'couch' ? 2 : 1, cw = (W - 0.36) / n;
+        for (let i = 0; i < n; i++) fpart(s, 'smooth', -(W - 0.36) / 2 + cw * (i + 0.5), 0.42, 0.08, cw - 0.03, 0.1, D - 0.3, shade(fabric, 1.08));
+        fpart(s, 'smooth', 0, 0.12, -D / 2 + 0.12, W, H - 0.12, 0.24, shade(fabric, 0.92));
+        for (const sd of [-1, 1]) fpart(s, 'smooth', sd * (W / 2 - 0.09), 0.12, 0, 0.18, 0.5, D, shade(fabric, 0.95));
+        break;
+      }
+      case 'coffeetable':
+      case 'diningtable':
+        table(H, woodC);
+        break;
+      case 'desk':
+      case 'officedesk':
+        table(H, t === 'officedesk' ? 0xd8d4cc : woodC);
+        fpart(s, 'flat', W / 2 - 0.25, 0.05, 0, 0.4, H - 0.1, D - 0.06, t === 'officedesk' ? 0x9aa0a6 : shade(woodC, 0.85));
+        if (t === 'officedesk') {
+          fpart(s, 'glassDark', -0.1, H, -D / 2 + 0.2, 0.55, 0.34, 0.04, dark);
+          fpart(s, 'flat', -0.1, H, -D / 2 + 0.22, 0.08, 0.06, 0.12, dark);
+        }
+        break;
+      case 'chair':
+        fpart(s, 'wood', 0, 0.43, 0, W, 0.05, D, woodC, { tile: 1.3 });
+        legs(0.43, 0.04, shade(woodC, 0.7), 'wood');
+        fpart(s, 'wood', 0, 0.48, -D / 2 + 0.03, W, 0.45, 0.04, woodC, { tile: 1.3 });
+        break;
+      case 'tvstand':
+        fpart(s, 'wood', 0, 0, 0, W, 0.48, D, woodC, { tile: 1.3 });
+        fpart(s, 'flat', 0, 0.48, -0.04, 0.3, 0.05, 0.2, dark);
+        fpart(s, 'glassDark', 0, 0.53, -0.04, W * 0.82, 0.62, 0.05, 0x15171a);
+        break;
+      case 'rug':
+        box('paint').add({ x: s.x, y: s.y - s.sy / 2 + 0.012, z: s.z, sx: W, sy: 0.006, sz: D, q: yawQ(s.ry ?? 0) }, { color: shade(fabric, 1.15) });
+        break;
+      case 'lamp':
+        fpart(s, 'flat', 0, 0, 0, 0.3, 0.04, 0.3, dark);
+        fpart(s, 'flat', 0, 0.04, 0, 0.04, H - 0.38, 0.04, dark);
+        fpart(s, 'lit', 0, H - 0.36, 0, 0.36, 0.3, 0.36, 0xf7e2b8);
+        break;
+      case 'plant':
+        fpart(s, 'flat', 0, 0, 0, 0.32, 0.34, 0.32, 0xa8613f);
+        fpart(s, 'faceted', 0, 0.34, 0, 0.5, H - 0.34, 0.5, 0x4d7a3c);
+        break;
+      case 'bookcase':
+      case 'shelf':
+      case 'rack':
+        box('shelf').add({ x: s.x, y: s.y, z: s.z, sx: W, sy: H, sz: D, q: yawQ(s.ry ?? 0) }, { color: t === 'rack' ? 0xc8ccd0 : 0xffffff, tile: 1 });
+        break;
+      case 'fridge':
+        fpart(s, 'smooth', 0, 0, 0, W, H, D, white);
+        fpart(s, 'flat', 0, H * 0.66, D / 2, W, 0.012, 0.012, 0xb9b6ae);
+        fpart(s, 'flat', W / 2 - 0.08, H * 0.4, D / 2 + 0.02, 0.03, 0.45, 0.03, metal);
+        break;
+      case 'stove':
+        fpart(s, 'smooth', 0, 0, 0, W, H - 0.02, D, white);
+        fpart(s, 'flat', 0, H - 0.02, 0, W, 0.02, D, dark);
+        fpart(s, 'glassDark', 0, 0.2, D / 2, W * 0.7, 0.32, 0.012, dark);
+        break;
+      case 'counter':
+      case 'kitchensink':
+      case 'register':
+        fpart(s, 'wood', 0, 0, 0, W, H - 0.04, D, woodC, { tile: 1.3 });
+        fpart(s, 'flat', 0, H - 0.04, 0, W + 0.03, 0.04, D + 0.03, t === 'register' ? 0x2f3338 : 0xd9d4ca);
+        if (t === 'register') fpart(s, 'flat', 0, H, 0, 0.38, 0.22, 0.32, dark);
+        break;
+      case 'bed':
+      case 'bedsingle':
+        fpart(s, 'wood', 0, 0, 0, W, 0.3, D, woodC, { tile: 1.3 });
+        fpart(s, 'smooth', 0, 0.3, 0.02, W - 0.06, 0.2, D - 0.1, white);
+        fpart(s, 'smooth', 0, 0.48, D * 0.14, W - 0.02, 0.07, D * 0.68, fabric);
+        fpart(s, 'smooth', 0, 0.5, -D / 2 + 0.28, W * 0.78, 0.12, 0.34, 0xfaf8f2);
+        fpart(s, 'wood', 0, 0, -D / 2 + 0.03, W, 0.95, 0.06, shade(woodC, 0.85), { tile: 1.3 });
+        break;
+      case 'wardrobe':
+      case 'dresser':
+      case 'nightstand':
+        fpart(s, 'wood', 0, 0, 0, W, H, D, woodC, { tile: 1.3 });
+        if (t === 'wardrobe') fpart(s, 'flat', 0, 0.05, D / 2, 0.012, H - 0.1, 0.012, shade(woodC, 0.6));
+        else for (let y = 0.25; y < H - 0.1; y += 0.28) fpart(s, 'flat', 0, y, D / 2, W - 0.1, 0.012, 0.012, shade(woodC, 0.6));
+        break;
+      case 'cabinet':
+      case 'locker':
+        fpart(s, 'metal', 0, 0, 0, W, H, D, t === 'locker' ? 0x5d7a8c : 0x8a9096, { tile: 1.5 });
+        for (let y = 0.3; y < H - 0.1; y += t === 'locker' ? H : 0.33) fpart(s, 'flat', 0, y, D / 2, W - 0.08, 0.012, 0.012, dark);
+        break;
+      case 'toilet':
+        fpart(s, 'smooth', 0, 0, 0.08, W * 0.8, 0.4, D * 0.66, white);
+        fpart(s, 'smooth', 0, 0.38, -D / 2 + 0.1, W, 0.4, 0.2, white);
+        break;
+      case 'bathsink':
+        fpart(s, 'smooth', 0, 0, -0.05, 0.18, 0.74, 0.18, white);
+        fpart(s, 'smooth', 0, 0.74, 0, W, 0.14, D, white);
+        fpart(s, 'glassDark', 0, 1.15, -D / 2 + 0.01, W * 0.9, 0.6, 0.02, 0x9fb4c0);
+        break;
+      case 'tub':
+        fpart(s, 'smooth', 0, 0, 0, W, H, D, white);
+        fpart(s, 'flat', 0, H, 0, W - 0.14, 0.005, D - 0.14, 0xbfd6df);
+        break;
+      case 'shower':
+        fpart(s, 'smooth', 0, 0, 0, W, 0.08, D, white);
+        box('glass').add({ ...rotated(s, 0, 1.1, D / 2 - 0.02), sx: W, sy: 2.0, sz: 0.02 }, { color: 0xd8eef6 });
+        fpart(s, 'flat', 0, 1.95, -D / 2 + 0.1, 0.18, 0.04, 0.18, metal);
+        break;
+      case 'washer':
+      case 'dryer':
+        fpart(s, 'smooth', 0, 0, 0, W, H, D, white);
+        fpart(s, 'glassDark', 0, 0.22, D / 2, W * 0.6, W * 0.6, 0.015, t === 'washer' ? 0x2a3a48 : 0x222428);
+        fpart(s, 'flat', 0, H - 0.1, D / 2, W, 0.08, 0.012, 0x9aa0a6);
+        break;
+      case 'barberchair':
+        fpart(s, 'metal', 0, 0, 0, 0.36, 0.42, 0.36, metal, { tile: 1 });
+        fpart(s, 'smooth', 0, 0.42, 0.05, W, 0.16, D * 0.75, 0x8c1f24);
+        fpart(s, 'smooth', 0, 0.58, -D / 2 + 0.08, W, 0.62, 0.14, 0x8c1f24);
+        for (const sd of [-1, 1]) fpart(s, 'flat', sd * (W / 2 - 0.04), 0.58, 0.05, 0.08, 0.2, D * 0.6, metal);
+        break;
+      case 'mirror':
+        fpart(s, 'glassDark', 0, 0.9, 0, W, 1.0, Math.max(0.03, D), 0xb7c6cf);
+        break;
+      case 'booth': {
+        const red = [0x8c1f24, 0x1f5a8c, 0x2f6b3a][Math.floor(r * 3)];
+        for (const sd of [-1, 1]) {
+          fpart(s, 'smooth', 0, 0, sd * (D / 2 - 0.22), W, 0.45, 0.44, red);
+          fpart(s, 'smooth', 0, 0, sd * (D / 2 - 0.06), W, 1.05, 0.12, shade(red, 0.85));
+        }
+        fpart(s, 'flat', 0, 0.7, 0, W * 0.92, 0.04, 0.5, 0xe9e4d8);
+        fpart(s, 'flat', 0, 0, 0, 0.1, 0.7, 0.1, metal);
+        break;
+      }
+      case 'cooler':
+        fpart(s, 'metal', 0, 0, 0, W, H, D, 0xd9dde0, { tile: 1.5 });
+        fpart(s, 'lit', 0, 0.15, D / 2 - 0.06, W - 0.12, H - 0.3, 0.02, 0xbfe6ff);
+        for (let y = 0.45; y < H - 0.3; y += 0.4) fpart(s, 'flat', 0, y, D / 2 - 0.03, W - 0.16, 0.18, 0.03, [0xc8323a, 0x2f7ad1, 0xf2b630, 0x37a05a][Math.floor(hash(seed + y * 10) * 4)]);
+        box('glass').add({ ...rotated(s, 0, H / 2, D / 2 + 0.01), sx: W, sy: H, sz: 0.02 }, { color: 0xd8eef6 });
+        break;
+      case 'workbench':
+        table(H, 0x8a6a48);
+        fpart(s, 'wood', 0, H, -D / 2 + 0.02, W, 0.8, 0.03, 0xa88a62, { tile: 1.3 });
+        fpart(s, 'flat', -0.4, H, 0, 0.3, 0.12, 0.2, 0xc4392f);
+        break;
+      case 'pallets':
+        fpart(s, 'wood', 0, 0, 0, W, 0.14, D, 0x9a7b55, { tile: 1 });
+        box('crate').add({ ...rotated(s, 0, 0.14 + (H - 0.14) / 2, 0), sx: W * 0.9, sy: H - 0.14, sz: D * 0.9 }, { tile: 1 });
+        break;
+      case 'boxes':
+        box('crate').add({ ...rotated(s, 0, H * 0.3, 0), sx: W, sy: H * 0.6, sz: D }, { tile: 1 });
+        box('crate').add({ ...rotated(s, 0.1, H * 0.8, -0.05), sx: W * 0.7, sy: H * 0.4, sz: D * 0.7 }, { tile: 1 });
+        break;
+      case 'tires':
+        for (let i = 0; i < 3; i++) fpart(s, 'faceted', 0, i * 0.3, 0, W, 0.26, D, 0x1f2124);
+        break;
+      case 'lantern':
+        // paper lanterns hang overhead
+        fpart(s, 'lit', 0, 2.05, 0, 0.36, 0.42, 0.36, 0xe8332e);
+        fpart(s, 'flat', 0, 2.47, 0, 0.02, 0.5, 0.02, dark);
+        lights.push({ x: s.x, y: s.y - s.sy / 2 + 2.0, z: s.z, kind: 'shop' });
+        break;
+      case 'altar':
+        fpart(s, 'wood', 0, 0, 0, W, H, D, 0x8c1f1f, { tile: 1.3 });
+        fpart(s, 'flat', 0, H, 0, W + 0.04, 0.04, D + 0.04, 0xd4a32a);
+        fpart(s, 'lit', -W * 0.3, H + 0.04, 0, 0.05, 0.25, 0.05, 0xffb35c);
+        fpart(s, 'lit', W * 0.3, H + 0.04, 0, 0.05, 0.25, 0.05, 0xffb35c);
+        break;
+      case 'stall': {
+        const awn = [0xc8323a, 0x2f7ad1, 0xe0a030, 0x37a05a][Math.floor(r * 4)];
+        fpart(s, 'wood', 0, 0, 0, W, H, D, 0x7a5a3a, { tile: 1.3 });
+        for (const sd of [-1, 1]) fpart(s, 'flat', sd * (W / 2 - 0.05), H, -D / 2 + 0.05, 0.06, 1.3, 0.06, dark);
+        fpart(s, 'flat', 0, H + 1.3, -0.05, W + 0.2, 0.06, D + 0.3, awn);
+        for (let i = 0; i < 5; i++) fpart(s, 'smooth', -W / 2 + 0.3 + i * (W - 0.6) / 4, H, 0.1, 0.3, 0.18, 0.3, [0xd95f2b, 0x7fbf3f, 0xf2c94c, 0xc23b3b][(i + seed) % 4]);
+        break;
+      }
+      default:
+        fpart(s, 'flat', 0, 0, 0, W, H, D, 0x8a8a8a);
+    }
+  }
+
+  /** Center (and rotation) of a point in a solid's frame, for box specs. */
+  function rotated(s: Solid, lx: number, ly: number, lz: number): { x: number; y: number; z: number; q: { x: number; y: number; z: number; w: number } } {
+    const ry = s.ry ?? 0, sn = Math.sin(ry), c = Math.cos(ry);
+    return { x: s.x + lz * sn + lx * c, y: s.y - s.sy / 2 + ly, z: s.z + lz * c - lx * sn, q: yawQ(ry) };
+  }
+
+  /** A gable end: a triangle (base along the solid's z, apex at the top) as thick as the wall. */
+  function gable(s: Solid, key: string, color: number, tile: number): void {
+    const q = new THREE.Quaternion(...(Object.values(solidQuat(s)) as [number, number, number, number]));
+    const hx = s.sx / 2, hy = s.sy / 2, hz = s.sz / 2;
+    const P = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(q).add(_gp.set(s.x, s.y, s.z));
+    const pos: number[] = [], nor: number[] = [], uv: number[] = [], col: number[] = [];
+    const c = new THREE.Color(color);
+    const tri = (a: THREE.Vector3, b: THREE.Vector3, d: THREE.Vector3, uvs: number[][]) => {
+      const n = b.clone().sub(a).cross(d.clone().sub(a)).normalize();
+      for (const [i, p] of [a, b, d].entries()) {
+        pos.push(p.x, p.y, p.z);
+        nor.push(n.x, n.y, n.z);
+        uv.push(uvs[i][0], uvs[i][1]);
+        col.push(c.r, c.g, c.b);
+      }
+    };
+    for (const sd of [-1, 1]) {
+      const a = P(sd * hx, -hy, -hz), b = P(sd * hx, -hy, hz), top = P(sd * hx, hy, 0);
+      const uvs = [[0, 0], [s.sz / tile, 0], [s.sz / 2 / tile, s.sy / tile]];
+      if (sd > 0) tri(a, top, b, [uvs[0], uvs[2], uvs[1]]);
+      else tri(a, b, top, uvs);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo(key).addColored(g);
+  }
+
+  /** Plaster on the inside face of an outside wall of an explorable building. */
+  function liner(s: Solid, color: number, side: string): void {
+    const t = 0.012;
+    // the wall faces `side` outward; the liner goes on the opposite face
+    const ox = side === 'e' ? -1 : side === 'w' ? 1 : 0, oz = side === 's' ? -1 : side === 'n' ? 1 : 0;
+    const x = s.x + ox * (s.sx / 2 + t / 2), z = s.z + oz * (s.sz / 2 + t / 2);
+    const prev = inChunk;
+    inChunk = chunkOf(s.x, s.z);
+    box('smooth').add({ x, y: s.y, z, sx: ox ? t : s.sx, sy: s.sy, sz: oz ? t : s.sz }, { color, tile: 3 });
+    inChunk = prev;
+  }
+
+  /** Frame and sill round a window opening. */
+  function windowFrame(w: NonNullable<MapDef['windows']>[number]): void {
+    const q = yawQ(w.a);
+    const ux = Math.sin(w.a), uz = Math.cos(w.a);
+    const nx = Math.cos(w.a) * (w.out ?? 1), nz = -Math.sin(w.a) * (w.out ?? 1);
+    const frame = w.kind === 'fixed' ? 0x2c2f33 : 0xf1eee6;
+    const T = 0.3; // across the wall
+    const at = (u: number, y: number, n = 0) => ({ x: w.x + ux * u + nx * n, y, z: w.z + uz * u + nz * n });
+    for (const sd of [-1, 1]) box('flat').add({ ...at(sd * (w.w / 2 - 0.03), w.y + w.h / 2), sx: T, sy: w.h, sz: 0.06, q }, { color: frame });
+    box('flat').add({ ...at(0, w.y + w.h - 0.03), sx: T, sy: 0.06, sz: w.w, q }, { color: frame });
+    // the sill sticks out a little on the outside
+    box('flat').add({ ...at(0, w.y - 0.025, 0.06), sx: T + 0.12, sy: 0.05, sz: w.w + 0.14, q }, { color: shade(frame, 0.92) });
+  }
+
+  /** Casing round a door opening (the door itself swings: see BuildingVisual). */
+  function doorCasing(d: NonNullable<MapDef['doors']>[number]): void {
+    const q = yawQ(d.a);
+    const ux = Math.sin(d.a), uz = Math.cos(d.a);
+    const color = d.kind === 'glass' || d.kind === 'metal' ? 0x3a3e44 : 0xeeeae2;
+    const at = (u: number, y: number) => ({ x: d.x + ux * u, y, z: d.z + uz * u });
+    for (const u of [-0.035, d.w + 0.035]) box('flat').add({ ...at(u, d.y + (d.h + 0.04) / 2), sx: 0.32, sy: d.h + 0.04, sz: 0.07, q }, { color });
+    box('flat').add({ ...at(d.w / 2, d.y + d.h + 0.06), sx: 0.32, sy: 0.08, sz: d.w + 0.14, q }, { color });
+  }
 
   function offsetLine(points: Array<{ x: number; z: number }>, off: number): Array<{ x: number; z: number }> {
     return points.map((p, i) => {
@@ -1374,7 +1754,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
             part(p, 'metal', side * (S.w / 2 + 0.03), 1.1, 0, 0.07, 2.7, 2.8, shade(color, 0.78), { tile: 1.4 });
             part(p, 'flat', side * (S.w / 2 + 0.05), 3.84, 0, 0.08, 0.09, 5.8, 0x2a2b2e);
             part(p, 'flat', side * (S.w / 2 + 0.05), 1.02, 0, 0.08, 0.09, 5.8, 0x2a2b2e);
-            for (const z of [-5.5, 5.5]) part(p, 'bars', side * (S.w / 2 + 0.04), 1.0, z, 0.03, 3.0, 0.5, 0xffffff, { tile: 0.42 });
+            for (const z of [-5.5, 5.5]) part(p, 'bars', side * (S.w / 2 + 0.04), 1.0, z, 0.03, 3.0, 0.5, 0x323538, { tile: 0.42 });
           }
           graffiti(p, i, S.w / 2 + 0.07, 2.25, (hash(i) - 0.5) * 6 + (hash(i + 1) > 0.5 ? 3.6 : -3.6), 3.4, 1.5, Math.PI / 2);
           if (hash(i + 9) > 0.4) graffiti(p, i + 31, -(S.w / 2 + 0.07), 2.2, hash(i + 2) > 0.5 ? 3.5 : -3.5, 3.0, 1.4, -Math.PI / 2);

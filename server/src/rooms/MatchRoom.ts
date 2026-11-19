@@ -397,7 +397,8 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
 
   private matchStartFor(idx: number): MatchStartMsg {
     const sim = this.sim!;
-    return { mode: sim.mode, you: idx, roster: sim.roster(), t: sim.time, ...(sim.porch ? { porch: sim.porch.init() } : {}) };
+    const bld = sim.buildings.doorCount + sim.buildings.windowCount > 0 ? { bld: sim.buildings.encode() } : {};
+    return { mode: sim.mode, you: idx, roster: sim.roster(), t: sim.time, ...(sim.porch ? { porch: sim.porch.init() } : {}), ...bld };
   }
 
   /** Public battle royale lobbies launch by themselves once enough players are waiting. */
@@ -421,6 +422,9 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
     if (this.countdownMs <= 0) void this.startMatch();
   }
 
+  /** The sim's roster version last broadcast. */
+  private rosterSent = -1;
+
   private onTick(dtMs: number): void {
     this.updateCountdown(dtMs);
     const sim = this.sim;
@@ -433,6 +437,11 @@ export class MatchRoom extends Room<{ state: LobbyState }> {
       sim.tick();
       const evs = sim.drainEvents();
       for (const e of evs) this.pendingEvents.push(e);
+      // someone dropped into the warm-up (or left): everyone gets the new roster
+      if (sim.rosterVersion !== this.rosterSent) {
+        this.rosterSent = sim.rosterVersion;
+        this.broadcast(MSG.ROSTER, sim.roster());
+      }
       if (sim.tickCount % SNAPSHOT_EVERY === 0) this.sendSnapshots(sim);
     }
     if (n === MAX_CATCHUP_TICKS) this.accumulator = 0; // do not spiral after a hitch

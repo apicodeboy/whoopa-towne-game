@@ -255,6 +255,7 @@ export class OnlineSession implements Session {
   myIdx: number;
   roster: RosterEntry[];
   porch?: PorchInit;
+  bld?: number[];
   handlers: SessionHandlers = {};
   ping = 0;
 
@@ -271,6 +272,7 @@ export class OnlineSession implements Session {
     this.myIdx = start.you;
     this.roster = start.roster;
     this.porch = start.porch;
+    this.bld = start.bld;
     this.offset = start.t - performance.now();
     this.synced = false;
   }

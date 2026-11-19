@@ -115,6 +115,50 @@ export interface SignDef {
   team?: TeamId;
 }
 
+/** Door leaf look and sound. */
+export type DoorKind = 'wood' | 'metal' | 'glass' | 'apartment';
+
+/**
+ * A working door. The leaf hangs from its hinge at (x, y, z) and, closed, runs `w` meters in
+ * direction `a` (radians about Y: (sin a, 0, cos a)). It opens away from whoever opens it.
+ * `inside` says which side of the leaf is the inside (+1: the side its normal (cos a, 0, -sin a)
+ * points to): a lockable door is locked and unlocked from there.
+ */
+export interface DoorDef {
+  x: number;
+  y: number;
+  z: number;
+  a: number;
+  w: number;
+  h: number;
+  kind: DoorKind;
+  lockable?: boolean;
+  /** Starts locked. */
+  locked?: boolean;
+  inside?: 1 | -1;
+}
+
+/** 'slide' = a sash window (the lower half slides up), 'hinge' = a casement, 'fixed' = shop glass. */
+export type WindowKind = 'slide' | 'hinge' | 'fixed';
+
+/**
+ * A working window: an opening `w` wide and `h` tall, its sill at (x, y, z), running in
+ * direction `a` like a door. Closed or intact, its glass blocks movement (not bullets); open or
+ * broken, people can climb through it if the sill is low enough.
+ */
+export interface WindowDef {
+  x: number;
+  y: number;
+  z: number;
+  a: number;
+  w: number;
+  h: number;
+  kind: WindowKind;
+  breakable: boolean;
+  /** Which side of the wall is outside (+1 the normal side (cos a, 0, -sin a), -1 the other). */
+  out?: 1 | -1;
+}
+
 export interface LabelDef {
   text: string;
   x: number;
@@ -140,6 +184,11 @@ export interface MapDef {
   lootSpots?: Array<{ x: number; y: number; z: number }>;
   /** Big area names shown floating over the map while people are in the air (to call landings). */
   districts?: Array<{ name: string; x: number; z: number }>;
+  /** Working doors and windows (the buildings you can walk into). */
+  doors?: DoorDef[];
+  windows?: WindowDef[];
+  /** JUMP OFF THE PORCH: where everyone warms up before the match (shooting around while players join). */
+  warmup?: { x0: number; x1: number; z0: number; z1: number };
   /** What lies beyond each edge, for the backdrop. Unset sides get a hazy skyline. */
   backdrop?: Partial<Record<'n' | 's' | 'e' | 'w', 'city' | 'hills' | 'ocean' | 'desert'>>;
 }

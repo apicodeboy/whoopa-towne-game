@@ -3,7 +3,10 @@ import type { TeamId } from './config/crews';
 import type { ModeId } from './config/game';
 import type { SquadMode } from './config/porch';
 import type { Loadout } from './config/weapons';
-import { PSTATE_KEYS, makeInputCmd, type InputCmd } from './sim/player';
+import { BTN, PSTATE_KEYS, makeInputCmd, type InputCmd } from './sim/player';
+
+/** Every input button bit. */
+const BTN_MASK = Object.values(BTN).reduce((m, b) => m | b, 0);
 
 // ---------------------------------------------------------------------------------------------
 // Match events (sent inside snapshots). Every event is a flat number array: [type, ...payload].
@@ -47,6 +50,13 @@ export const EV = {
   ELIM: 27,
   /** [HEALED, idx, healKind] */
   HEALED: 28,
+  // ---- buildings ----
+  /** [DOOR, doorId, bits (1 open, 2 locked, 4 swings back), by] */
+  DOOR: 30,
+  /** [WINDOW, windowId, state (0 closed, 1 open, 2 broken), by] */
+  WINDOW: 31,
+  /** [DENIED, doorId, by] tried a locked door from outside */
+  DENIED: 32,
 } as const;
 
 /** Kill-feed weapon codes: 0..5 are WEAPON_IDS, then these. */
@@ -294,7 +304,8 @@ export function decodeInputs(raw: unknown, max = 8): InputCmd[] {
     c.mz = int(raw[i + 2], -AXIS_Q, AXIS_Q) / AXIS_Q;
     c.yaw = int(raw[i + 3], -40000, 40000) / ANGLE_Q;
     c.pitch = int(raw[i + 4], -16000, 16000) / ANGLE_Q;
-    c.buttons = int(raw[i + 5], 0, 1023);
+    // only known bits (a clamp would turn an out-of-range value into "every button held")
+    c.buttons = int(raw[i + 5], 0, 0x7fffffff) & BTN_MASK;
     c.slot = int(raw[i + 6], 0, 3);
     c.ox = int(raw[i + 7], -100000, 100000) / POS_Q;
     c.oy = int(raw[i + 8], -100000, 100000) / POS_Q;
@@ -340,6 +351,8 @@ export interface MatchStartMsg {
   t: number;
   /** JUMP OFF THE PORCH: the static layout of this match (bags, transport route) and its current state. */
   porch?: PorchInit;
+  /** Doors and windows as they are right now (see Buildings.encode). */
+  bld?: number[];
 }
 
 /** What a client needs to draw a battle royale match it is joining (or rejoining). */

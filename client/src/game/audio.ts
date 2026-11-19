@@ -232,6 +232,28 @@ export class AudioEngine implements GameAudio {
     const sn = lpNoise(3200);
     this.make(ctx, 'smoke', 1.3, (t) => sn() * Math.min(1, t / 0.05) * expDecay(t, 0.45) * 0.8 + click(t, 0, 800, 0.02));
 
+    // --- buildings: doors creak open and thud shut, locks click, glass slides and shatters ---
+    const dn = lpNoise(700), dk = lpNoise(180);
+    this.make(ctx, 'door_open', 0.55, (t) => {
+      // a dry creak (a wobbling high tone in noise) after the latch
+      const creak = Math.sin(TAU * (520 + 140 * Math.sin(TAU * 9 * t)) * t) * Math.min(1, t / 0.05) * expDecay(t, 0.22) * 0.35;
+      return click(t, 0, 1100, 0.006) * 0.8 + creak + dn() * expDecay(t, 0.18) * 0.4;
+    });
+    this.make(ctx, 'door_close', 0.4, (t) => dk() * expDecay(t, 0.05) * 1.6 + Math.sin(TAU * 82 * t) * expDecay(t, 0.07) + click(t, 0.03, 1300, 0.005) * 0.5);
+    this.make(ctx, 'lock', 0.2, (t) => click(t, 0, 1700, 0.006) + click(t, 0.07, 1200, 0.008) * 0.9);
+    this.make(ctx, 'rattle', 0.42, (t) => click(t, 0, 900, 0.01) + click(t, 0.1, 820, 0.01) + click(t, 0.2, 950, 0.01) * 0.8 + dk() * expDecay(t, 0.15) * 0.4);
+    const sl = lpNoise(2600);
+    this.make(ctx, 'window', 0.35, (t) => sl() * Math.sin(Math.PI * Math.min(1, t / 0.35)) * 0.7 + click(t, 0.3, 1600, 0.005) * 0.4);
+    this.make(ctx, 'glass', 0.9, (t) => {
+      // a sharp crack, then many tiny bright tinkles falling
+      let tink = 0;
+      for (let k = 0; k < 9; k++) {
+        const at = 0.03 + k * 0.07 + (k % 3) * 0.013;
+        if (t > at) tink += Math.sin(TAU * (3100 + k * 410) * (t - at)) * expDecay(t - at, 0.025) * (1 - k / 11);
+      }
+      return rnd() * expDecay(t, 0.02) * 1.4 + Math.sin(TAU * 4200 * t) * expDecay(t, 0.03) * 0.5 + tink * 0.5;
+    });
+
     const tone = (t: number, at: number, f: number, tau: number) => (t < at ? 0 : (Math.sin(TAU * f * (t - at)) + Math.sin(TAU * f * 2 * (t - at)) * 0.25) * expDecay(t - at, tau));
     this.make(ctx, 'zone_good', 0.6, (t) => tone(t, 0, 523, 0.1) + tone(t, 0.11, 659, 0.1) + tone(t, 0.22, 784, 0.18));
     this.make(ctx, 'zone_bad', 0.6, (t) => tone(t, 0, 440, 0.1) + tone(t, 0.13, 349, 0.2));
@@ -497,6 +519,26 @@ export class AudioEngine implements GameAudio {
 
   smoke(pos: THREE.Vector3): void {
     this.play('smoke', 0.6, pos, 1, 12);
+  }
+
+  door(open: boolean, pos: THREE.Vector3): void {
+    this.play(open ? 'door_open' : 'door_close', 0.55, pos, 0.95 + Math.random() * 0.1, 8);
+  }
+
+  lock(pos: THREE.Vector3): void {
+    this.play('lock', 0.5, pos, 1, 6);
+  }
+
+  rattle(pos: THREE.Vector3): void {
+    this.play('rattle', 0.5, pos, 0.95 + Math.random() * 0.1, 6);
+  }
+
+  windowSlide(pos: THREE.Vector3): void {
+    this.play('window', 0.4, pos, 0.9 + Math.random() * 0.2, 7);
+  }
+
+  glass(pos: THREE.Vector3): void {
+    this.play('glass', 0.75, pos, 0.9 + Math.random() * 0.2, 14);
   }
 
   zone(kind: 'captured' | 'lost' | 'neutral'): void {

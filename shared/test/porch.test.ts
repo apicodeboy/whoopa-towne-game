@@ -338,3 +338,50 @@ test('porch: 20 bots play a whole match to a single winner', async () => {
   assert(sim.players.filter((p) => p && p.alive).every((p) => p!.squad === sim.winner), 'winner is the last one standing');
   sim.dispose();
 });
+
+test('warm-up: a minute on foot in BABYLON, bots turning up one by one, then everybody boards', async () => {
+  const R = await initRapier();
+  const sim = new GameSim(R, { mode: 'porch', seed: 5, squads: 'solo' });
+  const me = sim.addPlayer({ id: 'h0', name: 'Me', team: 0, squad: 0 })!;
+  const other = sim.addPlayer({ id: 'h1', name: 'Other', team: 0, squad: 1 })!;
+  for (let i = 0; i < 18; i++) sim.addPlayer({ id: `b${i}`, name: `Bot${i}`, team: 1, squad: 2 + i, isBot: true });
+  sim.start();
+  sim.tick();
+  const w = sim.map.warmup!;
+  assert(sim.arena && sim.phase === PHASE.WARMUP, 'a warm-up arena');
+  assert(me.alive && me.state.air === AIR_GROUND, 'on foot');
+  assert(me.state.x >= w.x0 && me.state.x <= w.x1 && me.state.z >= w.z0 && me.state.z <= w.z1, 'in BABYLON');
+  assert((weaponInSlot(me.state, 0)?.magSize ?? 0) > 0, 'armed');
+  const early = sim.roster().length;
+  assert(early < 20, `not everyone at once (${early} at the start)`);
+  // walking works (not frozen)
+  const x0 = me.state.x, z0 = me.state.z;
+  for (let i = 0; i < 40; i++) step(sim, me, { mz: 1 });
+  assert(Math.hypot(me.state.x - x0, me.state.z - z0) > 1, 'can move');
+  // over the pregame the roster fills up, one by one
+  const counts: number[] = [];
+  const joins = new Set<number>();
+  let version = sim.rosterVersion;
+  for (let t = 0; t < (PORCH.pregame * 1000 * 0.85) / TICK_MS; t++) {
+    sim.tick();
+    if (sim.rosterVersion !== version) {
+      version = sim.rosterVersion;
+      joins.add(sim.roster().length);
+    }
+    if (t % 600 === 0) counts.push(sim.roster().length);
+  }
+  sim.drainEvents();
+  assert(joins.size >= 8, `people arrived over time (${joins.size} separate arrivals, counts ${counts.join(' ')})`);
+  // warm-up deaths: back in a few seconds, nothing counted
+  other.protectedUntil = 0;
+  sim.damage(other, 500, me.idx, 0, false, me.state.x, me.state.z);
+  assert(!other.alive && other.deaths === 0 && me.kills === 0, 'killed, not counted');
+  for (let t = 0; t < (PORCH.warmup.respawn * 1000 + 200) / TICK_MS; t++) sim.tick();
+  assert(other.alive && other.state.air === AIR_GROUND, 'back in the warm-up');
+  // the pregame ends: everybody (all 20) is aboard
+  while (sim.phase === PHASE.WARMUP) sim.tick();
+  sim.tick();
+  assert(sim.roster().length === 20, `everyone in the match (${sim.roster().length})`);
+  for (const p of sim.players) if (p) assert(p.alive && p.state.air === AIR_RIDING, `${p.name} aboard`);
+  sim.dispose();
+});

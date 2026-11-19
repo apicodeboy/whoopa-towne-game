@@ -31,7 +31,14 @@ export const PORCH = {
   /** Seconds of countdown before a public lobby launches (more players can still join). */
   startCountdown: 30,
   /** Seconds on the transport before it takes off (look around, get ready). */
-  pregame: 6,
+  pregame: 60,
+  /** The pregame warm-up (in the map's warm-up area): respawn delay, and when bots turn up. */
+  warmup: {
+    respawn: 3,
+    /** Bots join at random between these fractions of the pregame (so they arrive one by one). */
+    joinFrom: 0.04,
+    joinTo: 0.78,
+  },
 
   // ---- the transport (a party blimp flying a straight line over the town) ------------
   transport: {

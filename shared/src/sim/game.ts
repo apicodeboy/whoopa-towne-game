@@ -17,6 +17,7 @@ import {
   type BotDifficulty, type Phase, type RosterEntry, type StandingRow, type WireSnapshot,
 } from '../protocol';
 import { BotBrain, randomBotLoadout } from './bots';
+import { BuildingRules, Buildings } from './buildings';
 import { HIT_PLAYER, makeShotResult, pelletDamage, shotSeed, spreadDirection, traceShot, type ShotTarget } from './combat';
 import { NavGrid } from './nav';
 import { PhysicsWorld, Q_PROJECTILE, type Rapier } from './physics';
@@ -63,6 +64,11 @@ export interface SimPlayer {
   idleTicks: number;
   lastCmd: InputCmd;
   brain: BotBrain | null;
+  /**
+   * Sim time this player shows up (JUMP OFF THE PORCH bots trickle into the warm-up); until
+   * then they are not in the roster, not in snapshots and not in the world. 0 = here.
+   */
+  joinAt: number;
   // lag compensation history (ring buffer)
   hT: Float64Array;
   hX: Float32Array;
@@ -207,6 +213,15 @@ export function throwLaunch(
 }
 
 /**
+ * Whether players are held still: before the match starts and after it ends, except in a
+ * JUMP OFF THE PORCH warm-up arena, where the pregame is played on foot. The client predicts
+ * with the same rule.
+ */
+export function playersFrozen(phase: Phase, arena: boolean): boolean {
+  return phase === PHASE.ENDED || (phase === PHASE.WARMUP && !arena);
+}
+
+/**
  * The authoritative match simulation: players, weapons, health, respawns, throwables,
  * bots and both game modes. Runs on the server inside a Colyseus room and, unchanged,
  * in the browser for offline practice.
@@ -225,6 +240,9 @@ export class GameSim {
   readonly smokes: SmokeCloud[] = [];
   readonly zones: ZoneState[];
   readonly scores: [number, number] = [0, 0];
+  /** Doors and windows (their state, and the rules for using them). */
+  readonly buildings: Buildings;
+  readonly bld: BuildingRules;
 
   /** Milliseconds since the sim was created. */
   time = 0;
@@ -249,12 +267,18 @@ export class GameSim {
   private dmgByTarget: Float32Array;
   private headByTarget: Uint8Array;
   private roam: SpawnPoint | null;
+  /** JUMP OFF THE PORCH with a warm-up area: the pregame is played (armed, respawning) there. */
+  readonly arena: boolean;
+  /** Goes up whenever who is in the match changes (hosts resend the roster). */
+  rosterVersion = 0;
 
   constructor(R: Rapier, opts: GameSimOptions) {
     this.roam = opts.roam ?? null;
     this.map = opts.map ?? mapForMode(opts.mode);
     this.phys = new PhysicsWorld(R, this.map);
     this.nav = new NavGrid(this.phys, this.map);
+    // after the walk grid: bots plan their routes through doorways, open or not
+    this.buildings = new Buildings(this.map, this.phys);
     this.mode = opts.mode;
     this.rng = new Rng(opts.seed ?? (Date.now() & 0x7fffffff));
     this.botDifficulty = opts.botDifficulty ?? 'normal';
@@ -264,8 +288,10 @@ export class GameSim {
     this.dmgByTarget = new Float32Array(cap);
     this.headByTarget = new Uint8Array(cap);
     this.warmupMs = (opts.warmup ?? (porch ? PORCH.pregame : WARMUP_SECONDS)) * 1000;
+    this.arena = porch && !!this.map.warmup && this.warmupMs > 0;
     this.zones = this.map.zones.map(() => ({ owner: -1, capTeam: -1, progress: 0, contested: false, count: [0, 0] }));
     if (porch) this.porch = new PorchRules(this, sanitizeSquadMode(opts.squads));
+    this.bld = new BuildingRules(this.buildings, this, cap);
   }
 
   /** Queues a match event (sent with the next snapshot). */
@@ -312,6 +338,7 @@ export class GameSim {
       idleTicks: 0,
       lastCmd: makeInputCmd(),
       brain: null,
+      joinAt: 0,
       hT: new Float64Array(HISTORY),
       hX: new Float32Array(HISTORY),
       hY: new Float32Array(HISTORY),
@@ -322,12 +349,25 @@ export class GameSim {
     };
     if (p.isBot) p.brain = new BotBrain(this, p);
     this.players[idx] = p;
+    // warm-up arena: bots added before the start drop in one by one over the pregame
+    if (this.arena && p.isBot && !this.started) {
+      p.joinAt = this.warmupMs * this.rng.range(PORCH.warmup.joinFrom, PORCH.warmup.joinTo);
+      // a few are there from the start
+      if (this.rng.chance(0.15)) p.joinAt = 0;
+    }
+    this.rosterVersion++;
     if (this.started) this.spawn(p);
     return p;
   }
 
+  /** Not here yet (a bot that has not dropped into the warm-up). */
+  pending(p: SimPlayer): boolean {
+    return p.joinAt > this.time;
+  }
+
   removePlayer(idx: number): void {
     this.players[idx] = null;
+    this.rosterVersion++;
   }
 
   /** Hands a disconnected human's slot to a bot so the teams stay even. */
@@ -348,7 +388,7 @@ export class GameSim {
 
   roster(): RosterEntry[] {
     const out: RosterEntry[] = [];
-    for (const p of this.players) if (p) out.push({ idx: p.idx, name: p.name, team: p.team, squad: p.squad, bot: p.isBot, look: encodeAppearance(p.look) });
+    for (const p of this.players) if (p && !this.pending(p)) out.push({ idx: p.idx, name: p.name, team: p.team, squad: p.squad, bot: p.isBot, look: encodeAppearance(p.look) });
     return out;
   }
 
@@ -377,7 +417,7 @@ export class GameSim {
     this.started = true;
     this.phase = PHASE.WARMUP;
     this.phaseEndsAt = this.time + this.warmupMs;
-    for (const p of this.players) if (p) this.spawn(p);
+    for (const p of this.players) if (p && !this.pending(p)) this.spawn(p);
     this.events.push([EV.PHASE, PHASE.WARMUP, -1]);
     if (this.warmupMs <= 0) this.beginPlaying();
   }
@@ -387,6 +427,19 @@ export class GameSim {
     // free roam has no clock (a long way off rather than Infinity, so it still fits the wire)
     this.phaseEndsAt = this.time + (this.roam ? 1e9 : MODES[this.mode].timeLimit * 1000);
     this.porch?.goLive(this.time);
+    if (this.arena) {
+      // the warm-up is over: anyone still on their way turns up, and everybody boards the blimp
+      for (const p of this.players) {
+        if (!p) continue;
+        if (p.joinAt > 0) {
+          p.joinAt = 0;
+          this.rosterVersion++;
+        }
+        p.respawnAt = Infinity;
+        p.kills = p.deaths = 0;
+        this.spawn(p);
+      }
+    }
     this.events.push([EV.PHASE, PHASE.PLAYING, -1]);
   }
 
@@ -440,11 +493,18 @@ export class GameSim {
   tick(): void {
     this.time += TICK_MS;
     this.tickCount++;
-    const frozen = this.phase !== PHASE.PLAYING;
+    const frozen = playersFrozen(this.phase, this.arena);
 
     for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
       if (!p) continue;
+      if (p.joinAt > 0) {
+        if (this.time < p.joinAt) continue;
+        // just dropped in
+        p.joinAt = 0;
+        this.rosterVersion++;
+        if (this.started) this.spawn(p);
+      }
       if (p.brain) {
         const cmd = p.lastCmd;
         cmd.seq = p.lastSeq + 1;
@@ -487,7 +547,9 @@ export class GameSim {
   private applyInput(p: SimPlayer, cmd: InputCmd, frozen: boolean): void {
     p.lastSeq = cmd.seq;
     if (!p.alive) return;
-    this.porch?.onInput(p, cmd);
+    const looted = this.porch?.onInput(p, cmd) ?? false;
+    if (p.brain) this.bld.botAssist(p.idx, cmd);
+    else this.bld.onInput(p.idx, cmd, TICK_DT, looted);
     const act = this.act;
     stepPlayer(p.state, cmd, TICK_DT, this.phys, p.loadout, act, frozen);
     if (act.shot) this.fire(p, cmd, act);
@@ -541,6 +603,8 @@ export class GameSim {
       spreadDirection(rng, s.yaw, s.pitch, act.shotSpread, this.dir);
       traceShot(this.phys, eyeX, eyeY, eyeZ, camX, camY, camZ, this.dir.x, this.dir.y, this.dir.z, w.range, targets, res);
       ev.push(Math.round(res.ex * 100), Math.round(res.ey * 100), Math.round(res.ez * 100), res.kind);
+      // glass in the way breaks (the shot carries on through it)
+      if (this.buildings.windowCount) this.bld.shot(eyeX, eyeY, eyeZ, res.ex, res.ey, res.ez, p.idx);
       if (res.kind === HIT_PLAYER) {
         dmg[res.target] += pelletDamage(w, res.dist, res.head);
         if (res.head) heads[res.target] = 1;
@@ -597,6 +661,7 @@ export class GameSim {
   private explode(pr: Projectile): void {
     const owner = this.players[pr.owner];
     const ox = pr.x, oy = pr.y + 0.25, oz = pr.z;
+    this.bld.blast(ox, oy, oz, pr.owner);
     for (let i = 0; i < this.players.length; i++) {
       const v = this.players[i];
       if (!v || !v.alive || v.state.air === AIR_RIDING) continue;
@@ -618,9 +683,10 @@ export class GameSim {
 
   /** Applies damage, emits hit/kill events, handles scoring. */
   damage(v: SimPlayer, amount: number, attackerIdx: number, weaponCode: number, head: boolean, srcX: number, srcZ: number): void {
-    if (!v.alive || this.phase !== PHASE.PLAYING) return;
+    const warming = this.arena && this.phase === PHASE.WARMUP;
+    if (!v.alive || (this.phase !== PHASE.PLAYING && !warming)) return;
     if (this.time < v.protectedUntil) return;
-    if (this.porch) {
+    if (this.porch && !warming) {
       this.porch.noteDamage(attackerIdx, v.idx, amount);
       amount = this.porch.absorb(v, amount, attackerIdx, weaponCode);
     }
@@ -641,11 +707,17 @@ export class GameSim {
   private kill(v: SimPlayer, attackerIdx: number, weaponCode: number, head: boolean): void {
     v.alive = false;
     v.health = 0;
-    v.deaths++;
-    v.respawnAt = this.porch ? Infinity : this.time + PLAYER.respawnTime * 1000;
     v.state.vx = v.state.vz = 0;
     v.state.healT = 0;
     const a = attackerIdx >= 0 ? this.players[attackerIdx] : null;
+    if (this.arena && this.phase === PHASE.WARMUP) {
+      // warming up: back in a moment, nothing counts
+      v.respawnAt = this.time + PORCH.warmup.respawn * 1000;
+      this.events.push([EV.KILL, a ? a.idx : -1, v.idx, weaponCode, head ? 1 : 0]);
+      return;
+    }
+    v.deaths++;
+    v.respawnAt = this.porch ? Infinity : this.time + PLAYER.respawnTime * 1000;
     if (a && a !== v && !this.allies(a, v)) {
       a.kills++;
       if (this.mode === 'tdm') this.scores[a.team]++;
@@ -656,6 +728,30 @@ export class GameSim {
 
   // ------------------------------------------------------------------ spawning
   spawn(p: SimPlayer): void {
+    if (this.porch && this.arena && this.phase === PHASE.WARMUP) {
+      // the warm-up: on foot, armed, somewhere in the warm-up area
+      if (p.nextLoadout) {
+        p.loadout = p.nextLoadout;
+        p.nextLoadout = null;
+      }
+      const sp = this.warmupSpot();
+      spawnPlayerState(p.state, sp, p.loadout);
+      p.alive = true;
+      p.health = PLAYER.maxHealth;
+      p.armor = 0;
+      p.lastDamageAt = -1e9;
+      p.protectedUntil = this.time + 1500;
+      p.life++;
+      p.lastCmd.yaw = sp.yaw;
+      p.lastCmd.pitch = 0;
+      p.hCount = 0;
+      p.brain?.onSpawn();
+      this.events.push([
+        EV.SPAWN, p.idx, Math.round(sp.x * 100), Math.round(sp.y * 100), Math.round(sp.z * 100), Math.round(sp.yaw * 1000),
+        weaponIndex(p.loadout.primary), weaponIndex(p.loadout.secondary), throwableIndex(p.loadout.throwable),
+      ]);
+      return;
+    }
     if (this.porch) {
       // battle royale: everyone starts on the transport (late joiners too, if it is still flying)
       this.porch.board(p);
@@ -718,7 +814,7 @@ export class GameSim {
   private updatePlayers(): void {
     for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
-      if (!p) continue;
+      if (!p || this.pending(p)) continue;
       if (!p.alive) {
         if (this.started && this.phase !== PHASE.ENDED && this.time >= p.respawnAt) this.spawn(p);
         continue;
@@ -883,6 +979,26 @@ export class GameSim {
     return this.phys.lineOfSight(ax, ay, az, bx, by, bz);
   }
 
+  /** A random open spot in the map's warm-up area, not right on top of anyone. */
+  private warmupSpot(): SpawnPoint {
+    const w = this.map.warmup!;
+    const nav = this.nav;
+    let best: SpawnPoint | null = null, bestD = -1;
+    for (let tries = 0; tries < 60; tries++) {
+      const x = this.rng.range(w.x0, w.x1), z = this.rng.range(w.z0, w.z1);
+      if (!nav.isWalkable(x, z)) continue;
+      let near = Infinity;
+      for (const o of this.players) if (o && o.alive) near = Math.min(near, Math.hypot(o.state.x - x, o.state.z - z));
+      const sp = { x, y: 0, z, yaw: this.rng.range(-Math.PI, Math.PI) };
+      if (near > 8) return sp;
+      if (near > bestD) {
+        bestD = near;
+        best = sp;
+      }
+    }
+    return best ?? { x: (w.x0 + w.x1) / 2, y: 0, z: (w.z0 + w.z1) / 2, yaw: 0 };
+  }
+
   // ------------------------------------------------------------------ snapshots & events
   /** Events since the last drain. The host sends them with the next snapshot. */
   drainEvents(): number[][] {
@@ -896,7 +1012,7 @@ export class GameSim {
     const p: number[] = [];
     for (let i = 0; i < this.players.length; i++) {
       const pl = this.players[i];
-      if (!pl) continue;
+      if (!pl || this.pending(pl)) continue;
       const s = pl.state;
       let flags = 0;
       if (pl.alive) flags |= PF.ALIVE;

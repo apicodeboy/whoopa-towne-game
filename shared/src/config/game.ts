@@ -74,6 +74,23 @@ export const LEDGE = {
   time: 0.55,
 } as const;
 
+/** Climbing through a window (jump at it while moving toward it). */
+export const VAULT = {
+  /** How far in front of your body the sill can be. */
+  reach: 0.55,
+  /** The deepest wall you can climb through. */
+  depth: 0.9,
+  /** Sill height above your feet. */
+  minSill: 0.2,
+  maxSill: 1.25,
+  /** The tallest opening that still counts as a window (taller ones you just jump through). */
+  maxOpening: 2.2,
+  /** The furthest the floor on the other side can be below the sill and still be landed on. */
+  maxDrop: 6,
+  /** Seconds it takes. */
+  time: 0.5,
+} as const;
+
 // ---- Hitboxes (relative to feet) --------------------------------------------
 export const HITBOX = {
   /** Body capsule: sphere centers at bodyBottom / bodyTop above the feet. */

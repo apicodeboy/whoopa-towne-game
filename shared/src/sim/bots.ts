@@ -663,6 +663,25 @@ export class BotBrain {
     const rng = this.rng;
     let gx = 0, gz = 0;
     this.lootGoal = false;
+    const w = sim.map.warmup;
+    if (sim.arena && sim.phase === PHASE.WARMUP && w) {
+      // the warm-up: roam the warm-up area looking for a fight (nothing to loot yet)
+      gx = (w.x0 + w.x1) / 2;
+      gz = (w.z0 + w.z1) / 2;
+      for (let k = 0; k < 12; k++) {
+        const x = rng.range(w.x0, w.x1), z = rng.range(w.z0, w.z1);
+        if (sim.nav.isWalkable(x, z)) {
+          gx = x;
+          gz = z;
+          break;
+        }
+      }
+      this.goalUntil = now + rng.range(6000, 11000);
+      this.hunting = false;
+      this.setGoal(gx, gz, 2500);
+      if (!this.hasGoal) this.idleUntil = now + 400;
+      return;
+    }
     if (sim.porch) {
       const porch = sim.porch;
       const n = this.zoneUrgent() ? porch.next : porch.zone;

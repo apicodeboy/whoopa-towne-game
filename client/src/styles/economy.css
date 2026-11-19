@@ -840,6 +840,25 @@
 .aj-prompt b {
   color: #ffd977;
 }
+/* doors and windows: the same pill, a little lower and quieter */
+.use-prompt {
+  bottom: 18%;
+  padding: 8px 16px;
+  font-size: 15px;
+  pointer-events: auto;
+}
+.use-prompt .use-hold {
+  margin-left: 6px;
+  color: #b9b4aa;
+  font-size: 13px;
+  font-weight: 500;
+}
+.use-prompt .use-locked {
+  color: #ff8a7a;
+}
+body.is-touch .use-prompt {
+  bottom: 30%;
+}
 .aj-key {
   display: inline-grid;
   place-items: center;

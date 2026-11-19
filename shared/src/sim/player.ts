@@ -1,4 +1,4 @@
-import { LEDGE, PLAYER, ROLL, THROW } from '../config/game';
+import { LEDGE, PLAYER, ROLL, THROW, VAULT } from '../config/game';
 import { HEAL_KINDS, PORCH } from '../config/porch';
 import {
   SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, SLOT_THROWABLE, THROWABLE_IDS, WEAPONS, WEAPON_IDS,
@@ -6,7 +6,7 @@ import {
 } from '../config/weapons';
 import type { SpawnPoint } from '../map/types';
 import { clamp } from '../math';
-import { Q_CAMERA, Q_PROJECTILE, type MoveResult, type PhysicsWorld } from './physics';
+import { Q_PROJECTILE, Q_SOLID, type MoveResult, type PhysicsWorld } from './physics';
 
 /** Input button bitmask. */
 export const BTN = {
@@ -155,6 +155,8 @@ export interface PlayerState {
   climbBX: number;
   climbBY: number;
   climbBZ: number;
+  /** Climbing through a window (a vault): the height the feet go over (0 for a ledge pull-up). */
+  climbH: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -166,7 +168,7 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'wA', 'wB', 'wH', 'thr', 'magB', 'pool', 'ammoL', 'ammoM', 'ammoS', 'ammoH',
   'bandages', 'medkits', 'drinks', 'healT', 'healKind',
   'air', 'windX', 'windZ', 'riot', 'hp', 'armor', 'airT', 'airJumps',
-  'rollT', 'rollX', 'rollZ', 'climbT', 'climbAX', 'climbAY', 'climbAZ', 'climbBX', 'climbBY', 'climbBZ',
+  'rollT', 'rollX', 'rollZ', 'climbT', 'climbAX', 'climbAY', 'climbAZ', 'climbBX', 'climbBY', 'climbBZ', 'climbH',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -476,19 +478,19 @@ const mv: MoveResult = { x: 0, y: 0, z: 0, grounded: false };
  */
 function tryGrabLedge(s: PlayerState, phys: PhysicsWorld, sinY: number, cosY: number, act: StepActions): void {
   const fx = -sinY, fz = -cosY;
-  const wall = phys.raycast(s.x, s.y + 1.15, s.z, fx, 0, fz, PLAYER.radius + LEDGE.reach, Q_CAMERA);
+  const wall = phys.raycast(s.x, s.y + 1.15, s.z, fx, 0, fz, PLAYER.radius + LEDGE.reach, Q_SOLID);
   if (wall < 0) return;
   // straight down just past the face of the wall, from above the highest grabbable edge
   const px = s.x + fx * (wall + 0.25), pz = s.z + fz * (wall + 0.25);
   const from = s.y + LEDGE.maxUp + 0.35;
-  const down = phys.raycast(px, from, pz, 0, -1, 0, LEDGE.maxUp + 0.35 - LEDGE.minUp, Q_CAMERA);
+  const down = phys.raycast(px, from, pz, 0, -1, 0, LEDGE.maxUp + 0.35 - LEDGE.minUp, Q_SOLID);
   if (down <= 0.02) return; // no edge in reach (or the wall goes higher than that)
   const top = from - down;
   // stand a body-width past the edge, with room to stand and nothing over our head on the way up
   const tx = s.x + fx * (wall + PLAYER.radius + 0.12), tz = s.z + fz * (wall + PLAYER.radius + 0.12);
   // (cheap rays first; the body-sized test only when everything else says yes)
-  if (phys.raycast(s.x, s.y + 1.5, s.z, 0, 1, 0, Math.max(0.1, top + PLAYER.height - (s.y + 1.5)), Q_CAMERA) >= 0) return;
-  if (phys.raycast(tx, top + 0.05, tz, 0, 1, 0, PLAYER.height, Q_CAMERA) >= 0) return;
+  if (phys.raycast(s.x, s.y + 1.5, s.z, 0, 1, 0, Math.max(0.1, top + PLAYER.height - (s.y + 1.5)), Q_SOLID) >= 0) return;
+  if (phys.raycast(tx, top + 0.05, tz, 0, 1, 0, PLAYER.height, Q_SOLID) >= 0) return;
   if (!phys.canStandAt(tx, top + 0.03, tz)) return;
   s.climbT = LEDGE.time;
   s.climbAX = s.x; s.climbAY = s.y; s.climbAZ = s.z;
@@ -497,6 +499,50 @@ function tryGrabLedge(s: PlayerState, phys: PhysicsWorld, sinY: number, cosY: nu
   s.reloadT = 0;
   s.healT = 0;
   act.climbed = true;
+}
+
+/**
+ * Climbing through an opening in front: something at knee height (a window sill), open space
+ * above it at chest height, a lintel overhead (so it is a window, not a low wall to jump), and
+ * room to stand on the far side. Starts the vault when all of that holds.
+ */
+function tryVault(s: PlayerState, phys: PhysicsWorld, sinY: number, cosY: number, act: StepActions): boolean {
+  const fx = -sinY, fz = -cosY;
+  // (low, so it also finds the sill when you are already perched on its edge)
+  const knee = phys.raycast(s.x, s.y + 0.15, s.z, fx, 0, fz, PLAYER.radius + VAULT.reach, Q_PROJECTILE);
+  if (knee < 0) return false;
+  if (phys.raycast(s.x, s.y + 1.25, s.z, fx, 0, fz, knee + VAULT.depth + 0.6, Q_PROJECTILE) >= 0) return false;
+  // the sill top, just past the face of the wall
+  const px = s.x + fx * (knee + 0.06), pz = s.z + fz * (knee + 0.06);
+  const d = phys.raycast(px, s.y + 1.2, pz, 0, -1, 0, 1.2, Q_PROJECTILE);
+  if (d < 0) return false;
+  const sill = s.y + 1.2 - d;
+  if (sill < s.y + VAULT.minSill || sill > s.y + VAULT.maxSill) return false;
+  // a lintel overhead: an opening you could not simply jump through
+  if (phys.raycast(px, sill + 0.05, pz, 0, 1, 0, VAULT.maxOpening, Q_PROJECTILE) < 0) return false;
+  // the far face of the wall: back toward us from beyond it, at knee height
+  const reachBack = knee + VAULT.depth;
+  const bx0 = s.x + fx * reachBack, bz0 = s.z + fz * reachBack;
+  const back = phys.raycast(bx0, sill - 0.15, bz0, -fx, 0, -fz, VAULT.depth, Q_PROJECTILE);
+  if (back <= 0.05) return false; // solid all the way (or something right behind it)
+  const far = reachBack - back;
+  const tx = s.x + fx * (far + PLAYER.radius + 0.15), tz = s.z + fz * (far + PLAYER.radius + 0.15);
+  // the floor over there (a balcony, a fire escape, the street, or a drop)
+  const down = phys.raycast(tx, sill + 0.3, tz, 0, -1, 0, VAULT.maxDrop + 0.3, Q_PROJECTILE);
+  let ty = down >= 0 ? sill + 0.3 - down : sill + 0.05;
+  if (ty > sill + 0.1) return false;
+  // a long way down: come out at sill height and fall from there
+  if (ty < sill - 1.2) ty = sill + 0.05;
+  if (!phys.canStandAt(tx, ty + 0.02, tz)) return false;
+  s.climbT = VAULT.time;
+  s.climbH = sill + 0.08;
+  s.climbAX = s.x; s.climbAY = s.y; s.climbAZ = s.z;
+  s.climbBX = tx; s.climbBY = ty + 0.02; s.climbBZ = tz;
+  s.vx = s.vy = s.vz = 0;
+  s.reloadT = 0;
+  s.healT = 0;
+  act.climbed = true;
+  return true;
 }
 
 /**
@@ -536,12 +582,24 @@ export function stepPlayer(
   // ---- pulling up onto a ledge: up the wall first, then over the edge ----------
   if (s.climbT > 0) {
     s.climbT = Math.max(0, s.climbT - dt);
-    const t = 1 - s.climbT / LEDGE.time;
     const ease = (k: number) => k * k * (3 - 2 * k);
-    const up = ease(Math.min(1, t / 0.62)), over = ease(Math.max(0, (t - 0.4) / 0.6));
-    s.x = s.climbAX + (s.climbBX - s.climbAX) * over;
-    s.z = s.climbAZ + (s.climbBZ - s.climbAZ) * over;
-    s.y = s.climbAY + (s.climbBY - s.climbAY) * up;
+    if (s.climbH > 0) {
+      // through a window: up onto the sill, across, down the other side
+      const t = 1 - s.climbT / VAULT.time;
+      const over = ease(Math.min(1, Math.max(0, (t - 0.12) / 0.76)));
+      s.x = s.climbAX + (s.climbBX - s.climbAX) * over;
+      s.z = s.climbAZ + (s.climbBZ - s.climbAZ) * over;
+      s.y = t < 0.4 ? s.climbAY + (s.climbH - s.climbAY) * ease(t / 0.4)
+        : t < 0.62 ? s.climbH
+        : s.climbH + (s.climbBY - s.climbH) * ease((t - 0.62) / 0.38);
+      if (s.climbT <= 0) s.climbH = 0;
+    } else {
+      const t = 1 - s.climbT / LEDGE.time;
+      const up = ease(Math.min(1, t / 0.62)), over = ease(Math.max(0, (t - 0.4) / 0.6));
+      s.x = s.climbAX + (s.climbBX - s.climbAX) * over;
+      s.z = s.climbAZ + (s.climbBZ - s.climbAZ) * over;
+      s.y = s.climbAY + (s.climbBY - s.climbAY) * up;
+    }
     s.vx = s.vy = s.vz = 0;
     s.crouching = 0;
     s.sprinting = 0;
@@ -621,6 +679,11 @@ export function stepPlayer(
 
   // ---- jump + gravity -------------------------------------------------------
   const jumpBtn = (btn & BTN.JUMP) !== 0;
+  // jumping at an open (or broken) window climbs through it
+  if (jumpBtn && !s.jumpHeld && s.grounded && mz > 0.3 && !rolling && s.air === AIR_GROUND && tryVault(s, phys, sinY, cosY, act)) {
+    s.jumpHeld = 1;
+    return;
+  }
   if (s.grounded && s.vy < 0) s.vy = 0;
   if (jumpBtn && !s.jumpHeld && s.grounded) {
     s.vy = PLAYER.jumpVelocity;

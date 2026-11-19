@@ -1,9 +1,11 @@
 import type { MapDef } from '@shared/map/types';
 import { getWhoopaTowne } from '@shared/map/whoopaTowne';
+import { Buildings } from '@shared/sim/buildings';
 import { PhysicsWorld, type Rapier } from '@shared/sim/physics';
 import type { SettingsStore } from '../core/settings';
 import type { Assets } from './assets';
 import { GameRenderer } from './renderer';
+import { BuildingVisual } from './world/buildingVisual';
 import { buildWorld, type WorldVisual } from './world/worldBuilder';
 
 /**
@@ -16,6 +18,9 @@ export class Stage {
   phys: PhysicsWorld;
   readonly gfx: GameRenderer;
   world: WorldVisual;
+  /** Doors and windows (this client's copy, kept current by the match's events) and their visuals. */
+  buildings: Buildings;
+  bldVisual: BuildingVisual;
   readonly R: Rapier;
 
   constructor(container: HTMLElement, R: Rapier, settings: SettingsStore) {
@@ -26,6 +31,9 @@ export class Stage {
     this.world = buildWorld(this.map);
     this.gfx.scene.add(this.world.group);
     this.gfx.setLights(this.world.lights);
+    this.buildings = new Buildings(this.map, this.phys);
+    this.bldVisual = new BuildingVisual(this.buildings);
+    this.gfx.scene.add(this.bldVisual.group);
   }
 
   /**
@@ -37,6 +45,10 @@ export class Stage {
     this.map = map;
     this.phys.dispose();
     this.phys = new PhysicsWorld(this.R, map);
+    this.bldVisual.dispose();
+    this.buildings = new Buildings(map, this.phys);
+    this.bldVisual = new BuildingVisual(this.buildings);
+    this.gfx.scene.add(this.bldVisual.group);
     this.setWorld(buildWorld(map, assets));
   }
 
@@ -49,6 +61,7 @@ export class Stage {
   }
 
   dispose(): void {
+    this.bldVisual.dispose();
     this.world.dispose();
     this.gfx.dispose();
     this.phys.dispose();

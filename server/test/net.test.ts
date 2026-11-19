@@ -4,10 +4,10 @@ import { pack } from 'msgpackr';
 import { LobbyConnection, NetClient, OnlineSession, describeJoinError } from '../../client/src/net/online.ts';
 import { Predictor } from '../../client/src/game/predictor.ts';
 import {
-  BTN, DEFAULT_LOADOUT, EV, INTERP_DELAY_MS, INVITE_CODE_ALPHABET, PF, PHASE, PhysicsWorld, PLAYER, TICK_MS,
+  BTN, Buildings, DEFAULT_LOADOUT, EV, WIN_BROKEN, INTERP_DELAY_MS, INVITE_CODE_ALPHABET, PF, PHASE, PhysicsWorld, PLAYER, TICK_MS,
   LOOK_FIELD_KEYS, decodeAppearance, encodeAppearance, getWhoopaTowne, makeInputCmd, makePlayerState, playerStateFromArray,
   quantizeInput, sameAppearance, sanitizeAppearance, yawToward,
-  type GameSim, type InputCmd, type Loadout, type MatchEndMsg, type Snapshot,
+  type GameSim, type InputCmd, type Loadout, type MatchEndMsg, type MatchStartMsg, type Snapshot,
 } from '../../shared/src/index.ts';
 import { approx, assert, test } from '../../shared/test/harness.ts';
 import { startServer } from '../src/index.ts';
@@ -97,7 +97,7 @@ class Bot {
   }
 }
 
-async function privateMatch(n: number, opts: { fillBots?: boolean; mode?: 'tdm' | 'turf' } = {}): Promise<Bot[]> {
+async function privateMatch(n: number, opts: { fillBots?: boolean; mode?: 'tdm' | 'turf' | 'porch' } = {}): Promise<Bot[]> {
   const bots: Bot[] = [];
   const net = new NetClient(URL);
   const host = new Bot().attach(await net.createPrivate(opts.mode ?? 'tdm', 'Host', DEFAULT_LOADOUT));
@@ -508,6 +508,52 @@ test("AJ's cosmetics in matches: what you own is worn and seen by everyone; nobo
     assert(g.topColor !== 'flames' && g.shoeColor !== 'gold24k' && g.weaponSkin === 'none', "the guest's forged exclusives are stripped");
     assert(g.hair === 'braids' && g.top === 'hoodie', "the rest of the guest's look is kept");
   }
+  await leaveAll();
+});
+
+test('doors and windows over the network: one player opens a door, everyone sees it; a late joiner gets the state', async () => {
+  const R = await RAPIER.init().then(() => RAPIER);
+  const [a, b] = await privateMatch(2, { mode: 'porch' });
+  const sim = simOf(a.lobby.code);
+  assert(sim.buildings.doorCount > 0, 'the map has doors');
+  // B keeps a client-side copy, fed only by the events it receives (like the game does)
+  const bPhys = new PhysicsWorld(R, sim.map);
+  const bBld = new Buildings(sim.map, bPhys);
+  bBld.decode(b.session!.bld);
+  // a front door on THE HILL; put A on the step outside it, facing it
+  const d = sim.buildings.doors.findIndex((x) => x.y === 0 && x.kind === 'wood' && x.lockable && !x.locked);
+  const door = sim.buildings.doors[d];
+  assert(sim.buildings.open[d] === 0 && bBld.open[d] === 0, 'starts closed for everyone');
+  const nx = Math.cos(door.a) * -(door.inside ?? 1), nz = -Math.sin(door.a) * -(door.inside ?? 1);
+  const cx = door.x + Math.sin(door.a) * door.w / 2, cz = door.z + Math.cos(door.a) * door.w / 2;
+  const pa = sim.players[a.session!.myIdx]!;
+  const yaw = Math.atan2(nx, nz); // facing back toward the door
+  Object.assign(pa.state, { x: cx + nx * 1.1, y: 0.32, z: cz + nz * 1.1, vx: 0, vy: 0, vz: 0, yaw });
+  let k = 0;
+  a.drive((cmd) => {
+    cmd.yaw = yaw;
+    cmd.buttons = k++ < 4 ? BTN.USE : 0;
+  });
+  await until(() => b.events.some((e) => e[0] === EV.DOOR && e[1] === d && (e[2] & 1) === 1), 'B hears the door open');
+  a.stop();
+  for (const e of b.events) bBld.applyEvent(e);
+  const opened = (bl: Buildings) => bl.open[d] as number;
+  assert(opened(sim.buildings) === 1 && opened(bBld) === 1, 'open on the server and on B');
+  assert(bPhys.canStandAt(cx, 0.3, cz), "B's collision has the doorway clear");
+  // a window breaks: B gets that too
+  const wi = sim.buildings.windows.findIndex((x) => x.breakable);
+  sim.bld.breakWindow(wi, pa.idx);
+  await until(() => b.events.some((e) => e[0] === EV.WINDOW && e[1] === wi && e[2] === WIN_BROKEN), 'B hears the glass');
+  for (const e of b.events) bBld.applyEvent(e);
+  assert(bBld.win[wi] === WIN_BROKEN, 'broken on B');
+  // anyone (re)joining gets the whole state with their match start message
+  const room = matchMaker.getLocalRoomById(a.lobby.code) as unknown as { matchStartFor(idx: number): MatchStartMsg };
+  const start = room.matchStartFor(b.session!.myIdx);
+  const lateBld = new Buildings(sim.map, null);
+  lateBld.decode(start.bld);
+  assert(opened(lateBld) === 1 && lateBld.win[wi] === WIN_BROKEN, 'a joiner sees the open door and the broken window');
+  assert(lateBld.encode().join() === sim.buildings.encode().join(), 'the same state as the server');
+  bPhys.dispose();
   await leaveAll();
 });
 

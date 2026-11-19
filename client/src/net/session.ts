@@ -33,6 +33,8 @@ export interface Session {
   roster: RosterEntry[];
   /** JUMP OFF THE PORCH: bags, transport route, pickups at the time we joined. */
   porch?: PorchInit;
+  /** Doors and windows at the time we joined (Buildings.encode). */
+  bld?: number[];
   /** Free roam around Greater Whoopa Towne (offline, nobody else around): AJ'S is open. */
   readonly roam?: boolean;
   /** The map, when it is not the mode's usual one (free roam). */
@@ -81,6 +83,7 @@ export class LocalSession implements Session {
   readonly sim: GameSim;
   roster: RosterEntry[];
   porch?: PorchInit;
+  bld?: number[];
   readonly roam: boolean;
   readonly map?: MapDef;
   handlers: SessionHandlers = {};
@@ -94,6 +97,7 @@ export class LocalSession implements Session {
   private ended = false;
   private left = false;
   private pendingEvents: number[][] = [];
+  private rosterSeen = -1;
 
   constructor(R: Rapier, opts: LocalSessionOptions) {
     this.mode = opts.mode;
@@ -109,6 +113,7 @@ export class LocalSession implements Session {
       this.myIdx = me.idx;
       this.roster = this.sim.roster();
       this.sim.start();
+      this.bld = this.sim.buildings.encode();
       return;
     }
     this.sim = new GameSim(R, {
@@ -129,6 +134,7 @@ export class LocalSession implements Session {
       this.roster = this.sim.roster();
       this.sim.start();
       this.porch = this.sim.porch.init();
+      this.bld = this.sim.buildings.encode();
       return;
     }
     const team = opts.team ?? 0;
@@ -145,6 +151,7 @@ export class LocalSession implements Session {
     }
     this.roster = this.sim.roster();
     this.sim.start();
+    this.bld = this.sim.buildings.encode();
   }
 
   serverTime(): number {
@@ -178,6 +185,11 @@ export class LocalSession implements Session {
       this.sim.tick();
       const evs = this.sim.drainEvents();
       for (const e of evs) this.pendingEvents.push(e);
+      if (this.sim.rosterVersion !== this.rosterSeen) {
+        this.rosterSeen = this.sim.rosterVersion;
+        this.roster = this.sim.roster();
+        this.handlers.onRoster?.(this.roster);
+      }
       if (this.sim.tickCount % SNAPSHOT_EVERY === 0) {
         const wire = this.sim.snapshot(this.myIdx, this.pendingEvents);
         this.pendingEvents = [];

@@ -4,10 +4,10 @@
  *   npx tsx tools/map-preview.ts [out.svg]
  */
 import { writeFileSync } from 'node:fs';
-import { getWhoopaTowne, CREWS, type Solid } from '../shared/src/index';
+import { getGreaterTowne, getWhoopaTowne, CREWS, type Solid } from '../shared/src/index';
 
-const map = getWhoopaTowne();
-const S = 10; // px per meter
+const map = process.argv.includes('--greater') ? getGreaterTowne() : getWhoopaTowne();
+const S = process.argv.includes('--greater') ? 4 : 10; // px per meter
 const pad = 4;
 const { minX, maxX, minZ, maxZ } = map.bounds;
 const W = (maxX - minX + pad * 2) * S;
@@ -90,6 +90,6 @@ for (let x = Math.ceil(minX / 10) * 10; x <= maxX; x += 10) out.push(`<text x="$
 for (let z = Math.ceil(minZ / 10) * 10; z <= maxZ; z += 10) out.push(`<text x="4" y="${Z(z) + 4}" fill="#888" font-size="11">${z}</text><line x1="0" y1="${Z(z)}" x2="${W}" y2="${Z(z)}" stroke="rgba(255,255,255,0.05)"/>`);
 out.push('</svg>');
 
-const file = process.argv[2] ?? new URL('./out/map.svg', import.meta.url).pathname;
+const file = process.argv.find((a, i) => i >= 2 && !a.startsWith('--')) ?? new URL('./out/map.svg', import.meta.url).pathname;
 writeFileSync(file, out.join('\n'));
 console.log(`wrote ${file} (${map.solids.length} solids, ${map.props.length} props)`);
