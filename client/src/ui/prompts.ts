@@ -187,8 +187,14 @@ export function glyphText(device: DeviceKind, action: Action): string {
 /** "glyph Label" pairs for a list of actions. */
 export function legendHtml(device: DeviceKind, actions: readonly Action[]): string {
   if (!SETS[device]) return '';
+  // one controller button for using things and reloading (square): one entry for both
+  const pad = device !== 'kbm';
+  const shared = pad && bindings.pad.use === bindings.pad.reload;
+  const label = (a: Action) => (shared && a === 'reload' ? 'Reload · Use · Pick up' : ACTION_LABELS[a]);
   // actions without a button on this device are left out
-  return actions.filter((a) => glyphOf(device, a)?.t).map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
+  return actions
+    .filter((a) => glyphOf(device, a)?.t && !(shared && a === 'use'))
+    .map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${label(a)}</span></span>`).join('');
 }
 
 export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'weapons', 'wheel', 'mark', 'throw', 'shoulder', 'scores', 'pause'];

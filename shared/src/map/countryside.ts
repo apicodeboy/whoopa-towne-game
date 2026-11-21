@@ -5,7 +5,7 @@ import { bale, pen, silo } from './capsHouse';
 
 /**
  * The round map: the nine districts sit inside one big circle, and the land between their old
- * square edge and the circle is open country. North of THE HILL the NORTH FORTY (fields, two
+ * square edge and the circle is open country. North of THE HILL "96" (fields, two
  * farmsteads and a feed store on County Road), the BADLANDS north and west of BABYLON, more
  * jungle west of the jungle, orchards and fields east of HONG KONG and DOWNTOWN. A rim of rock
  * runs round the circle; south of the shore the circle is LAKE LINDA.
@@ -154,9 +154,9 @@ export function countryside(b: MapBuilder, rng: Rng, city: Rect, shore: number):
   b.loot(214, 0);
   b.loot(-214, 10);
 
-  b.label('NORTH FORTY', 110, -230);
+  b.label('96', 110, -230);
   b.label('BADLANDS', -150, -190);
-  b.districts.push({ name: 'NORTH FORTY', x: 40, z: -205 }, { name: 'BADLANDS', x: -150, z: -185 });
+  b.districts.push({ name: '96', x: 40, z: -205 }, { name: 'BADLANDS', x: -150, z: -185 });
 }
 
 /**

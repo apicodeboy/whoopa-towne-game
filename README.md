@@ -93,7 +93,7 @@ headshot multipliers and damage falloff. In Turf War, standing in a zone alone c
 | Look | Mouse | Right stick | Right stick | Drag on the right side |
 | Fire | Left click | R2 | RT | FIRE (drag on it to keep aiming) |
 | Aim (zooms in) | Right click | L1 (hold) | LB (hold) | AIM |
-| Reload | R | □ | X | RELOAD |
+| Reload | R | □ (when nothing is in reach to use) | X | RELOAD |
 | Jump | Space | ✕ | A | JUMP |
 | Crouch | C | ○ | B | CROUCH |
 | Sprint | Shift | L3 (click) | LS (click) | Push the stick all the way forward |
@@ -102,8 +102,8 @@ headshot multipliers and damage falloff. In Turf War, standing in a zone alone c
 | Mark danger (your squad sees it) | Z, or click while holding B | R2 while holding L2 | RT while holding LT | — |
 | Throw grenade / smoke | G | △ | Y | THROW |
 | Swap camera shoulder | Q | R3 | RS | ⇄ |
-| Heal / take ibuprofen (hold) | H | D-pad down | D-pad down | HEAL |
-| Use (doors, windows, bags; hold to lock a door from inside) | E | D-pad down | D-pad down | USE / tap the prompt |
+| Heal / take Perc 29 (hold) | H | D-pad down | D-pad down | HEAL |
+| Use (doors, windows, bags, pick up; hold to lock a door from inside) | E | □ (the same button as reload) | X | USE / tap the prompt |
 | Climb through an open window | Space toward it | ✕ | A | JUMP |
 | Scoreboard (hold) | Tab | Create | View | SCORES |
 | Pause / menu | Esc | Options | Menu | II |
@@ -115,9 +115,16 @@ Every button can be changed in Settings → Controls; a controller layout saved 
 weapon wheel moves to this one unless you had changed it yourself.
 
 The **weapon & gadget wheel** has the guns on top and the gadgets underneath, fenced off from
-each other: grenades / smoke, ibuprofen, first-aid kits, drinks and bandages. Picking a gun or a
-throwable puts it in your hands; picking a healing item or ibuprofen starts using it on its own
+each other: grenades / smoke, Perc 29, first-aid kits, oranges and bandages. Picking a gun or a
+throwable puts it in your hands; picking a healing item or Perc 29 starts using it on its own
 (firing stops it). Things you can't use right now are dimmed.
+
+On a controller **□ does what is in front of you**: it opens a door or window, searches a
+bookbag, picks a gun or an item up, talks to AJ, and reloads when there is nothing in reach.
+
+**Healing** (battle royale): a bandage is +25 health (2.5 s); an orange is eaten in 2.5 s and
+then builds 50 health up over 10 seconds (the bar shows what is still coming); a first-aid kit
+takes 8 seconds and brings you all the way back to 100; Perc 29 (2 s) fills your armor.
 
 **Marking danger:** with the wheel open, press fire (R2 on a DualSense, a click on a mouse), or
 tap Z on a keyboard: a red marker goes up where you are looking, with your name and how far it
@@ -221,7 +228,7 @@ Houses, apartments, shops, offices and warehouses you can walk into: rooms on ev
 stairs, roofs, fire escapes, doors that open, close and lock, windows that open, break and can
 be climbed through, all synced by the server. The JUMP OFF THE PORCH map is round: a 3×3 grid of
 districts (Babylon, The Hill, Hong Kong, Jungle, CAP'S HOUSE, Downtown, the Docks, Lake Linda,
-the Boardwalk) inside one big circle, open country (the North Forty's fields and farmsteads,
+the Boardwalk) inside one big circle, open country ("96": fields and farmsteads, north of The Hill;
 the Badlands) filling the ring out to a rim of rock, and Lake Linda to the south. In the middle
 is **CAP'S HOUSE**: a gigantic two-floor barndominium (shop, great room open to the loft,
 master suite, game room, bedrooms, a deck), an in-ground pool you can drop into, a red barn and

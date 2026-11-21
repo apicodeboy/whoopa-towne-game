@@ -31,6 +31,8 @@ export interface InputFrame {
   drop: boolean;
   /** Controller: interact if there is something to pick up, otherwise heal. */
   useOrHeal: boolean;
+  /** Controller (square): use what is in reach (a door, a bag, a pickup), otherwise reload. */
+  useOrReload: boolean;
 
   // one-frame events
   crouchPress: boolean;
@@ -65,7 +67,7 @@ export function makeInputFrame(): InputFrame {
   return {
     moveX: 0, moveZ: 0, lookYaw: 0, lookPitch: 0,
     fire: false, aim: false, jump: false, sprint: false, crouchHold: false, reload: false, throwBtn: false, scoreboard: false,
-    use: false, heal: false, drop: false, useOrHeal: false,
+    use: false, heal: false, drop: false, useOrHeal: false, useOrReload: false,
     crouchPress: false, roll: false, sprintPress: false, swapShoulder: false, pause: false, slotSelect: -1, slotCycle: 0,
     wheel: false, wheelStickX: 0, wheelStickY: 0, wheelMouseX: 0, wheelMouseY: 0, wheelClose: false, mark: false,
     navX: 0, navY: 0, accept: false, back: false,
@@ -76,7 +78,7 @@ export function clearInputFrame(f: InputFrame): void {
   f.moveX = 0; f.moveZ = 0; f.lookYaw = 0; f.lookPitch = 0;
   f.fire = false; f.aim = false; f.jump = false; f.sprint = false; f.crouchHold = false;
   f.reload = false; f.throwBtn = false; f.scoreboard = false;
-  f.use = false; f.heal = false; f.drop = false; f.useOrHeal = false;
+  f.use = false; f.heal = false; f.drop = false; f.useOrHeal = false; f.useOrReload = false;
   f.crouchPress = false; f.roll = false; f.sprintPress = false; f.swapShoulder = false; f.pause = false;
   f.slotSelect = -1; f.slotCycle = 0;
   f.wheel = false; f.wheelStickX = 0; f.wheelStickY = 0; f.wheelMouseX = 0; f.wheelMouseY = 0; f.wheelClose = false; f.mark = false;

@@ -1158,7 +1158,7 @@ export class SkinnedCharacter implements CharacterVisual {
   private healProp: THREE.Group | null = null;
   private healPropKind = -1;
 
-  /** The item in hand: a first-aid kit, a bandage roll, a drink bottle or a bottle of ibuprofen. */
+  /** The item in hand: a first-aid kit, a bandage roll, an orange or a bottle of Perc 29. */
   private makeHealProp(kind: number): THREE.Group {
     const g = new THREE.Group();
     const mat = (c: number, rough = 0.6) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, flatShading: true });
@@ -1170,11 +1170,14 @@ export class SkinnedCharacter implements CharacterVisual {
       cap.position.y = 0.046;
       g.add(bottle, label, cap);
     } else if (kind === 2) {
-      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 0.17, 10), mat(0x2f9be8, 0.3));
-      const label = new THREE.Mesh(new THREE.CylinderGeometry(0.037, 0.037, 0.07, 10), mat(0xff7a1a));
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 8), mat(0xffffff));
-      cap.position.y = 0.1;
-      g.add(bottle, label, cap);
+      // an orange (peeled open on top) with a leaf
+      const fruit = new THREE.Mesh(new THREE.IcosahedronGeometry(0.042, 1), mat(0xf5891f, 0.75));
+      const flesh = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.03, 0.01, 8), mat(0xffb347, 0.6));
+      flesh.position.y = 0.036;
+      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.02, 6, 4), mat(0x4c9a3a));
+      leaf.scale.set(1, 0.25, 0.5);
+      leaf.position.set(0.02, 0.04, 0.01);
+      g.add(fruit, flesh, leaf);
     } else if (kind === 0) {
       const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.07, 12), mat(0xf1ece0, 0.9));
       roll.rotation.z = Math.PI / 2;
@@ -1195,7 +1198,7 @@ export class SkinnedCharacter implements CharacterVisual {
 
   /**
    * Healing: a first-aid kit is opened in front of the chest and pressed on; a bandage is
-   * wound around the arm; a drink is tipped back. Head down to watch the hands (or back to drink).
+   * wound around the arm; an orange is eaten. Head down to watch the hands (or up to eat).
    */
   private healPose(dt: number, kind: number): void {
     const R = this.arms.R, L = this.arms.L;
@@ -1226,7 +1229,7 @@ export class SkinnedCharacter implements CharacterVisual {
     const at = (v: THREE.Vector3) => this.root.localToWorld(v.clone());
     let headPitch = -0.35;
     if (kind === 2 || kind === 3) {
-      // drink: bottle up to the mouth, tipping back in sips (pills: shaken out and tossed back)
+      // an orange up to the mouth, a bite at a time (pills: shaken out and tossed back)
       const sip = kind === 3 ? Math.max(0, Math.sin(t * 4.5)) : 0.5 + 0.5 * Math.sin(t * 3.2);
       reach(R, at(shR.clone().add(new THREE.Vector3(-0.1, 0.14 + 0.03 * sip, -0.12))), new THREE.Vector3(1, -1.2, 0.3).applyQuaternion(rq));
       reach(L, at(shL.clone().add(new THREE.Vector3(0.0, -0.45, 0.05))), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
@@ -1254,8 +1257,8 @@ export class SkinnedCharacter implements CharacterVisual {
     const hand = wr.clone().addScaledVector(wr.clone().sub(el).normalize(), 0.07);
     this.healProp.position.copy(this.root.worldToLocal(hand));
     if (kind === 2) {
-      // tipped toward the mouth
-      this.healProp.rotation.set(-0.9 - 0.3 * Math.sin(t * 3.2), 0, 0);
+      // an orange held up to the mouth, a bite at a time
+      this.healProp.rotation.set(-0.5 - 0.15 * Math.sin(t * 3.2), 0, 0);
     } else if (kind === 3) {
       // tipped right up to shake a pill out
       this.healProp.rotation.set(-1.4 - 0.5 * Math.max(0, Math.sin(t * 4.5)), 0, 0);

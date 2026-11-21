@@ -161,10 +161,12 @@ export interface PlayerState {
   climbBZ: number;
   /** Climbing through a window (a vault): the height the feet go over (0 for a ledge pull-up). */
   climbH: number;
-  /** Ibuprofen bottles carried (each taken adds armor). */
+  /** Perc 29 bottles carried (each one taken fills your armor). */
   pills: number;
   /** What you swing with a gun slot empty: WEAPON_IDS index + 1 (0 = hands). */
   wM: number;
+  /** Mirror of the server's health still building up from an orange (for the HUD and choices). */
+  regen: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -177,7 +179,7 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'bandages', 'medkits', 'drinks', 'healT', 'healKind',
   'air', 'windX', 'windZ', 'riot', 'hp', 'armor', 'airT', 'airJumps',
   'rollT', 'rollX', 'rollZ', 'climbT', 'climbAX', 'climbAY', 'climbAZ', 'climbBX', 'climbBY', 'climbBZ', 'climbH',
-  'pills', 'wM',
+  'pills', 'wM', 'regen',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -314,12 +316,14 @@ export function canHeal(s: PlayerState, kind: number): boolean {
   const k = HEAL_KINDS[kind];
   if (!k || healCount(s, kind) <= 0) return false;
   const h = PORCH.heals[k];
-  return h.armor ? s.armor < Math.min(h.cap, PORCH.maxArmor) : s.hp < Math.min(h.cap, PLAYER.maxHealth);
+  if (h.armor) return s.armor < Math.min(h.cap, PORCH.maxArmor);
+  // an orange is not worth eating while the last one's health is still coming
+  return (h.slow > 0 ? s.hp + s.regen : s.hp) < Math.min(h.cap, PLAYER.maxHealth);
 }
 
 /**
  * Which healing item HEAL uses right now (HEAL_KINDS index), or -1. `want` is the one picked
- * on the weapon wheel; otherwise health comes first, then ibuprofen tops up the armor.
+ * on the weapon wheel; otherwise health comes first, then Perc 29 fills the armor.
  */
 export function pickHeal(s: PlayerState, want = -1): number {
   if (want >= 0) return canHeal(s, want) ? want : -1;
@@ -327,7 +331,7 @@ export function pickHeal(s: PlayerState, want = -1): number {
   if (s.hp < PLAYER.maxHealth) {
     if (s.hp < 50 && s.medkits > 0) return M;
     if (canHeal(s, B)) return B;
-    if (s.drinks > 0) return D;
+    if (canHeal(s, D)) return D;
     if (s.medkits > 0) return M;
   }
   return canHeal(s, I) ? I : -1;

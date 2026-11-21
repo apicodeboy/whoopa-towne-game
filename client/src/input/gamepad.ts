@@ -60,8 +60,8 @@ function applyDeadzone(x: number, y: number, dz: number, out: { x: number; y: nu
  *   Left stick move · Right stick look · R2 fire · hold L1 aim · tap L2 / R1 previous / next gun
  *   hold L2 weapon & gadget wheel (point with the right stick, let go to pick; R2 in it marks
  *   danger where you are looking) · Cross jump
- *   Circle crouch · Square reload · Triangle throw · R3 swap shoulder · L3 sprint
- *   D-pad weapon slots, ▼ use / heal · Create (or touchpad) scoreboard · Options pause
+ *   Circle crouch · Square use (doors, bags, pick up) or reload · Triangle throw · R3 swap
+ *   shoulder · L3 sprint · D-pad weapon slots, ▼ heal · Create (or touchpad) scoreboard · Options pause
  */
 export class GamepadSource implements InputSource {
   readonly kind = 'gamepad' as const;
@@ -210,7 +210,11 @@ export class GamepadSource implements InputSource {
       if (btn(m.fire)) frame.fire = true;
       if (btn(m.aim)) frame.aim = true;
       if (btn(m.jump)) frame.jump = true;
-      if (btn(m.reload)) frame.reload = true;
+      // use and reload on one button: whatever is in reach gets used, otherwise it reloads
+      const useReload = m.use === m.reload;
+      if (useReload) {
+        if (btn(m.use)) frame.useOrReload = true;
+      } else if (btn(m.reload)) frame.reload = true;
       if (btn(m.throw)) frame.throwBtn = true;
       if (btn(m.scores) || (m.scores === B.SELECT && btn(B.TOUCHPAD))) frame.scoreboard = true;
       if (pressed(m.crouch)) frame.crouchPress = true;
@@ -225,7 +229,7 @@ export class GamepadSource implements InputSource {
       if (m.use === m.heal) {
         if (btn(m.use)) frame.useOrHeal = true;
       } else {
-        if (btn(m.use)) frame.use = true;
+        if (btn(m.use) && !useReload) frame.use = true;
         if (btn(m.heal)) frame.heal = true;
       }
     } else {

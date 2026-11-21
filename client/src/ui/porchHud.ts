@@ -81,7 +81,6 @@ export class PorchHud {
   private armorBox: HTMLElement;
   private invEl: HTMLElement;
   private slotEls: HTMLElement[] = [];
-  private bagEl: HTMLElement;
   private healBar: HTMLElement;
   private lowEl: HTMLElement;
   private cardEl: HTMLElement;
@@ -134,7 +133,6 @@ export class PorchHud {
       this.slotEls.push(s);
       this.invEl.append(s);
     });
-    this.bagEl = el('div', 'ph-bag');
     this.healFill = el('i', '');
     this.healText = el('span', '', 'HEALING');
     this.healBar = el('div', 'ph-heal hidden', [this.healText, el('div', 'bar', [this.healFill])]);
@@ -162,7 +160,7 @@ export class PorchHud {
     this.boardEl = el('div', 'ph-board hidden');
 
     this.root = el('div', 'porch-hud', [
-      top, this.compassEl, this.squadEl, this.invEl, this.bagEl, this.healBar, this.lowEl, this.cardEl,
+      top, this.compassEl, this.squadEl, this.invEl, this.healBar, this.lowEl, this.cardEl,
       this.promptEl, this.bannerEl, this.riotEl, this.toastsEl, this.specEl, this.outEl, this.winEl, this.boardEl,
     ]);
     parent.append(this.root);
@@ -199,7 +197,7 @@ export class PorchHud {
     else if (kind === ITEM.AMMO) text = `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`;
     else if (kind === ITEM.HEAL) text = `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`;
     else if (kind === ITEM.ARMOR) text = `Armor (${code})`;
-    else if (kind === ITEM.IBUPROFEN) text = `${count}× Ibuprofen`;
+    else if (kind === ITEM.IBUPROFEN) text = `${count}× ${PORCH.heals.ibuprofen.name}`;
     else if (kind === ITEM.THROWABLE) text = `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`;
     if (!text || count <= 0) return;
     const t = el('div', 'ph-toast', `+ ${text}`);
@@ -291,12 +289,6 @@ export class PorchHud {
         (n.children[1] as HTMLElement).textContent = slot.empty ? (i === 3 ? '—' : 'EMPTY') : slot.name;
         (n.children[2] as HTMLElement).textContent = slot.empty ? '' : i === 3 ? `×${slot.mag}` : `${slot.mag}/${slot.reserve}`;
       });
-    });
-    const bag = `${s.heals.join(',')}|${s.ammo.join(',')}|${s.device}`;
-    this.set('bag', bag, () => {
-      const heals = HEAL_KINDS.map((k, i) => `<span class="h h-${k}" title="${PORCH.heals[k].name}">${s.heals[i]}</span>`).join('');
-      const ammo = AMMO_TYPES.map((t, i) => `<span class="a a-${t}" title="${AMMO_NAMES[t]}">${s.ammo[i]}</span>`).join('');
-      this.bagEl.innerHTML = `<div class="row">${heals}${glyphHtml(s.device, 'heal') || glyphHtml(s.device, 'use')}</div><div class="row">${ammo}</div>`;
     });
     this.set('healing', s.healing >= 0, () => this.healBar.classList.toggle('hidden', s.healing < 0));
     this.set('card', s.card?.html ?? '', () => {

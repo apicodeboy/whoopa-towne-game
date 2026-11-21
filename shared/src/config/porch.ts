@@ -102,14 +102,14 @@ export const PORCH = {
   endedSeconds: 14,
 
   // ---- player ------------------------------------------------------------------------
-  /** Armor on top of health (four ibuprofen bottles' worth). */
+  /** Armor on top of health. */
   maxArmor: 100,
   /**
-   * Ibuprofen: orange pill bottles. They go in your pockets when you pick them up; taking one
-   * (HEAL, or from the weapon wheel) adds this much armor. `loose`: bottles lying around the
-   * map at the start.
+   * Perc 29 (internally still 'ibuprofen'): orange pill bottles. They go in your pockets when
+   * you pick them up; taking one (HEAL, or from the weapon wheel) fills your armor. `loose`:
+   * bottles lying around the map at the start.
    */
-  ibuprofen: { armor: 25, loose: 40 },
+  ibuprofen: { armor: 100, loose: 40 },
   /** Carry limits. */
   carry: {
     ammo: { light: 240, medium: 180, shells: 40, heavy: 30 },
@@ -120,14 +120,16 @@ export const PORCH = {
     throwables: 4,
   },
   /**
-   * Healing items: seconds to use, what they give and up to how much. Ibuprofen gives armor
-   * (`armor: true`), the rest health.
+   * Healing items: seconds to use, what they give and up to how much. Perc 29 gives armor
+   * (`armor: true`), the rest health. An orange (`slow`) is eaten, then its health builds up
+   * over `slow` seconds instead of all at once. (The keys are wire ids: the orange is still
+   * 'drink', Perc 29 still 'ibuprofen'.)
    */
   heals: {
-    bandage: { name: 'Bandage', time: 2.5, amount: 15, cap: 75, armor: false },
-    medkit: { name: 'First-Aid Kit', time: 6, amount: 100, cap: 100, armor: false },
-    drink: { name: 'Corner Store Drink', time: 2, amount: 25, cap: 100, armor: false },
-    ibuprofen: { name: 'Ibuprofen', time: 2, amount: 25, cap: 100, armor: true },
+    bandage: { name: 'Bandage', time: 2.5, amount: 25, cap: 100, armor: false, slow: 0 },
+    medkit: { name: 'First-Aid Kit', time: 8, amount: 100, cap: 100, armor: false, slow: 0 },
+    drink: { name: 'Orange', time: 2.5, amount: 50, cap: 100, armor: false, slow: 10 },
+    ibuprofen: { name: 'Perc 29', time: 2, amount: 100, cap: 100, armor: true, slow: 0 },
   },
   /** Movement speed multiplier while using a healing item. */
   healSlow: 0.5,
@@ -160,7 +162,7 @@ export const ITEM = {
   ARMOR: 4,
   /** code = throwable index (THROWABLE_IDS), count = how many */
   THROWABLE: 5,
-  /** Ibuprofen bottles (code 0), count = how many: carried, each taken adds PORCH.ibuprofen.armor armor. */
+  /** Perc 29 bottles (code 0), count = how many: carried; each one taken fills your armor. */
   IBUPROFEN: 6,
 } as const;
 
@@ -228,9 +230,9 @@ export const LOOT: LootEntry[] = [
   { item: { kind: A, code: 2, count: 10 }, weight: 7, rarity: 'common' },
   { item: { kind: A, code: 3, count: 8 }, weight: 5, rarity: 'uncommon' },
   { item: { kind: H, code: 0, count: 3 }, weight: 9, rarity: 'common' }, // bandages
-  { item: { kind: H, code: 2, count: 1 }, weight: 6, rarity: 'common' }, // drink
+  { item: { kind: H, code: 2, count: 1 }, weight: 6, rarity: 'common' }, // an orange
   { item: { kind: H, code: 1, count: 1 }, weight: 3, rarity: 'rare' }, // first-aid kit
-  { item: { kind: I, code: 0, count: 1 }, weight: 7, rarity: 'uncommon' }, // ibuprofen
+  { item: { kind: I, code: 0, count: 1 }, weight: 7, rarity: 'uncommon' }, // Perc 29
   { item: { kind: I, code: 0, count: 2 }, weight: 2.5, rarity: 'rare' },
   { item: { kind: T, code: 0, count: 2 }, weight: 4, rarity: 'uncommon' }, // grenades
   { item: { kind: T, code: 1, count: 2 }, weight: 3, rarity: 'common' }, // smokes

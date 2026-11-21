@@ -443,9 +443,9 @@ export class BotBrain {
         if (mag < weapon.magSize * 0.5 && res > 0 && s.reloadT <= 0) buttons |= BTN.RELOAD;
       }
       if (porch) {
-        // patch up between fights (holding HEAL until the item is done), and take ibuprofen
-        // when there is a bottle and a quarter of armor or more to fill
-        const wantArmor = s.pills > 0 && s.armor <= PORCH.maxArmor - PORCH.ibuprofen.armor;
+        // patch up between fights (holding HEAL until the item is done), and take a Perc 29
+        // (it fills the armor) once a good part of the armor is gone
+        const wantArmor = s.pills > 0 && s.armor <= PORCH.maxArmor * 0.5;
         if ((s.hp < 65 || wantArmor) && s.healT <= 0 && pickHeal(s) >= 0 && now >= this.healAt && !urgent) {
           buttons |= BTN.HEAL;
           this.healAt = now + 400;

@@ -242,20 +242,20 @@ test('porch: healing items take time (held all the way), heal up to their cap, a
   // hold it all the way
   step(sim, me, { buttons: BTN.HEAL });
   const evs = wait(sim, PORCH.heals.bandage.time + 0.2, me, { buttons: BTN.HEAL });
-  assert(of(evs, EV.HEALED).length === 1 && me.health === 55 && me.state.bandages === 2, `bandage: ${me.health} hp`);
-  // ibuprofen: picking bottles up only puts them in your pockets...
+  assert(of(evs, EV.HEALED).length === 1 && me.health === 65 && me.state.bandages === 2, `bandage: +25 (${me.health} hp)`);
+  // Perc 29: picking bottles up only puts them in your pockets...
   const pills = (): number => me.state.pills;
   assert(sim.porch!.give(me, { kind: ITEM.IBUPROFEN, code: 0, count: 2 }) === null, 'two bottles taken');
   assert(pills() === 2 && me.armor === 0, `carried, not taken (${me.state.pills} bottles, ${me.armor} armor)`);
-  // ...taking one (picked on the wheel) is 25 armor on top of health
+  // ...taking one (picked on the wheel) fills your armor, on top of health
   const I = HEAL_KINDS.indexOf('ibuprofen');
   wait(sim, 0.1, me);
   step(sim, me, { buttons: BTN.HEAL, heal: I + 1 });
-  assert(me.state.healT > 0 && me.state.healKind === I, 'taking a bottle (health is not full, but ibuprofen was asked for)');
+  assert(me.state.healT > 0 && me.state.healKind === I, 'taking a bottle (health is not full, but Perc 29 was asked for)');
   const took = wait(sim, PORCH.heals.ibuprofen.time + 0.1, me, { buttons: BTN.HEAL, heal: I + 1 });
   assert(of(took, EV.HEALED).length === 1, 'done');
-  approx(me.armor, 25, 0.01, 'one bottle = 25 armor');
-  assert(pills() === 1 && me.state.armor === 25 && me.health === 55, `one bottle used (${pills()} left, ${me.state.armor} armor, ${me.health} hp)`);
+  approx(me.armor, PORCH.maxArmor, 0.01, 'one bottle fills the armor');
+  assert(pills() === 1 && me.state.armor === PORCH.maxArmor && me.health === 65, `one bottle used (${pills()} left, ${me.state.armor} armor, ${me.health} hp)`);
   // HEAL on its own still heals health first
   wait(sim, 0.1, me);
   step(sim, me, { buttons: BTN.HEAL });
@@ -265,9 +265,9 @@ test('porch: healing items take time (held all the way), heal up to their cap, a
   wait(sim, 0.1, me);
   sim.damage(me, 30, 5, 1, false, 0, 0);
   approx(me.armor, 20, 0.01, 'armor took the hit');
-  approx(me.health, 55, 0.01, 'health untouched');
+  approx(me.health, 65, 0.01, 'health untouched');
   sim.damage(me, 30, 5, 1, false, 0, 0);
-  approx(me.health, 45, 0.01, 'the rest goes through');
+  approx(me.health, 55, 0.01, 'the rest goes through');
   // four bottles is the most you carry: the rest stay on the ground
   const left = sim.porch!.give(me, { kind: ITEM.IBUPROFEN, code: 0, count: 6 });
   assert(pills() === PORCH.carry.ibuprofen, `carrying four (${pills()})`);
@@ -282,6 +282,44 @@ test('porch: healing items take time (held all the way), heal up to their cap, a
   let loose = 0;
   for (const it of sim.porch!.pickups.values()) if (it.kind === ITEM.IBUPROFEN) loose++;
   assert(loose >= PORCH.ibuprofen.loose * 0.8, `loose bottles on the map (${loose})`);
+  sim.dispose();
+});
+
+test('porch: an orange builds 50 health up slowly; a first-aid kit takes 8 s and heals you all the way', async () => {
+  const { sim, me } = await porchSim();
+  sim.tick();
+  land(me, -18, 30);
+  me.health = 30;
+  const O = HEAL_KINDS.indexOf('drink'), M = HEAL_KINDS.indexOf('medkit');
+  assert(PORCH.heals.drink.name === 'Orange' && PORCH.heals.ibuprofen.name === 'Perc 29', 'the names');
+  sim.porch!.give(me, { kind: ITEM.HEAL, code: O, count: 2 });
+  sim.porch!.give(me, { kind: ITEM.HEAL, code: M, count: 1 });
+  wait(sim, 0.1, me);
+  step(sim, me, { buttons: BTN.HEAL, heal: O + 1 });
+  const eaten = wait(sim, PORCH.heals.drink.time + 0.1, me, { buttons: BTN.HEAL, heal: O + 1 });
+  assert(of(eaten, EV.HEALED).length === 1 && me.state.drinks === 1, 'eaten');
+  // nothing all at once: it builds up
+  assert(me.health < 32 && me.state.regen > 45, `just eaten: ${me.health.toFixed(1)} hp, ${me.state.regen} to come`);
+  wait(sim, PORCH.heals.drink.slow / 2, me);
+  assert(me.health > 50 && me.health < 60, `halfway: ${me.health.toFixed(1)} hp`);
+  // another one is not worth eating while this one is still coming in... (only 20 short)
+  me.health = 80;
+  wait(sim, 0.1, me);
+  step(sim, me, { buttons: BTN.HEAL, heal: O + 1 });
+  assert(me.state.healT === 0, 'no second orange while the first one fills you up');
+  wait(sim, PORCH.heals.drink.slow, me);
+  approx(me.health, 100, 0.01, 'it stops at full health');
+  assert(me.state.regen === 0, 'and nothing is kept for later');
+  // the first-aid kit: 8 seconds, all the way back
+  me.health = 12;
+  wait(sim, 0.1, me);
+  step(sim, me, { buttons: BTN.HEAL, heal: M + 1 });
+  assert(PORCH.heals.medkit.time === 8, '8 seconds');
+  wait(sim, 7.5, me, { buttons: BTN.HEAL, heal: M + 1 });
+  assert(me.health === 12 && me.state.healT > 0, 'still working on it at 7.5 s');
+  wait(sim, 0.7, me, { buttons: BTN.HEAL, heal: M + 1 });
+  approx(me.health, 100, 0.01, 'full health');
+  assert(me.state.medkits === 0, 'kit used up');
   sim.dispose();
 });
 

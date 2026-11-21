@@ -109,6 +109,9 @@ export class PorchRules {
   readonly place: Uint16Array;
   private outAt: Float64Array;
   private prevButtons: Uint16Array;
+  /** Health still to come from an orange (per player), and how fast it comes (per second). */
+  private regen: Float32Array;
+  private regenRate: Float32Array;
   private riotTimer = 0;
   private nextPickupId = 1;
   private lastEliminatedSquad = -1;
@@ -125,6 +128,8 @@ export class PorchRules {
     this.place = new Uint16Array(n);
     this.outAt = new Float64Array(n);
     this.prevButtons = new Uint16Array(n);
+    this.regen = new Float32Array(n);
+    this.regenRate = new Float32Array(n);
 
     const b = sim.map.bounds, round = sim.map.round;
     // the first riot circle takes in the whole map
@@ -529,7 +534,12 @@ export class PorchRules {
   healed(p: SimPlayer, kind: number): void {
     const h = PORCH.heals[HEAL_KINDS[kind]];
     if (!h) return;
-    if (h.armor) {
+    if (h.slow > 0) {
+      // an orange: its health comes in bit by bit (see tick)
+      this.regen[p.idx] = Math.min(PLAYER.maxHealth, this.regen[p.idx] + h.amount);
+      this.regenRate[p.idx] = h.amount / h.slow;
+      p.state.regen = Math.ceil(this.regen[p.idx]);
+    } else if (h.armor) {
       p.armor = Math.min(Math.max(p.armor, Math.min(h.cap, p.armor + h.amount)), PORCH.maxArmor);
       p.state.armor = Math.round(p.armor);
     } else {
@@ -581,6 +591,22 @@ export class PorchRules {
   /** Advances the match. Returns the winning squad when it is over (-1 draw), else null. */
   tick(): number | null {
     const sim = this.sim, now = sim.time;
+    // health still coming from an orange
+    for (const p of sim.players) {
+      if (!p) continue;
+      const i = p.idx;
+      if (!p.alive || this.regen[i] <= 0) {
+        this.regen[i] = 0;
+        p.state.regen = 0;
+        continue;
+      }
+      const give = Math.min(this.regen[i], this.regenRate[i] * TICK_DT, PLAYER.maxHealth - p.health);
+      p.health += give;
+      this.regen[i] -= give;
+      // full up: the rest is not kept for later
+      if (p.health >= PLAYER.maxHealth - 1e-6) this.regen[i] = 0;
+      p.state.regen = Math.ceil(this.regen[i]);
+    }
     // riders move with the transport
     transportAt(this.route, this.speed, this.takeoff, now, this.tmp);
     for (const p of sim.players) {
@@ -594,7 +620,10 @@ export class PorchRules {
         if (sim.phase === PHASE.PLAYING && now >= this.dropBy) this.jumpOut(p);
       }
     }
-    if (sim.phase !== PHASE.PLAYING) return null;
+    if (sim.phase !== PHASE.PLAYING) {
+      this.mirror();
+      return null;
+    }
 
     // stage timeline
     while (this.stepI + 1 < this.steps.length && now >= this.steps[this.stepI + 1].start) {
@@ -633,12 +662,7 @@ export class PorchRules {
       if (caught && hurt) sim.damage(p, dps * 0.5, -1, KILL_RIOT, false, this.zone.x, this.zone.z);
     }
 
-    // mirrors the client predicts with
-    for (const p of sim.players) {
-      if (!p) continue;
-      p.state.hp = Math.max(0, Math.ceil(p.health));
-      p.state.armor = Math.round(p.armor);
-    }
+    this.mirror();
 
     // last squad standing
     this.recount();
@@ -660,6 +684,15 @@ export class PorchRules {
     // while a phase's crowd is still gathering, the previous phase's riot is what hurts
     const phase = step.kind === 'warn' ? step.phase - 1 : step.phase;
     return phase >= 0 ? PORCH.riotPhases[phase].dps : 0;
+  }
+
+  /** The health and armor mirrors the client predicts healing choices with (the warm-up too). */
+  private mirror(): void {
+    for (const p of this.sim.players) {
+      if (!p) continue;
+      p.state.hp = Math.max(0, Math.ceil(p.health));
+      p.state.armor = Math.round(p.armor);
+    }
   }
 
   /** Is (x, z) over the map's land, at least `margin` in from its edge? */

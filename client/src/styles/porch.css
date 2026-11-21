@@ -321,59 +321,6 @@
 .ph-slot.empty .nm {
   color: rgba(255, 255, 255, 0.35);
 }
-.ph-bag {
-  position: absolute;
-  right: calc(18px + var(--safe-right));
-  bottom: calc(186px + var(--safe-bottom));
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-.ph-bag .row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.ph-bag span,
-.ph-bag kbd {
-  min-width: 34px;
-  padding: 3px 7px 3px 18px;
-  border-radius: 6px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  font: 700 11px var(--font);
-  text-align: right;
-  position: relative;
-}
-.ph-bag span::before {
-  content: '';
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  width: 8px;
-  height: 8px;
-  margin-top: -4px;
-  border-radius: 2px;
-}
-.ph-bag kbd {
-  padding: 3px 8px;
-  min-width: 0;
-  color: var(--accent);
-}
-.ph-bag .h-bandage::before { background: #f4f1e8; }
-.ph-bag .h-medkit::before { background: #e03a3a; }
-.ph-bag .h-drink::before { background: #ff7a3d; border-radius: 50%; }
-/* an orange pill bottle with a white cap */
-.ph-bag .h-ibuprofen::before { background: linear-gradient(#fff 0 30%, #f08a1c 30%); width: 7px; height: 10px; margin-top: -5px; }
-.ph-bag .glyph {
-  min-width: 0;
-  padding: 2px 7px;
-}
-.ph-bag .a-light::before { background: #d9b44a; }
-.ph-bag .a-medium::before { background: #6a8f3c; }
-.ph-bag .a-shells::before { background: #c0392b; }
-.ph-bag .a-heavy::before { background: #3a6fd8; }
 .ph-heal {
   position: absolute;
   left: 50%;
@@ -670,8 +617,7 @@
   opacity: 0.45;
 }
 .porch-hud.dead .ph-armor,
-.porch-hud.dead .ph-inv,
-.porch-hud.dead .ph-bag {
+.porch-hud.dead .ph-inv {
   display: none;
 }
 
@@ -703,9 +649,6 @@
   .ph-slot {
     width: 74px;
     font-size: 10px;
-  }
-  .ph-bag {
-    bottom: calc(148px + var(--safe-bottom));
   }
   .ph-squad {
     top: calc(110px + var(--safe-top));
@@ -908,13 +851,6 @@ body.is-touch .ph-slot {
   width: 64px;
   padding: 3px 5px 4px;
   font-size: 9px;
-}
-body.is-touch .ph-bag {
-  right: auto;
-  left: 50%;
-  bottom: calc(104px + var(--safe-bottom));
-  transform: translateX(-50%) scale(0.85);
-  transform-origin: 50% 100%;
 }
 body.is-touch .ph-armor {
   display: none;

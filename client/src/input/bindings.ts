@@ -21,7 +21,7 @@ export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
   crouch: 'Crouch (tap) · roll while sprinting',
   crouchHold: 'Crouch (hold)',
   sprint: 'Sprint',
-  reload: 'Reload',
+  reload: 'Reload (on a controller, shared with Use: uses what is in reach first)',
   swap: 'Next weapon',
   prev: 'Previous weapon (tap) · weapon wheel (hold; fire in it to mark danger)',
   wheel: 'Weapon wheel (hold) · click in it to mark danger',
@@ -58,7 +58,9 @@ export const PAD = {
 
 /**
  * The controller layout: hold L1 to aim, R2 fires; tap L2 / R1 for the previous / next gun and
- * hold L2 for the weapon and gadget wheel; triangle throws, R3 swaps the shoulder.
+ * hold L2 for the weapon and gadget wheel; triangle throws, R3 swaps the shoulder. Square does
+ * whatever is in front of you: opens a door, searches a bag, picks something up, and reloads
+ * when there is nothing to use. D-pad down heals.
  */
 export const DEFAULT_PAD: Record<PadAction, number> = {
   fire: PAD.R2,
@@ -71,18 +73,20 @@ export const DEFAULT_PAD: Record<PadAction, number> = {
   swap: PAD.R1,
   throw: PAD.NORTH,
   shoulder: PAD.R3,
-  // search and heal share the d-pad down by default (it picks up when there is something in
-  // reach and heals otherwise); give heal its own button to split them
-  use: PAD.DOWN,
+  // use shares square with reload (it uses what is in reach, reloads otherwise); give use its
+  // own button to split them
+  use: PAD.WEST,
   heal: PAD.DOWN,
   scores: PAD.SELECT,
 };
+/** The layout before square took over using things (use and heal both on d-pad down). */
+const V2_DEFAULT_PAD: Record<PadAction, number> = { ...DEFAULT_PAD, use: PAD.DOWN, heal: PAD.DOWN };
 /** The controller layout before the weapon wheel (saved layouts still on it move to the new one). */
 const OLD_DEFAULT_PAD: Partial<Record<PadAction, number>> = {
   fire: PAD.R2, aim: PAD.L2, jump: PAD.SOUTH, crouch: PAD.EAST, sprint: PAD.L3, reload: PAD.WEST, swap: PAD.NORTH,
   throw: PAD.L1, shoulder: PAD.R1, use: PAD.DOWN, heal: PAD.DOWN, scores: PAD.SELECT,
 };
-const BINDINGS_VERSION = 2;
+const BINDINGS_VERSION = 3;
 
 /** Buttons a controller binding may not take (they always do the same thing). */
 export const PAD_RESERVED: readonly number[] = [PAD.START, PAD.LEFT, PAD.RIGHT, PAD.UP];
@@ -110,14 +114,16 @@ class BindingStore {
         const v = raw?.pad?.[a];
         if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 20 && !PAD_RESERVED.includes(v)) pad[a] = v;
       }
-      const old = (raw?.v ?? 1) < BINDINGS_VERSION;
-      // a controller layout saved before the weapon wheel that was never changed: the new layout
-      const untouched = old && (Object.keys(OLD_DEFAULT_PAD) as PadAction[]).every((a) => pad[a] === undefined || pad[a] === OLD_DEFAULT_PAD[a]);
+      const v = raw?.v ?? 1;
+      const old = v < BINDINGS_VERSION;
+      // a controller layout saved on an older default that was never changed: the new layout
+      const same = (d: Partial<Record<PadAction, number>>) => (Object.keys(d) as PadAction[]).every((a) => pad[a] === undefined || pad[a] === d[a]);
+      const untouched = old && (v < 2 ? same(OLD_DEFAULT_PAD) : same(V2_DEFAULT_PAD));
       if (!untouched) {
         Object.assign(this.pad, pad);
         // a layout of the player's own keeps every button; the new wheel button goes on L2 if
         // that is free, otherwise on the first free button
-        if (old && pad.prev === undefined) {
+        if (v < 2 && pad.prev === undefined) {
           const taken = new Set(Object.entries(this.pad).filter(([a]) => a !== 'prev').map(([, v]) => v));
           const free = [PAD.L2, PAD.R1, PAD.L1, PAD.R3, PAD.NORTH].find((b) => !taken.has(b));
           if (free !== undefined) this.pad.prev = free;

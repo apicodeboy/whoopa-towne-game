@@ -1,8 +1,9 @@
 /**
  * The weapon and gadget wheel: hold L2 (B on the keyboard), point at a slot with the right stick
  * (or the mouse), let go to pick it. The top of the ring is the guns, the bottom the gadgets
- * (throwables, healing items, ibuprofen); the two halves are fenced off by a gap.
+ * (throwables, healing items, Perc 29); the two halves are fenced off by a gap.
  */
+import { FIST_SHAPES } from './handIcon';
 
 /** One slot on the ring. */
 export interface WheelItem {
@@ -32,9 +33,11 @@ const FENCE = 0.075;
 const ICONS: Record<NonNullable<WheelItem['icon']>, string> = {
   bandage: '<rect x="-20" y="-9" width="40" height="18" rx="9" fill="#efe6d2"/><rect x="-7" y="-9" width="14" height="18" fill="#d9cdb3"/><g fill="#b9ab90"><circle cx="-3" cy="-3" r="1.4"/><circle cx="3" cy="-3" r="1.4"/><circle cx="-3" cy="3" r="1.4"/><circle cx="3" cy="3" r="1.4"/></g>',
   medkit: '<rect x="-19" y="-14" width="38" height="28" rx="5" fill="#e03a3a"/><rect x="-8" y="-20" width="16" height="7" rx="2" fill="none" stroke="#e03a3a" stroke-width="3"/><path d="M-3 -9h6v6h6v6h-6v6h-6v-6h-6v-6h6z" fill="#fff"/>',
-  drink: '<rect x="-10" y="-18" width="20" height="36" rx="6" fill="#ff7a3d"/><rect x="-10" y="-6" width="20" height="12" fill="#ffd23f"/><rect x="-6" y="-22" width="12" height="5" rx="2" fill="#d8d8d8"/>',
-  ibuprofen: '<rect x="-11" y="-14" width="22" height="32" rx="4" fill="#f08a1c"/><rect x="-11" y="-1" width="22" height="11" fill="#fff"/><rect x="-13" y="-22" width="26" height="9" rx="2.5" fill="#fff"/><path d="M-6 4.5h12" stroke="#f08a1c" stroke-width="2.4"/>',
-  fists: '<path d="M-14 -4c0-6 4-9 8-9h12c5 0 9 3 9 8v9c0 6-5 10-11 10h-6c-7 0-12-5-12-11z" fill="#e8c9a8"/><path d="M-5 -13v8M2 -13v8M9 -12v7" stroke="#b3906d" stroke-width="2"/>',
+  // an orange (the item's wire id is still 'drink')
+  drink: '<circle cy="3" r="16" fill="#f5891f" stroke="#16171a" stroke-width="2.2"/><circle cx="-6" cy="-3" r="4" fill="#ffc27d" opacity=".75"/><path d="M0 -13v-4" stroke="#5a3a1a" stroke-width="2.4"/><path d="M1 -15c2-5 7-7 12-6-2 5-7 7-12 6z" fill="#4c9a3a" stroke="#16171a" stroke-width="1.6"/>',
+  // Perc 29: an orange pill bottle, 29 on the label (wire id 'ibuprofen')
+  ibuprofen: '<rect x="-11" y="-14" width="22" height="32" rx="4" fill="#f08a1c"/><rect x="-11" y="-2" width="22" height="13" fill="#fff"/><rect x="-13" y="-22" width="26" height="9" rx="2.5" fill="#fff"/><text y="8.5" text-anchor="middle" font-size="10" font-weight="900" font-family="sans-serif" fill="#c2410c">29</text>',
+  fists: `<g transform="translate(-20 -20) scale(0.625)">${FIST_SHAPES}</g>`,
 };
 
 function arc(a0: number, a1: number): string {

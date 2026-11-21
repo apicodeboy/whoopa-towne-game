@@ -28,7 +28,7 @@ player.
 ## The map: nine districts in a round map
 
 ```
-                       .-''''  NORTH FORTY  ''''-.            the rim of rock: a circle,
+                       .-''''  96  ''''-.            the rim of rock: a circle,
               BADLANDS     (fields, farmsteads)    '.          center (0, -16), radius 246
    x: -200            -86                 86              200
       +---------------+------------------+----------------+  z = -150
@@ -43,7 +43,7 @@ player.
 
 The JUMP OFF THE PORCH map is round (`MapDef.round`): the nine districts sit inside one big
 circle and the land between their old square edge and the circle is open country
-(`countryside.ts`): the **NORTH FORTY** north of The Hill (crop fields on a grid of farm
+(`countryside.ts`): **"96"** north of The Hill (crop fields on a grid of farm
 tracks, County Road, the Millers' and the Okafors' farmsteads with a barn, a silo and a house
 each, a sheep pen, the FEED & SEED store), the **BADLANDS** north and west of Babylon (sand,
 rocks, ruins), more jungle west of the jungle, an orchard and sunflowers east of Hong Kong and
@@ -183,12 +183,13 @@ the USE button.
   world builds in ~65 ms, and a JUMP OFF THE PORCH bot match runs at about 0.12–0.18 ms per
   server tick.
 
-## Ibuprofen (armor)
+## Perc 29 (armor)
 
-Orange pill bottles, in bookbags and lying around the map (about 40 at the start). Picking a
-bottle up puts it in your pockets (you carry up to four); nothing happens until you take one:
-pick it on the weapon wheel, or hold HEAL when your health is full. Taking one takes two
-seconds and gives 25 armor on top of your 100 health, up to 100 armor (four bottles' worth).
+Orange pill bottles (the item's id in the code is still `ibuprofen`), in bookbags and lying
+around the map (about 40 at the start). Picking a bottle up puts it in your pockets (you carry
+up to four); nothing happens until you take one: pick it on the weapon wheel, or hold HEAL when
+your health is full. Taking one takes two seconds and fills your armor (all four segments, 100
+on top of your 100 health).
 With full armor a bottle does nothing, so it is not used up. Armor shows as four blue segments
 over the health bar and soaks gunfire before health does (not the riot). Knocked out, the
 bottles you carry drop where you fell. The old armor vests are out of the loot pool.
@@ -216,7 +217,7 @@ From the blimp and in the air, each district's name floats over it in its own le
 (`client/src/game/porch/airLabels.ts`, styles in `client/src/styles/theme.css`): all in Paytone
 One, a free chunky display face, in cream and pink with a dark outline. BABYLON is in a
 starburst, THE HILL is extruded, HONG KONG is striped and slanted, JUNGLE is hatched, WHOOPA
-TOWNE and CAP'S HOUSE sit between rows of dots, NORTH FORTY is in a speech bubble, BADLANDS is
+TOWNE and CAP'S HOUSE sit between rows of dots, 96 is in a speech bubble, BADLANDS is
 stacked, DOWNTOWN is outlined, THE DOCKS is stacked, LAKE LINDA is in a
 speech bubble, and the BOARDWALK sparkles.
 

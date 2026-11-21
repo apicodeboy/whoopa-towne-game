@@ -122,7 +122,7 @@ function itemName(kind: number, code: number, count: number): string {
   if (kind === ITEM.AMMO) return `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`.toUpperCase();
   if (kind === ITEM.HEAL) return `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`.toUpperCase();
   if (kind === ITEM.ARMOR) return `ARMOR (${code})`;
-  if (kind === ITEM.IBUPROFEN) return `${count}× IBUPROFEN`;
+  if (kind === ITEM.IBUPROFEN) return `${count}× ${PORCH.heals.ibuprofen.name}`.toUpperCase();
   if (kind === ITEM.THROWABLE) return `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`.toUpperCase();
   return 'ITEM';
 }
@@ -1108,7 +1108,10 @@ export class Game {
     if (input.wantCrouch) b |= BTN.CROUCH;
     if (f.fire) b |= BTN.FIRE;
     if (f.aim) b |= BTN.AIM;
-    if (f.reload) b |= BTN.RELOAD;
+    // one button for both (square on a controller): use whatever is in reach, reload otherwise
+    const inReach = this.canTalkToAj || (this.porchWorld ? !!(this.promptTarget || this.bldTarget) : !!this.bldTarget);
+    if (f.reload || (f.useOrReload && !inReach)) b |= BTN.RELOAD;
+    if (f.useOrReload && inReach) b |= BTN.USE;
     if (f.throwBtn) b |= BTN.THROW;
     if (f.roll) b |= BTN.ROLL;
     // marking danger: a press (held for a couple of commands so it is never missed)
@@ -1164,9 +1167,12 @@ export class Game {
         const n = healCount(st, i);
         const ok = canHeal(st, i);
         const what = h.armor ? 'armor' : 'health';
+        const gives = h.armor && h.amount >= PORCH.maxArmor ? 'Fills your armor'
+          : h.amount >= PLAYER.maxHealth ? 'Full health'
+          : h.slow > 0 ? `+${h.amount} health, bit by bit` : `+${h.amount} ${what}`;
         return {
           label: h.name, count: `×${n}`, icon, ok, active: st.healT > 0 && st.healKind === i,
-          detail: n <= 0 ? 'None on you' : ok ? `+${h.amount} ${what} (up to ${h.cap})` : `Your ${what} is already topped up`,
+          detail: n <= 0 ? 'None on you' : ok ? gives : `Your ${what} is already topped up`,
         };
       };
       items[3] = heal('ibuprofen', 'ibuprofen');
@@ -1328,7 +1334,8 @@ export class Game {
     h.gun = !!weapon;
     h.melee = !!weapon && weapon.magSize === 0;
     h.weaponName = weapon ? weapon.name : st.thr > 0 ? THROWABLES[THROWABLE_IDS[st.thr - 1]].name : 'Nothing';
-    h.weaponId = weapon ? (weapon.id === 'fists' ? '' : weapon.id) : st.slot === 2 && st.thr > 0 ? THROWABLE_IDS[st.thr - 1] : '';
+    h.weaponId = weapon ? weapon.id : st.slot === 2 && st.thr > 0 ? THROWABLE_IDS[st.thr - 1] : '';
+    h.regen = st.regen;
     h.porch = this.porchWorld && snap?.porch ? { zone: snap.porch.zone, next: snap.porch.next } : null;
     h.reload = weapon && st.reloadT > 0 ? 1 - st.reloadT / weapon.reloadTime : -1;
     h.throwables = st.throwables;
@@ -1583,9 +1590,9 @@ export class Game {
       rarity = it.code >= 100 ? 'epic' : 'rare';
       rows = [['ARMOR', `+${it.code}`]];
     } else if (it.kind === ITEM.IBUPROFEN) {
-      name = 'IBUPROFEN';
+      name = PORCH.heals.ibuprofen.name.toUpperCase();
       rarity = it.count > 1 ? 'rare' : 'uncommon';
-      rows = [['ARMOR', `+${PORCH.ibuprofen.armor * it.count}`], ['MAX', String(PORCH.maxArmor)], ['QTY', String(it.count)]];
+      rows = [['ARMOR', 'FULL'], ['QTY', String(it.count)]];
     } else if (it.kind === ITEM.THROWABLE) {
       const t = THROWABLES[THROWABLE_IDS[it.code]];
       name = (t?.name ?? 'Throwable').toUpperCase();

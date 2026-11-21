@@ -470,6 +470,16 @@
 .health.low .fill {
   background: linear-gradient(90deg, #ff3b30, #ff8a5c);
 }
+.health .bar { position: relative; }
+/* health still coming in from an orange */
+.health .regen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(255, 168, 60, 0.75) 0 4px, rgba(255, 168, 60, 0.4) 4px 8px);
+  transition: width 0.12s linear, left 0.12s linear;
+}
+.health .regen.hidden { display: none; }
 .health.low .num {
   color: var(--bad);
   animation: pulse 0.8s infinite;
@@ -500,6 +510,11 @@
 .ammo .mag {
   font-size: 46px;
 }
+/* melee: the hands logo or the knife where the rounds would be */
+.ammo .mag.icon { display: inline-block; vertical-align: bottom; }
+.ammo .mag.icon svg.fist { width: 50px; height: 50px; display: block; }
+.ammo .mag.icon svg.knife { width: 84px; height: 32px; display: block; margin: 9px 0; }
+.gunpic .gp-img[src^='data:image/svg'] { object-fit: contain; height: 64px; }
 .ammo .sep {
   font-size: 24px;
   color: var(--muted);

@@ -54,7 +54,7 @@ const ADS: Record<string, [string, string, string, string, string]> = {
   shack: ['SHRIMP SHACK', 'ON THE BOARDWALK', '#0f4f55', '#1e7f86', '#ffffff'],
   kicks: ['KICKS', 'DOWNTOWN · NEW DROPS', '#3a0f0f', '#7a1f1f', '#ffffff'],
   wings: ['WINGS & THINGS', 'OCEAN DRIVE · 2 FLOORS', '#7a1410', '#d9451e', '#ffe14d'],
-  ibu: ['IBUPROFEN', 'TAKE THE EDGE OFF · +25 ARMOR', '#c25a08', '#ff8a1f', '#ffffff'],
+  ibu: ['PERC 29', 'FILLS YOUR ARMOR', '#c25a08', '#ff8a1f', '#ffffff'],
   hk: ['唐人街 HONG KONG', 'NIGHT MARKET · EVERY NIGHT', '#24101a', '#5c1438', '#3ff0ff'],
   docks: ['PIER 9', 'WAREHOUSE SPACE · THE DOCKS', '#1c2a36', '#3d5a70', '#ffd23f'],
 };

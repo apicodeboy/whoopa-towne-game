@@ -6,6 +6,7 @@ import { DEG, wrapAngle, yawToward } from '@shared/math';
 import { KILL_GRENADE, KILL_RIOT, KILL_WORLD, PHASE, type Phase, type SnapZone } from '@shared/protocol';
 import type { DeviceKind } from '../input/types';
 import { el } from './dom';
+import { FIST_OUTLINE, FIST_SVG, FIST_URL } from './handIcon';
 import { Minimap } from './minimap';
 import { GAMEPLAY_LEGEND, PORCH_LEGEND, glyphHtml, legendHtml } from './prompts';
 
@@ -74,6 +75,8 @@ export interface HudState {
   weaponName?: string;
   /** Id of what is in hand for its picture (weapon or throwable id; '' = nothing / fists). */
   weaponId?: string;
+  /** Health still to come from an orange. */
+  regen?: number;
   /** The crosshair of what is in hand (see Reticle in the weapons config). */
   reticle?: string;
   /** Looking down a scope: the scope fills the screen. */
@@ -98,6 +101,9 @@ export function makeHudState(): HudState {
 
 export type HitKind = 'hit' | 'head' | 'kill';
 
+/** The knife, for the ammo box (it has no rounds to count). */
+const KNIFE_SVG = '<svg class="knife" viewBox="0 0 64 24" aria-hidden="true"><path d="M4 9.5h21l2-3h5v11h-5l-2-3H4z" fill="#3a3c41" stroke="#16171a" stroke-width="2" stroke-linejoin="round"/><path d="M32 7h19c5 0 9 2.5 11 5.5L53 17H32z" fill="#dfe3e7" stroke="#16171a" stroke-width="2" stroke-linejoin="round"/></svg>';
+
 const WEAPON_ICONS: Record<string, string> = {
   smg: '<svg viewBox="0 0 48 20"><path d="M2 6h30v3h10v2H32v2h-8v6h-4v-6h-6l-3 6H7l2-6H2z"/></svg>',
   ar: '<svg viewBox="0 0 48 20"><path d="M1 7h8l2-2h20v2h14v2H31v3h-6l-1 7h-4l1-7h-8l-3 5H6l2-5H1z"/></svg>',
@@ -106,7 +112,7 @@ const WEAPON_ICONS: Record<string, string> = {
   grenade: '<svg viewBox="0 0 48 20"><circle cx="24" cy="12" r="7"/><path d="M21 2h7v4h-7z"/></svg>',
   world: '<svg viewBox="0 0 48 20"><path d="M24 2l9 16H15z"/></svg>',
   sniper: '<svg viewBox="0 0 48 20"><path d="M0 9h12l2-2h22v2h12v2H34v2h-7l-2 6h-4l1-6h-6l-4 5h-5l3-5H0z"/><path d="M16 3h12v3H16z"/></svg>',
-  fists: '<svg viewBox="0 0 48 20"><path d="M16 5h14a4 4 0 014 4v4a4 4 0 01-4 4H18a4 4 0 01-4-4V7a2 2 0 012-2z"/></svg>',
+  fists: FIST_OUTLINE,
   riot: '<svg viewBox="0 0 48 20"><circle cx="14" cy="6" r="3"/><circle cx="24" cy="5" r="3"/><circle cx="34" cy="6" r="3"/><path d="M9 19l2-9h6l2 9zM19 19l2-10h6l2 10zM29 19l2-9h6l2 9z"/></svg>',
 };
 
@@ -152,6 +158,7 @@ export class Hud {
   private zonesEl: HTMLElement;
   private zoneChips: HTMLElement[] = [];
   private healthFill: HTMLElement;
+  private regenFill: HTMLElement;
   private healthNum: HTMLElement;
   private healthBox: HTMLElement;
   /** Ibuprofen armor: four segments of 25 over the health bar. */
@@ -259,6 +266,7 @@ export class Hud {
 
     // ---- health ----
     this.healthFill = el('div', 'fill');
+    this.regenFill = el('div', 'regen hidden');
     this.healthNum = el('div', 'num', '100');
     this.shieldEl = el('div', 'shield hidden', 'SPAWN SHIELD');
     this.armorSegs = [0, 1, 2, 3].map(() => el('i', '', [el('b')]));
@@ -266,7 +274,7 @@ export class Hud {
     this.healthBox = el('div', 'health', [
       el('div', 'cap', 'HEALTH'),
       this.armorEl,
-      el('div', 'row', [this.healthNum, el('div', 'bar', [this.healthFill])]),
+      el('div', 'row', [this.healthNum, el('div', 'bar', [this.healthFill, this.regenFill])]),
       this.shieldEl,
     ]);
 
@@ -426,6 +434,13 @@ export class Hud {
       this.healthFill.style.width = `${hp}%`;
       this.healthBox.classList.toggle('low', hp <= 35);
     });
+    // health still coming in from an orange: a pale stretch past the bar's end
+    const regen = s.alive ? Math.max(0, Math.min(100 - hp, Math.round(s.regen ?? 0))) : 0;
+    this.set('regen', `${hp}|${regen}`, () => {
+      this.regenFill.style.left = `${hp}%`;
+      this.regenFill.style.width = `${regen}%`;
+      this.regenFill.classList.toggle('hidden', regen <= 0);
+    });
     const ar = Math.round(s.armor);
     this.set('armor', ar, () => {
       this.armorEl.classList.toggle('hidden', ar < 0);
@@ -450,14 +465,21 @@ export class Hud {
     this.set('wname', wname, () => (this.ammoName.textContent = wname.toUpperCase()));
     const picId = s.alive ? s.weaponId ?? '' : '';
     this.set('gunpic', `${picId}|${wname}`, () => {
-      const url = picId && this.gunIcon ? this.gunIcon(picId) : '';
+      // empty hands: the hands logo
+      const url = picId === 'fists' ? FIST_URL : picId && this.gunIcon ? this.gunIcon(picId) : '';
       this.gunPic.classList.toggle('hidden', !url);
       if (url) this.gunPicImg.src = url;
       this.gunPicName.textContent = wname.toUpperCase();
     });
-    const magText = s.melee ? '—' : gun ? String(s.mag) : String(s.throwables);
+    const magText = s.melee ? (s.weaponId === 'fists' ? '\u270a' : '\u2020') : gun ? String(s.mag) : String(s.throwables);
     const resText = s.melee ? '' : gun ? String(s.reserve) : '';
-    this.set('mag', magText, () => (this.ammoMag.textContent = magText));
+    // melee has nothing to count: the hands logo (or the knife) instead of a number
+    this.set('mag', magText, () => {
+      if (magText === '\u270a') this.ammoMag.innerHTML = FIST_SVG;
+      else if (magText === '\u2020') this.ammoMag.innerHTML = KNIFE_SVG;
+      else this.ammoMag.textContent = magText;
+      this.ammoMag.classList.toggle('icon', !!s.melee);
+    });
     this.set('res', `${resText}|${s.melee ? 1 : 0}`, () => {
       this.ammoRes.textContent = resText;
       this.ammoBox.classList.toggle('nores', !gun || !!s.melee);

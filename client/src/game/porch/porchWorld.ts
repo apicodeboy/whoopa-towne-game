@@ -396,7 +396,12 @@ export class PorchWorld {
       own(new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.2), mat(color)));
     } else if (kind === ITEM.HEAL) {
       if (code === 2) {
-        own(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.24, 10), mat(0xff5a36))).position.y = 0.04;
+        // an orange, a leaf on its stem
+        own(new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 2), mat(0xf5891f, { roughness: 0.75 }))).position.y = 0.02;
+        const leaf = own(new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 4), mat(0x4c9a3a)));
+        leaf.scale.set(1, 0.25, 0.5);
+        leaf.position.set(0.03, 0.12, 0);
+        leaf.rotation.z = -0.5;
       } else {
         own(new THREE.Mesh(new THREE.BoxGeometry(code === 1 ? 0.34 : 0.2, 0.14, code === 1 ? 0.26 : 0.14), mat(0xf4f4f0)));
         own(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, code === 1 ? 0.18 : 0.1), mat(0xd62f2f)));
