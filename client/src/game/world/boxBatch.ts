@@ -93,6 +93,36 @@ export class BoxBatch {
     this.count++;
   }
 
+  /**
+   * A flat polygon lying on the ground (y up), with holes cut out of it: `outline` and each
+   * hole are lists of (x, z) points. Textured in world space like addQuad.
+   */
+  addPolygon(outline: Array<[number, number]>, holes: Array<Array<[number, number]>>, y: number, opts: BoxOptions = {}): void {
+    const tile = opts.tile ?? 1;
+    if (opts.color instanceof THREE.Color) _c.copy(opts.color);
+    else _c.set(opts.color ?? 0xffffff);
+    const v2 = (p: [number, number]) => new THREE.Vector2(p[0], p[1]);
+    const contour = outline.map(v2);
+    const hs = holes.map((h) => h.map(v2));
+    const tris = THREE.ShapeUtils.triangulateShape(contour, hs);
+    const all = [...contour, ...hs.flat()];
+    const base = this.pos.length / 3;
+    for (const p of all) {
+      this.pos.push(p.x, y, p.y);
+      this.nor.push(0, 1, 0);
+      this.uv.push(p.x / tile, -p.y / tile);
+      this.col.push(_c.r, _c.g, _c.b);
+    }
+    for (const [a, b, c] of tris) {
+      const A = all[a], B = all[b], C = all[c];
+      // facing up: (B - A) × (C - A) has a positive y
+      const up = (B.y - A.y) * (C.x - A.x) - (B.x - A.x) * (C.y - A.y) > 0;
+      if (up) this.idx.push(base + a, base + b, base + c);
+      else this.idx.push(base + a, base + c, base + b);
+    }
+    this.count++;
+  }
+
   /** A flat quad lying on the ground (y up), for roads / painted areas. */
   addQuad(x0: number, z0: number, x1: number, z1: number, y: number, opts: BoxOptions = {}): void {
     const tile = opts.tile ?? 1;

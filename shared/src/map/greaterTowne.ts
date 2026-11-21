@@ -1,21 +1,25 @@
 import { Rng } from '../math';
 import { construct } from './architect';
 import { MapBuilder, type Opening, type Side } from './builder';
+import { capsHouse, POOL } from './capsHouse';
+import { countryside, rim, ROUND } from './countryside';
 import type { MapDef } from './types';
-import { addWhoopaTowne } from './whoopaTowne';
 
 /**
- * GREATER WHOOPA TOWNE — the JUMP OFF THE PORCH map: nine districts in a 3×3 grid, the
- * original town untouched in the middle (only its boundary walls come down).
+ * GREATER WHOOPA TOWNE — the JUMP OFF THE PORCH map: nine districts in a 3×3 grid with CAP'S
+ * HOUSE (a farm round a gigantic barndominium) in the middle, all inside one round map: open
+ * country fills the ring between the grid and the circle, a rim of rock runs round it, and
+ * LAKE LINDA lies to the south. (The classic WHOOPA TOWNE map is its own map, for Team
+ * Deathmatch and Turf War, and is not touched by any of this.)
  *
  *   x: -200            -86                 86              200
  *      +---------------+------------------+----------------+  z=-150
  *      |   BABYLON     |    THE HILL      |   HONG KONG    |
  *      |  (desert)     |  (houses, AJ'S)  | (Chinatown)    |
  *      +---------------+---- Porch St ----+----------------+  z=-56
- *      |   JUNGLE      |   WHOOPA TOWNE   |   DOWNTOWN     |
- *      |               |  (the classic    |                |
- *      |               |   map)           |                |
+ *      |   JUNGLE      |   CAP'S HOUSE    |   DOWNTOWN     |
+ *      |               |  (the farm, the  |                |
+ *      |               |   barndominium)  |                |
  *      +---------------+-- Ocean Drive ---+----------------+  z=61..71
  *      |  THE DOCKS    |    LAKE LINDA    | THE BOARDWALK  |
  *      +---------------+------------------+----------------+  z=118, the lake beyond
@@ -26,6 +30,8 @@ import { addWhoopaTowne } from './whoopaTowne';
  */
 
 export const GREATER = { minX: -200, maxX: 200, minZ: -150, maxZ: 118 } as const;
+/** The whole round map's bounding box (the circle, cut off at the lake). */
+export const GREATER_BOUNDS = { minX: ROUND.x - ROUND.r, maxX: ROUND.x + ROUND.r, minZ: ROUND.z - ROUND.r, maxZ: GREATER.maxZ } as const;
 /** The jungle's old west edge (now the west edge of the map). */
 const OLD_WEST = -200;
 const SHORE = GREATER.maxZ;
@@ -48,27 +54,26 @@ const PASTELS = [0xf2b8c6, 0x9fd8d0, 0xc9b8e8, 0xf6d7a0, 0xa8d8f0, 0xf4c2a1, 0xb
 export function buildGreaterTowne(): MapDef {
   const b = new MapBuilder();
   const rng = new Rng(SEED);
-  addWhoopaTowne(b, { perimeter: false });
-  coreLoot(b);
 
-  // ---- one ground slab under everything, and the edges ----
-  b.box('ground', GREATER.minX - 12, GREATER.maxX + 12, GREATER.minZ - 12, SHORE + 12, -1, 0);
-  // city backs along the north edge (the hill, Hong Kong) and the east edge
-  b.box('perimeter', -86, GREATER.maxX + 3, GREATER.minZ - 3, GREATER.minZ, 0, 10, { meta: { side: 'n' } });
-  b.box('perimeter', GREATER.maxX, GREATER.maxX + 3, GREATER.minZ, 61, 0, 10, { meta: { side: 'e', tall: 2.2 } });
-  // rock cliffs where the desert, the jungle and the docks meet the edge of the world
-  // (these draws come first, as they always have, so THE HILL generates exactly as before)
-  cliffs(b, rng, 'n', OLD_WEST - 10, -86);
-  cliffs(b, rng, 'w', GREATER.minZ - 10, SHORE + 2);
-  cliffs(b, rng, 'e', 61, SHORE + 2);
+  // ---- the ground under everything (with a hole for Cap's pool), and the edges ----
+  const G = { x0: GREATER_BOUNDS.minX - 12, x1: GREATER_BOUNDS.maxX + 12, z0: GREATER_BOUNDS.minZ - 12, z1: SHORE + 12 };
+  b.box('ground', G.x0, G.x1, G.z0, POOL.z0, -2.6, 0);
+  b.box('ground', G.x0, G.x1, POOL.z1, G.z1, -2.6, 0);
+  b.box('ground', G.x0, POOL.x0, POOL.z0, POOL.z1, -2.6, 0);
+  b.box('ground', POOL.x1, G.x1, POOL.z0, POOL.z1, -2.6, 0);
+  // (the old square map's edge walls and bluffs are gone: the land runs on to the rim. Their
+  // random draws still come first, as they always have, so THE HILL generates exactly as before.)
+  const scrap = new MapBuilder();
+  cliffs(scrap, rng, 'n', OLD_WEST - 10, -86);
+  cliffs(scrap, rng, 'w', GREATER.minZ - 10, SHORE + 2);
+  cliffs(scrap, rng, 'e', 61, SHORE + 2);
   // LAKE LINDA: you can walk to the water's edge and no further
-  b.box('bound', GREATER.minX - 6, GREATER.maxX + 6, SHORE, SHORE + 4, 0, 40);
+  b.box('bound', GREATER_BOUNDS.minX - 10, GREATER_BOUNDS.maxX + 10, SHORE, SHORE + 4, 0, 40);
 
   // ---- the border roads ----
   b.road('road', [{ x: -86, z: GREATER.minZ }, { x: -86, z: 61 }], 9, true); // West Line Rd
   b.road('road', [{ x: 86, z: GREATER.minZ }, { x: 86, z: 61 }], 9, true); // East Line Rd
   b.road('road', [{ x: GREATER.minX, z: -56 }, { x: GREATER.maxX, z: -56 }], 9, true); // Porch St
-  for (const x of [-18, 18]) b.road('road', [{ x, z: 50 }, { x, z: 61 }], 8, true); // the Strips run down to the beach
   b.road('road', [{ x: GREATER.minX, z: 66 }, { x: GREATER.maxX, z: 66 }], 10, true); // Ocean Drive
 
   hood(b, rng);
@@ -79,6 +84,9 @@ export function buildGreaterTowne(): MapDef {
   downtown(b, new Rng(SEED ^ 0xd07));
   beach(b, new Rng(SEED ^ 0xbea));
   docks(b, new Rng(SEED ^ 0xd0c));
+  capsHouse(b, new Rng(SEED ^ 0xca95));
+  countryside(b, new Rng(SEED ^ 0xf4a), { x0: GREATER.minX, x1: GREATER.maxX, z0: GREATER.minZ, z1: GREATER.maxZ }, SHORE);
+  rim(b, new Rng(SEED ^ 0x1e1), SHORE);
 
   billboards(b);
   districtFences(b);
@@ -98,7 +106,7 @@ export function buildGreaterTowne(): MapDef {
     { name: 'THE HILL', x: 0, z: -105 },
     { name: 'HONG KONG', x: 145, z: -105 },
     { name: 'JUNGLE', x: -145, z: 5 },
-    { name: 'WHOOPA TOWNE', x: 0, z: 0 },
+    { name: "CAP'S HOUSE", x: 0, z: 0 },
     { name: 'DOWNTOWN', x: 145, z: 5 },
     { name: 'THE DOCKS', x: -145, z: 95 },
     { name: 'LAKE LINDA', x: 0, z: 97 },
@@ -107,8 +115,9 @@ export function buildGreaterTowne(): MapDef {
   // JUMP OFF THE PORCH: before the match, everyone warms up in BABYLON
   b.warmup = { x0: CELL.w.x0 + 4, x1: CELL.w.x1 - 4, z0: CELL.n.z0 + 4, z1: CELL.n.z1 - 4 };
 
-  b.backdrop = { n: 'city', e: 'city', w: 'desert', s: 'ocean' };
-  return b.build('greater-towne', 'Greater Whoopa Towne', { ...GREATER });
+  b.backdrop = { n: 'hills', e: 'hills', w: 'desert', s: 'ocean' };
+  b.round = { ...ROUND, paved: { x0: GREATER.minX, x1: GREATER.maxX, z0: GREATER.minZ, z1: SHORE } };
+  return b.build('greater-towne', 'Greater Whoopa Towne', { ...GREATER_BOUNDS });
 }
 
 /**
@@ -133,6 +142,10 @@ function districtFences(b: MapBuilder): void {
     { along: 'z', at: 86, from: GREATER.minZ, to: SHORE }, // East Line Rd
     { along: 'x', at: -56, from: GREATER.minX, to: GREATER.maxX }, // Porch St
     { along: 'x', at: 66, from: GREATER.minX, to: GREATER.maxX }, // Ocean Drive
+    // the old square's edge: the country beyond is its own section too
+    { along: 'x', at: GREATER.minZ, from: GREATER.minX, to: GREATER.maxX },
+    { along: 'z', at: GREATER.minX, from: GREATER.minZ, to: SHORE },
+    { along: 'z', at: GREATER.maxX, from: GREATER.minZ, to: SHORE },
   ];
   // the spans of each line taken by something already there (gaps in the railing)
   const solidsBefore = b.solids.slice();
@@ -280,18 +293,6 @@ function distToLine(pts: Array<{ x: number; z: number }>, x: number, z: number):
     best = Math.min(best, Math.hypot(a.x + dx * t - x, a.z + dz * t - z));
   }
   return best;
-}
-
-/** Loot in the old town's walk-in places and up on its roofs. */
-function coreLoot(b: MapBuilder): void {
-  for (const [x, z, y] of [
-    [-4, -9.5, 0], [4, -15, 0], // corner store
-    [-33, 3, 0], [-30, 9, 0], [-32.5, 6, 4.4], // liquor store + roof
-    [32.5, 8, 0], [32.5, 14, 0], [31, 11, 4.4], // yard office + roof
-    [40, -36, 0], [56, -32, 0], [52, -42, 1.1], // warehouse
-    [-48, 45.5, 5.5], [-60, 46, 5.5], [48, 45.5, 5.5], // apartment roof, overpass
-    [0, -34, 0], [-46, 26, 0], [46, 26, 0], [0, 31, 0], // park, court, rail yard, alleys
-  ] as const) b.loot(x, z, y);
 }
 
 // =================================================================================== THE HILL

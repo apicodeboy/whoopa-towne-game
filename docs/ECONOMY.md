@@ -67,6 +67,14 @@ money on the server. Displays show decimals (`3.5`, `0.5`).
 Store prices are set per item in `CATALOG` (also in units). New accounts start with **0 GRAMS
 and no items**.
 
+**Gun skins** are bought per gun in the gun picker (main menu → Guns): every gun in the
+collection can wear Gold (2 GRAMS), Mirror Chrome or Iced Out (1.5), Graffiti or Neon Stripe
+(1) or Woodland (0.5). Each is its own item (`gun-<gun>-<skin>`, in `GUN_SKIN_ITEMS`), bought
+through the same atomic, idempotent `buy` as everything else, owned in TRAP, and worn through
+the per-gun appearance field `gs_<gun>`, which the server strips unless the account owns that
+exact skin for that exact gun. A gun without its own skin wears the AJ'S wrap, if any. Old
+wire codes (saved before the per-gun fields) decode with every gun on its factory finish.
+
 ## Run it locally (test payments)
 
 Test payments replace Stripe with a fake checkout page on your own server. No money moves.
@@ -219,7 +227,8 @@ row locks on the account), and keep unique constraints on order ids, webhook eve
 Items and prices are in `CATALOG` in `shared/src/config/economy.ts`. Each item lists the
 appearance options it puts on (`equip`), its rarity, and its price **in units**. An option
 becomes "AJ'S only" by marking it `premium` in `appearance.ts` (the `aj(...)` helper). New
-prints go in `PRINTS` (`palette.ts`), new wraps in `weaponSkins.ts`.
+prints go in `PRINTS` (`palette.ts`), new wraps in `weaponSkins.ts`, and per-gun skin prices in
+`GUN_SKIN_PRICES`.
 
 All card art is **placeholder** (drawn SVGs, marked "Placeholder art" in the store). Replace it in
 `client/src/ui/economyArt.ts` when final art exists.

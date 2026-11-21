@@ -2,6 +2,7 @@ import {
   DEFAULT_APPEARANCE, EXTRA_FIELD_KEYS, GameSim, LOOK_FIELDS, LOOK_FIELD_KEYS, LOOK_PRESETS, TOPS, isPremiumOption, botAppearance, decodeAppearance, encodeAppearance,
   randomAppearance, sameAppearance, sanitizeAppearance, seededRandom, type Appearance, type TeamId,
 } from '../src/index';
+import { GUN_IDS } from '../src/config/weapons';
 import { assert, test } from './harness';
 import { initRapier } from './env';
 
@@ -50,7 +51,8 @@ test('appearance: wire codes are short and round-trip exactly', () => {
     const a = randomAppearance(rand);
     assertValid(a, `random #${i}`);
     const code = encodeAppearance(a);
-    assert(code.length <= 56, `code too long (${code.length})`);
+    // (one character per field: the look, then a skin for each gun)
+    assert(code.length <= 56 + GUN_IDS.length, `code too long (${code.length})`);
     const b = decodeAppearance(code);
     assert(JSON.stringify(b) === JSON.stringify(a), `round trip changed look #${i}: ${code}`);
   }
@@ -122,9 +124,10 @@ test('appearance: the faceless character: new fields round-trip, old starter loo
   const moved = sanitizeAppearance(old);
   assert(moved.hair === 'spikylocs' && moved.hat === 'none' && moved.shoes === 'lowtops' && moved.belt === 'redstuds', 'an untouched old default becomes the new default');
   assert(moved.weaponSkin === 'gold', 'what was bought at AJ\'S stays on');
-  // its wire code, as written before the new fields existed (it ends after the pants chain)
+  // its wire code, as written before the new fields existed (it ends after the pants chain,
+  // before the faceless character's four fields and the gun skins)
   const full = encodeAppearance({ ...DEFAULT_APPEARANCE, ...old } as Appearance);
-  const oldCode = full.slice(0, full.length - 4);
+  const oldCode = full.slice(0, full.length - 4 - GUN_IDS.length);
   const viaCode = decodeAppearance(oldCode);
   assert(viaCode.hair === 'spikylocs' && viaCode.weaponSkin === 'gold', 'the same through an old wire code');
   // a look somebody made their own is left exactly as it was (it only gains the new fields' defaults)

@@ -64,6 +64,7 @@ export interface TextureSet {
   stucco: THREE.Texture;
   siding: THREE.Texture;
   metal: THREE.Texture;
+  panel: THREE.Texture;
   wood: THREE.Texture;
   crate: THREE.Texture;
   grass: THREE.Texture;
@@ -204,6 +205,24 @@ export function makeTextures(): TextureSet {
       g.fillRect(0, y, s, s / n);
     }
     speckle(g, s, r, 2500, 150, 230, 0.2);
+  });
+
+  // clean ribbed steel panels (a new build: no rust)
+  const panel = make(256, 29, (g, s) => {
+    g.fillStyle = '#f2f3f4';
+    g.fillRect(0, 0, s, s);
+    const n = 12;
+    for (let i = 0; i < n; i++) {
+      const x = (i * s) / n;
+      const grad = g.createLinearGradient(x, 0, x + s / n, 0);
+      grad.addColorStop(0, 'rgba(60,64,70,0.28)');
+      grad.addColorStop(0.12, 'rgba(255,255,255,0.4)');
+      grad.addColorStop(0.2, 'rgba(60,64,70,0.12)');
+      grad.addColorStop(0.85, 'rgba(255,255,255,0)');
+      grad.addColorStop(1, 'rgba(60,64,70,0.28)');
+      g.fillStyle = grad;
+      g.fillRect(x, 0, s / n, s);
+    }
   });
 
   const metal = make(256, 18, (g, s, r) => {
@@ -378,9 +397,9 @@ export function makeTextures(): TextureSet {
     }
   });
 
-  const all = [asphalt, road, concrete, sidewalk, brick, stucco, siding, metal, wood, crate, grass, gravel, shingle, chain, bars, shelf];
+  const all = [asphalt, road, concrete, sidewalk, brick, stucco, siding, metal, panel, wood, crate, grass, gravel, shingle, chain, bars, shelf];
   return {
-    asphalt, road, concrete, sidewalk, brick, stucco, siding, metal, wood, crate, grass, gravel, shingle, chain, bars, shelf,
+    asphalt, road, concrete, sidewalk, brick, stucco, siding, metal, panel, wood, crate, grass, gravel, shingle, chain, bars, shelf,
     dispose() {
       for (const t of all) t.dispose();
     },

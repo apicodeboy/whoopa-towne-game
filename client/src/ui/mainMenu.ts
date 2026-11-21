@@ -127,8 +127,8 @@ export class MainMenu {
     store.classList.add('hm-aj');
     const trap = pill('TRAP', () => actions.openTrap());
     trap.classList.add('hm-trap');
-    // (JUMP OFF THE PORCH has no loadout: you find your guns)
-    this.loadoutPill = pill('Loadout', () => actions.openLoadout());
+    // the gun collection: browse every gun, set the loadout, buy skins (all modes)
+    this.loadoutPill = pill('Guns', () => actions.openLoadout());
     const navLeft = el('nav', 'hm-nav-left', [
       store,
       trap,
@@ -361,7 +361,7 @@ export class MainMenu {
     for (const [id, card] of this.modeCards) card.classList.toggle('hidden', id === mode);
     const porch = mode === 'porch';
     this.squadPill.classList.toggle('hidden', !porch);
-    this.loadoutPill.classList.toggle('hidden', porch);
+    void porch;
     // JUMP OFF THE PORCH has no bot settings: bot levels vary on their own
     this.diffPill.classList.toggle('hidden', porch);
     this.root.dataset.mode = mode;

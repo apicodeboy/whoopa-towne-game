@@ -81,6 +81,8 @@ export class MapBuilder {
   windows: WindowDef[] = [];
   warmup: MapDef['warmup'];
   backdrop: MapDef['backdrop'];
+  round: MapDef['round'];
+  pens: NonNullable<MapDef['pens']> = [];
   spawns: [SpawnPoint[], SpawnPoint[]] = [[], []];
   zones: ZoneDef[] = [];
 
@@ -323,6 +325,8 @@ export class MapBuilder {
       ...(this.doors.length ? { doors: this.doors } : {}),
       ...(this.windows.length ? { windows: this.windows } : {}),
       ...(this.warmup ? { warmup: this.warmup } : {}),
+      ...(this.round ? { round: this.round } : {}),
+      ...(this.pens.length ? { pens: this.pens } : {}),
     };
   }
 }

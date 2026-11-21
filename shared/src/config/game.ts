@@ -189,6 +189,13 @@ export const SMOKE = {
 } as const;
 
 // ---- Networking ---------------------------------------------------------------
+/** Marking danger: how often, how far, and how long a mark stays up (on the clients). */
+export const MARK = {
+  cooldown: 0.75,
+  range: 320,
+  life: 10,
+} as const;
+
 export const NET = {
   /** Max buffered input commands the server keeps per player. */
   maxQueuedInputs: 24,

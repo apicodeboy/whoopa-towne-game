@@ -10,7 +10,7 @@ const _p = new THREE.Vector3();
 const LOOKS = ['marquee', 'extrude', 'stripes', 'hatch', 'outline', 'stack', 'burst', 'bubble', 'sparkle'] as const;
 type Look = (typeof LOOKS)[number];
 const DISTRICT_LOOKS: Record<string, Look> = {
-  'WHOOPA TOWNE': 'marquee', 'THE HILL': 'extrude', 'HONG KONG': 'stripes', JUNGLE: 'hatch', DOWNTOWN: 'outline',
+  'WHOOPA TOWNE': 'marquee', "CAP'S HOUSE": 'marquee', 'NORTH FORTY': 'bubble', BADLANDS: 'stack', 'THE HILL': 'extrude', 'HONG KONG': 'stripes', JUNGLE: 'hatch', DOWNTOWN: 'outline',
   'THE DOCKS': 'stack', BABYLON: 'burst', 'LAKE LINDA': 'bubble', BOARDWALK: 'sparkle',
 };
 

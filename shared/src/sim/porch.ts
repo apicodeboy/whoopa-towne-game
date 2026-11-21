@@ -126,9 +126,10 @@ export class PorchRules {
     this.outAt = new Float64Array(n);
     this.prevButtons = new Uint16Array(n);
 
-    const b = sim.map.bounds;
-    const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
-    const R0 = Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2 + 4;
+    const b = sim.map.bounds, round = sim.map.round;
+    // the first riot circle takes in the whole map
+    const cx = round ? round.x : (b.minX + b.maxX) / 2, cz = round ? round.z : (b.minZ + b.maxZ) / 2;
+    const R0 = round ? round.r + 4 : Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2 + 4;
     this.start0 = { x: cx, z: cz, r: R0 };
     this.zone = { ...this.start0 };
     this.next = { ...this.start0 };
@@ -151,8 +152,8 @@ export class PorchRules {
   // ------------------------------------------------------------------ setup
   /** Bookbags: by cars, benches, store shelves, dumpsters and anywhere else people drop things. */
   private placeBags(): void {
-    const sim = this.sim, rng = this.rng, nav = sim.nav, b = sim.map.bounds;
-    const hectares = ((b.maxX - b.minX) * (b.maxZ - b.minZ)) / 10000;
+    const sim = this.sim, rng = this.rng, nav = sim.nav;
+    const hectares = this.landArea() / 10000;
     const count = Math.max(PORCH.minBags, Math.round(sim.players.length * PORCH.bagsPerPlayer), Math.round(hectares * PORCH.bagsPerHectare));
     const props = sim.map.props.filter((p) => p.y < 0.5 && ['car', 'van', 'truck', 'dumpster', 'bench', 'busstop', 'hoop', 'shelf', 'trashcan', 'crate', 'pallet', 'umbrella'].includes(p.type));
     const taken: Array<{ x: number; z: number }> = [];
@@ -294,13 +295,12 @@ export class PorchRules {
     this.steps.push({ stage: STAGE_RIOT + PORCH.riotPhases.length - 1, kind: 'hold', start: t, end: Infinity, phase: PORCH.riotPhases.length - 1 });
 
     // everyone still aboard gets pushed out just before the transport leaves the town
-    const b = this.sim.map.bounds;
     const len = Math.hypot(this.route[2] - this.route[0], this.route[3] - this.route[1]);
     let lastInside = 0;
     for (let d = 0; d <= len; d += 1) {
       const x = this.route[0] + ((this.route[2] - this.route[0]) * d) / len;
       const z = this.route[1] + ((this.route[3] - this.route[1]) * d) / len;
-      if (x > b.minX + 8 && x < b.maxX - 8 && z > b.minZ + 8 && z < b.maxZ - 8) lastInside = d;
+      if (this.overLand(x, z, 8)) lastInside = d;
     }
     this.dropBy = now + (lastInside / this.speed) * 1000;
     this.recount();
@@ -409,7 +409,7 @@ export class PorchRules {
     switch (it.kind) {
       case ITEM.WEAPON: {
         const w = WEAPONS[WEAPON_IDS[it.code]];
-        if (!w || w.id === 'fists') return null;
+        if (!w || w.kind === 'melee') return null;
         const code = it.code + 1;
         let slot = -1;
         if (w.kind === 'secondary') slot = SLOT_SECONDARY;
@@ -662,15 +662,31 @@ export class PorchRules {
     return phase >= 0 ? PORCH.riotPhases[phase].dps : 0;
   }
 
+  /** Is (x, z) over the map's land, at least `margin` in from its edge? */
+  private overLand(x: number, z: number, margin: number): boolean {
+    const b = this.sim.map.bounds, round = this.sim.map.round;
+    if (x < b.minX + margin || x > b.maxX - margin || z < b.minZ + margin || z > b.maxZ - margin) return false;
+    return !round || Math.hypot(x - round.x, z - round.z) < round.r - margin;
+  }
+
+  /** The map's land area (m²): its bounds, or on a round map the part of the circle on this side of the shore. */
+  private landArea(): number {
+    const b = this.sim.map.bounds;
+    if (!this.sim.map.round) return (b.maxX - b.minX) * (b.maxZ - b.minZ);
+    let n = 0;
+    for (let x = b.minX + 2; x < b.maxX; x += 4) for (let z = b.minZ + 2; z < b.maxZ; z += 4) if (this.overLand(x, z, 0)) n++;
+    return n * 16;
+  }
+
   /** The next safe area: inside the current one, centered on ground people can stand on. */
   private pickNext(cur: Circle, r: number): Circle {
-    const nav = this.sim.nav, b = this.sim.map.bounds, rng = this.rng;
+    const nav = this.sim.nav, rng = this.rng;
     const room = Math.max(0, cur.r - r);
     for (let k = 0; k < 60; k++) {
       const a = rng.range(0, Math.PI * 2), d = Math.sqrt(rng.next()) * room;
       const x = cur.x + Math.cos(a) * d, z = cur.z + Math.sin(a) * d;
       const margin = Math.min(r * 0.4, 12);
-      if (x < b.minX + margin || x > b.maxX - margin || z < b.minZ + margin || z > b.maxZ - margin) continue;
+      if (!this.overLand(x, z, margin)) continue;
       if (r < 20 && !nav.isWalkable(x, z)) continue;
       return { x, z, r };
     }

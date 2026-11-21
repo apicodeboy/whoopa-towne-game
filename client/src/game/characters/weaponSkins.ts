@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { gunSkinField, type Appearance } from '@shared/config/appearance';
 
 /**
  * AJ's weapon wraps. Purely a material swap on the held model: the gun, its stats, its muzzle
@@ -22,6 +23,7 @@ const SKINS: Record<string, SkinDef> = {
   neon: { id: 3, metal: 0.2, rough: 0.4, glow: 0.05 },
   chrome: { id: 4, metal: 0.4, rough: 0.12, glow: 0.04 },
   graffiti: { id: 5, metal: 0.05, rough: 0.6, glow: 0.18 },
+  ice: { id: 6, metal: 0.35, rough: 0.08, glow: 0.1 },
 };
 
 const NOISE = /* glsl */ `
@@ -44,6 +46,16 @@ vec3 wsPrint(int kind, vec3 p, out float glow) {
     if (s < 0.14) { glow = 1.6; return vec3(0.25, 1.0, 0.12); }
     if (s > 0.5 && s < 0.6) { glow = 1.6; return vec3(1.0, 0.12, 0.75); }
     return vec3(0.03, 0.03, 0.035);
+  }
+  if (kind == 6) {
+    // iced out: rows of little stones, each catching the light its own way
+    vec3 q = p * 70.0;
+    vec3 cell = floor(q);
+    float sparkle = wsHash(cell);
+    float d = length(fract(q) - 0.5);
+    if (d > 0.44) return vec3(0.55, 0.6, 0.66);
+    glow = sparkle > 0.86 ? 2.2 : 0.0;
+    return mix(vec3(0.78, 0.88, 0.98), vec3(1.0), sparkle);
   }
   // graffiti: bright blobs with black outlines
   float n = wsNoise(p * 6.0), m = wsNoise(p * 11.0 + 3.0);
@@ -92,7 +104,7 @@ function skinMaterial(src: THREE.Material, kind: string, def: SkinDef, unit: num
         `#include <emissivemap_fragment>
 	totalEmissiveRadiance += diffuseColor.rgb * (${def.glow.toFixed(3)} + wsGlow * 0.5);
 	// metals: a fake sky / ground reflection (the scene has no environment map)
-	${def.id === 1 || def.id === 4 ? `{
+	${def.id === 1 || def.id === 4 || def.id === 6 ? `{
 		vec3 wsR = reflect(-normalize(vViewPosition), normal);
 		float wsSky = smoothstep(-0.25, 0.4, wsR.y);
 		totalEmissiveRadiance += diffuseColor.rgb * (0.1 + 0.9 * wsSky) * ${def.id === 4 ? '0.9' : '0.55'};
@@ -102,6 +114,12 @@ function skinMaterial(src: THREE.Material, kind: string, def: SkinDef, unit: num
   mat.customProgramCacheKey = () => `wrap-${kind}`;
   cache.set(key, mat);
   return mat;
+}
+
+/** The skin a gun wears for a look: its own (bought for that gun), else the AJ'S wrap. */
+export function skinForGun(look: Readonly<Appearance>, gun: string): string {
+  const own = (look as unknown as Record<string, string | undefined>)[gunSkinField(gun)];
+  return own && own !== 'none' ? own : look.weaponSkin;
 }
 
 /** Is this an AJ's wrap that changes the gun's look? */

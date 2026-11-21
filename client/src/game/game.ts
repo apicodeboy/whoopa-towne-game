@@ -36,6 +36,7 @@ import { RiotCrowd } from './porch/riotCrowd';
 import { AirLabels } from './porch/airLabels';
 import { AjNpc } from './ajs/ajNpc';
 import { DamageNumbers } from '../ui/damageNumbers';
+import { DangerMarks } from '../ui/dangerMarks';
 import { GunIcons } from './gunIcons';
 import { glyphHtml } from '../ui/prompts';
 import { defaultServerUrl } from '../net/online';
@@ -69,6 +70,7 @@ export interface GameAudio {
   phase(kind: 'start' | 'win' | 'lose' | 'draw' | 'tick'): void;
   pop?(pos: THREE.Vector3 | null): void;
   loot?(): void;
+  mark?(): void;
   riot?(): void;
   crowd?(level: number): void;
   door?(open: boolean, pos: THREE.Vector3): void;
@@ -174,6 +176,9 @@ export class Game {
   private useWas = false;
   /** Damage you deal, floating over whoever you hit. */
   private dmgNums: DamageNumbers;
+  private marks: DangerMarks;
+  /** Ticks left to hold MARK down (a mark press reaches at least one input command). */
+  private tapMark = 0;
   readonly gunIcons: GunIcons;
   private mySkin = 'none';
   /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
@@ -277,6 +282,7 @@ export class Game {
 
     this.hud = new Hud(deps.uiRoot, this.map);
     this.dmgNums = new DamageNumbers(this.hud.root);
+    this.marks = new DangerMarks(this.hud.root);
     // pictures of the guns (with your wrap) for the weapon panel and pickup cards
     this.mySkin = (mine?.look ? decodeAppearance(mine.look) : null)?.weaponSkin ?? 'none';
     this.gunIcons = new GunIcons(this.gfx.renderer, deps.assets ?? null);
@@ -585,6 +591,7 @@ export class Game {
             primary: WEAPON_IDS[e[6]] ?? this.loadout.primary,
             secondary: WEAPON_IDS[e[7]] ?? this.loadout.secondary,
             throwable: THROWABLE_IDS[e[8]] ?? this.loadout.throwable,
+            melee: this.loadout.melee,
           };
           this.hudState.loadout = this.loadout;
         }
@@ -676,6 +683,15 @@ export class Game {
       case EV.HEALED:
         if (e[1] === myIdx) audio?.reloadDone();
         break;
+      case EV.MARK: {
+        // only your own squad's marks are sent; a local match checks here too
+        const r = this.roster.get(e[1]);
+        const mate = !!r && (this.session.mode === 'porch' ? (r.squad ?? r.team) === this.mySquad : r.team === this.myTeam);
+        if (e[1] !== myIdx && !mate) break;
+        this.marks.add(e[1], r?.name ?? '', e[2] / 100, e[3] / 100, e[4] / 100, e[1] === myIdx);
+        audio?.mark?.();
+        break;
+      }
       case EV.DOOR: {
         const b = this.stage.buildings;
         const i = e[1];
@@ -849,7 +865,8 @@ export class Game {
     p.climb = this.alive && st.climbT > 0 ? 1 - st.climbT / LEDGE.time : -1;
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
-      this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding && !spectating);
+      // (looking down a scope: out of the way, like a first-person view through the glass)
+      this.localChar.setVisible((this.rig.dist > 0.55 || !this.alive) && !riding && !spectating && !this.hudState.scoped);
     }
     // hanging from a balloon
     const wantBalloon = !!this.porchWorld && this.alive && st.air === AIR_BALLOON;
@@ -952,6 +969,8 @@ export class Game {
     {
       const el = this.gfx.renderer.domElement;
       this.dmgNums.update(dt, this.rig.camera, el.clientWidth, el.clientHeight);
+      const me = this.predictor.state;
+      this.marks.update(dt, this.rig.camera, el.clientWidth, el.clientHeight, { x: me.x, y: me.y, z: me.z });
     }
     if (this.porchHud) this.updatePorchHud(dt, aimYaw, spectating);
 
@@ -1092,6 +1111,12 @@ export class Game {
     if (f.reload) b |= BTN.RELOAD;
     if (f.throwBtn) b |= BTN.THROW;
     if (f.roll) b |= BTN.ROLL;
+    // marking danger: a press (held for a couple of commands so it is never missed)
+    if (f.mark) this.tapMark = 2;
+    if (this.tapMark > 0) {
+      b |= BTN.MARK;
+      this.tapMark--;
+    }
     const tapped = this.tapUse > 0;
     if (this.tapUse > 0) this.tapUse--;
     if (this.porchWorld) {
@@ -1116,7 +1141,7 @@ export class Game {
     const items: Array<WheelItem | null> = new Array(WHEEL_SEGMENTS).fill(null);
     const gun = (slot: number): WheelItem => {
       const w = weaponInSlot(st, slot);
-      const empty = !w || w.id === 'fists';
+      const empty = !w || w.kind === 'melee';
       if (empty) return { label: 'Empty', count: '', detail: this.porchWorld ? 'Search bookbags for a gun' : '', icon: 'fists', ok: false, active: false };
       return {
         label: w.name, count: w.magSize > 0 ? `${magOf(st, slot)} / ${reserveOf(st, slot)}` : '', detail: st.slot === slot ? 'In your hands' : 'Equip',
@@ -1164,7 +1189,7 @@ export class Game {
     const open = usable && input.wheelOpen;
     const items = open || input.wheelOpen ? this.wheelItems() : [];
     const device = input.device;
-    const hint = device === 'touch' ? '' : `LET GO OF ${glyphHtml(device, 'wheel')} TO PICK`;
+    const hint = device === 'touch' ? '' : `<em class="ww-h">LET GO OF ${glyphHtml(device, 'wheel')} TO PICK</em><em class="ww-h">${glyphHtml(device, 'fire')} MARK DANGER</em>`;
     this.wheel.update(open, items, input.wheelAim, hint);
     const pick = input.takeWheelPick();
     if (!pick || !usable) return;
@@ -1310,9 +1335,14 @@ export class Game {
     h.spreadDeg = weapon ? currentSpread(st, weapon) : 1;
     h.fovV = this.rig.camera.fov;
     h.aimT = this.rig.aimT;
+    // the reticle of the gun in hand, and the scope once a scoped gun is aimed in
+    const wdef = weapon && weapon.magSize > 0 ? weapon : null;
+    h.reticle = weapon ? weapon.reticle : 'cross';
+    h.scoped = !!wdef && (wdef.reticle === 'scope' || wdef.reticle === 'pso' || wdef.reticle === 'acog') && st.aiming === 1 && this.rig.aimT > 0.8;
     h.killer = this.killer;
     h.showScoreboard = this.deps.input.frame.scoreboard;
     h.myX = st.x;
+    h.marks = this.marks.points();
     h.myZ = st.z;
     h.viewYaw = aimYaw;
     h.ping = this.session.ping;
@@ -1432,7 +1462,7 @@ export class Game {
     const key = device === 'touch' ? '[TAP]' : glyphHtml(device, 'use');
     const slot = (n: number) => {
       const w = weaponInSlot(st, n);
-      const empty = !w || w.id === 'fists';
+      const empty = !w || w.kind === 'melee';
       return { name: empty ? '' : w!.name, mag: magOf(st, n), reserve: reserveOf(st, n), empty, active: st.slot === n };
     };
     const squad: PorchHudState['squad'] = [];
@@ -1604,6 +1634,7 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
     this.stop();
     this.aj?.dispose();
     this.dmgNums.dispose();
+    this.marks.dispose();
     this.gunIcons.dispose();
     this.wheel.dispose();
     window.removeEventListener('resize', this.onResize);

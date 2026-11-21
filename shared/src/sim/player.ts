@@ -25,6 +25,8 @@ export const BTN = {
   DROP: 512,
   /** Roll (crouch pressed while sprinting). */
   ROLL: 1024,
+  /** Mark danger where you are looking (your squad sees it). */
+  MARK: 2048,
 } as const;
 
 /** PlayerState.air: on the ground, riding the transport, or hanging from a balloon. */
@@ -161,6 +163,8 @@ export interface PlayerState {
   climbH: number;
   /** Ibuprofen bottles carried (each taken adds armor). */
   pills: number;
+  /** What you swing with a gun slot empty: WEAPON_IDS index + 1 (0 = hands). */
+  wM: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -173,7 +177,7 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'bandages', 'medkits', 'drinks', 'healT', 'healKind',
   'air', 'windX', 'windZ', 'riot', 'hp', 'armor', 'airT', 'airJumps',
   'rollT', 'rollX', 'rollZ', 'climbT', 'climbAX', 'climbAY', 'climbAZ', 'climbBX', 'climbBY', 'climbBZ', 'climbH',
-  'pills',
+  'pills', 'wM',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -234,6 +238,7 @@ export function spawnPlayerState(s: PlayerState, spawn: SpawnPoint, loadout: Loa
   const q = WEAPONS[loadout.secondary];
   s.wA = weaponCode(loadout.primary);
   s.wH = weaponCode(loadout.secondary);
+  s.wM = loadout.melee && loadout.melee !== 'fists' ? weaponCode(loadout.melee) : 0;
   s.thr = THROWABLE_IDS.indexOf(loadout.throwable) + 1;
   s.mag0 = p.magSize;
   s.res0 = p.reserve;
@@ -252,7 +257,9 @@ export function weaponCode(id: WeaponId): number {
 export function weaponInSlot(s: PlayerState, slot: number): WeaponDef | null {
   const code = slot === SLOT_PRIMARY ? s.wA : slot === SLOT_SECONDARY ? s.wH : slot === SLOT_PRIMARY_B ? s.wB : -1;
   if (code < 0) return null;
-  return code > 0 ? WEAPONS[WEAPON_IDS[code - 1]] ?? WEAPONS.fists : WEAPONS.fists;
+  // an empty gun slot: whatever you swing (hands, or the knife from your loadout)
+  const melee = s.wM > 0 ? WEAPONS[WEAPON_IDS[s.wM - 1]] ?? WEAPONS.fists : WEAPONS.fists;
+  return code > 0 ? WEAPONS[WEAPON_IDS[code - 1]] ?? melee : melee;
 }
 
 /** Rounds in a slot's magazine. */
@@ -425,10 +432,12 @@ function stepBalloon(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWor
   s.sprinting = 0;
   s.aiming = 0;
   phys.moveCharacter(s.x, s.y, s.z, s.vx * dt, s.vy * dt, s.vz * dt, false, mv);
-  const b = phys.bounds;
-  s.x = clamp(mv.x, b.minX + 1, b.maxX - 1);
+  _over.x = mv.x;
+  _over.z = mv.z;
+  phys.keepOver(_over, 1);
+  s.x = _over.x;
   s.y = mv.y;
-  s.z = clamp(mv.z, b.minZ + 1, b.maxZ - 1);
+  s.z = _over.z;
   if (mv.grounded) {
     act.landed = true;
     act.landSpeed = -s.vy;
@@ -442,6 +451,8 @@ function stepBalloon(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWor
     s.grounded = 0;
   }
 }
+
+const _over = { x: 0, z: 0 };
 
 /**
  * Skydiving: fall fast (faster holding crouch), fly over the town with the move keys, and
@@ -472,10 +483,12 @@ function stepSkydive(s: PlayerState, cmd: InputCmd, dt: number, phys: PhysicsWor
   s.aiming = 0;
   s.airT += dt;
   phys.moveCharacter(s.x, s.y, s.z, s.vx * dt, s.vy * dt, s.vz * dt, false, mv);
-  const b = phys.bounds;
-  s.x = clamp(mv.x, b.minX + 1, b.maxX - 1);
+  _over.x = mv.x;
+  _over.z = mv.z;
+  phys.keepOver(_over, 1);
+  s.x = _over.x;
   s.y = mv.y;
-  s.z = clamp(mv.z, b.minZ + 1, b.maxZ - 1);
+  s.z = _over.z;
   if (mv.grounded) {
     act.landed = true;
     act.landSpeed = -s.vy;

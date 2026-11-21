@@ -7,7 +7,7 @@ import type { DeviceKind } from './types';
  */
 
 /** Actions with a key (keyboard). */
-export const KEY_ACTIONS = ['jump', 'crouch', 'crouchHold', 'sprint', 'reload', 'throw', 'shoulder', 'use', 'heal', 'drop', 'wheel', 'scores'] as const;
+export const KEY_ACTIONS = ['jump', 'crouch', 'crouchHold', 'sprint', 'reload', 'throw', 'shoulder', 'use', 'heal', 'drop', 'wheel', 'mark', 'scores'] as const;
 export type KeyAction = (typeof KEY_ACTIONS)[number];
 
 /** Actions with a button (controller). */
@@ -23,8 +23,9 @@ export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
   sprint: 'Sprint',
   reload: 'Reload',
   swap: 'Next weapon',
-  prev: 'Previous weapon (tap) · weapon wheel (hold)',
-  wheel: 'Weapon wheel (hold)',
+  prev: 'Previous weapon (tap) · weapon wheel (hold; fire in it to mark danger)',
+  wheel: 'Weapon wheel (hold) · click in it to mark danger',
+  mark: 'Mark danger (your squad sees it)',
   throw: 'Throw',
   shoulder: 'Swap shoulder',
   use: 'Use: doors, windows, search, pick up, talk',
@@ -45,6 +46,7 @@ export const DEFAULT_KEYS: Record<KeyAction, string> = {
   heal: 'KeyH',
   drop: 'KeyX',
   wheel: 'KeyB',
+  mark: 'KeyZ',
   scores: 'Tab',
 };
 

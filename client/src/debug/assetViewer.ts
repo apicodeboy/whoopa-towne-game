@@ -5,6 +5,10 @@ import { makePose, type CharacterVisual } from '../game/characters/characterType
 import { LookBuilder, lookTimings } from '../game/characters/look/assemble';
 import { ProceduralCharacter } from '../game/characters/proceduralCharacter';
 import { SkinnedCharacter } from '../game/characters/skinnedCharacter';
+import { applyWeaponSkin } from '../game/characters/weaponSkins';
+import { GunIcons } from '../game/gunIcons';
+import { hasGunModel, makeGunModel } from '../game/gunKit';
+import { WEAPON_IDS } from '@shared/config/weapons';
 
 /**
  * Developer page (?debug=assets): lines up every loaded model next to a 1.8m reference
@@ -51,7 +55,9 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
   if (view === 'characters') {
     const pose = makePose();
     const set = (p: typeof pose, t: number) => {
-      p.vx = 0; p.vz = 0; p.crouching = false; p.sprinting = false; p.aiming = false; p.reload = -1; p.pitch = 0; p.held = 'ar';
+      p.vx = 0; p.vz = 0; p.crouching = false; p.sprinting = false; p.aiming = false; p.reload = -1; p.pitch = 0; p.held = 'draco';
+      // &gun=<id>: hold that gun (any pose)
+      if (q.get('gun')) p.held = q.get('gun') as typeof p.held;
       switch (poseName) {
         case 'run': p.vz = -5; break;
         case 'strafe': p.vx = 5; break;
@@ -60,18 +66,21 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
         case 'crouch': p.crouching = true; break;
         case 'crouchwalk': p.crouching = true; p.vz = -2.6; break;
         case 'aim': p.aiming = true; break;
-        case 'aimsmg': p.aiming = true; p.held = 'smg'; break;
-        case 'aimshotgun': p.aiming = true; p.held = 'shotgun'; break;
-        case 'aimpistol': p.aiming = true; p.held = 'pistol'; break;
+        case 'aimsmg': p.aiming = true; p.held = 'mp7'; break;
+        case 'aimshotgun': p.aiming = true; p.held = 'bammer'; break;
+        case 'aimpistol': p.aiming = true; p.held = 'taurus'; break;
         case 'aimrun': p.aiming = true; p.vz = -3; break;
         case 'aimup': p.pitch = 0.6; p.aiming = true; break;
         case 'aimdown': p.pitch = -0.6; p.aiming = true; break;
         case 'reload': p.reload = (t * 0.5) % 1; break;
-        case 'pistol': p.held = 'pistol'; break;
-        case 'shotgun': p.held = 'shotgun'; break;
-        case 'smg': p.held = 'smg'; break;
+        case 'pistol': p.held = 'taurus'; break;
+        case 'magnum': p.held = 'magnum'; break;
+        case 'knife': p.held = 'knife'; break;
+        case 'shotgun': p.held = 'bammer'; break;
+        case 'double': p.held = 'doublebarrel'; break;
+        case 'smg': p.held = 'mp7'; break;
         case 'grenade': p.held = 'grenade'; break;
-        case 'sniper': p.held = 'sniper'; break;
+        case 'sniper': p.held = 'intervention'; break;
         case 'unarmed': p.held = 'none'; break;
         case 'unarmedrun': p.held = 'none'; p.vz = -5; break;
         case 'walk': p.vz = -2.6; break;
@@ -148,22 +157,23 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
     }
     info.characters = assets.characters.map((c) => ({ name: c.name, clips: [...c.clips.keys()] }));
   } else if (view === 'guns') {
-    // stacked vertically and seen side-on: screen-left is +Z (blue axis), up is +Y
-    const names = ['ar', 'smg', 'shotgun', 'pistol', 'grenade'];
-    names.forEach((name, i) => {
-      const t = assets.model(name);
-      if (!t) return;
-      const obj = t.root.clone(true);
-      const k = (name === 'grenade' ? 0.3 : name === 'pistol' ? 0.6 : 1.6) / t.size.z;
-      obj.scale.setScalar(k);
-      obj.position.set(0, 0.2 + i * 0.75, 0);
-      scene.add(obj);
-      const axes = new THREE.AxesHelper(1.1);
-      axes.position.copy(obj.position);
-      scene.add(axes);
+    // the weapon collection at real size, side-on (muzzles to the right), in three columns;
+    // &skin=gold etc. puts a wrap on them all
+    const icons = new GunIcons(renderer, assets);
+    // the pictures the menus use, for a sheet (see tools/out/sc/gunsheet.mjs)
+    (window as unknown as Record<string, unknown>).__gunIcons = (skin = 'none') => WEAPON_IDS.filter((id) => hasGunModel(id)).map((id) => [id, icons.get(id, skin)]);
+    const ids = WEAPON_IDS.filter((id) => hasGunModel(id));
+    ids.forEach((id, i) => {
+      const g = makeGunModel(id)!;
+      if (q.get('skin')) applyWeaponSkin(g, q.get('skin')!, new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3()));
+      const col = i % 3, row = Math.floor(i / 3);
+      g.rotation.y = -Math.PI / 2;
+      g.position.set(-1.6 + col * 1.6, 3.4 - row * 0.62, 0);
+      scene.add(g);
     });
-    camera.position.set(7, 1.9, 0);
-    camera.lookAt(0, 1.9, 0);
+    scene.background = new THREE.Color(0xb9bec8);
+    camera.position.set(0, 2.2, 7.2);
+    camera.lookAt(0, 2.2, 0);
   } else {
     const names = ['car', 'taxi', 'van', 'truck', 'dumpster', 'barrier', 'bench', 'hydrant', 'trashcan', 'cone'];
     let x = 0;

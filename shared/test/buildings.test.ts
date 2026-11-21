@@ -9,11 +9,12 @@ import { initRapier } from './env';
 /** A flat lot with one building (front toward +z when facing south), and room around it. */
 function lotMap(type: BuildingType, w: number, d: number, floors?: number, facing: Side = 's'): MapDef {
   const b = new MapBuilder();
-  b.box('ground', -30, 40, -30, 40, -1, 0);
+  const far = Math.max(40, w + 20, d + 20);
+  b.box('ground', -30, far, -30, far, -1, 0);
   construct(b, { id: 'bld', type, x0: 0, x1: w, z0: 0, z1: d, facing, floors, seed: 3 });
   b.spawn(0, 0, 20, 0);
   b.spawn(1, 0, 20, 0);
-  return b.build('lot', 'lot', { minX: -30, maxX: 40, minZ: -30, maxZ: 40 });
+  return b.build('lot', 'lot', { minX: -30, maxX: far, minZ: -30, maxZ: far });
 }
 
 /** The reference house: 10 × 8.8, two floors, its front door on the south side (z = 8.8). */
@@ -91,6 +92,8 @@ const TYPES: Array<{ type: BuildingType; w: number; d: number; floors?: number }
   { type: 'restaurant', w: 12, d: 12, floors: 2 }, { type: 'office', w: 16, d: 14, floors: 3 }, { type: 'warehouse', w: 18, d: 16 }, { type: 'garage', w: 10, d: 10 },
   { type: 'workshop', w: 14, d: 12 }, { type: 'storage', w: 17, d: 14 },
   { type: 'townhouse', w: 8, d: 8.8 }, { type: 'duplex', w: 14, d: 8.8 },
+  // CAP'S HOUSE: the barndominium and the barns
+  { type: 'barndo', w: 50, d: 26 }, { type: 'barn', w: 16, d: 18 }, { type: 'barn', w: 18, d: 16 },
 ];
 
 test('buildings: on every floor of every type, every room can be walked to (doors open)', async () => {
@@ -99,8 +102,8 @@ test('buildings: on every floor of every type, every room can be walked to (door
     const map = lotMap(t.type, t.w, t.d, t.floors);
     // no Buildings on this world: doors and windows have no collision (all open)
     const phys = new PhysicsWorld(R, map);
-    const story = t.type === 'office' ? 3.4 : t.type === 'warehouse' ? 6.4 : t.type === 'garage' || t.type === 'workshop' || t.type === 'storage' ? 4.4 : 3.2;
-    const nf = t.type === 'house2' || t.type === 'townhouse' || t.type === 'duplex' ? 2 : t.floors ?? 1;
+    const story = t.type === 'office' ? 3.4 : t.type === 'warehouse' ? 6.4 : t.type === 'garage' || t.type === 'workshop' || t.type === 'storage' || t.type === 'barndo' ? 4.4 : t.type === 'barn' ? 6.2 : 3.2;
+    const nf = t.type === 'house2' || t.type === 'townhouse' || t.type === 'duplex' || t.type === 'barndo' ? 2 : t.floors ?? 1;
     const step = 0.1;
     for (let f = 0; f < nf; f++) {
       const y = f * story;

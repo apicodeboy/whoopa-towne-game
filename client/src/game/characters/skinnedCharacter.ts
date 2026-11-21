@@ -8,7 +8,9 @@ import { BALLOON_GRIP, type CharacterPose, type CharacterVisual, type HeldItem }
 import { LOOK_MATERIAL, weldedNormals, type Assembled, type LookBuilder } from './look/assemble';
 import { paint, paletteFor, printsFor } from './look/palette';
 import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
-import { applyWeaponSkin } from './weaponSkins';
+import { applyWeaponSkin, skinForGun } from './weaponSkins';
+import { gunSockets, makeGunModel, muzzleOf } from '../gunKit';
+import { WEAPONS } from '@shared/config/weapons';
 
 /** Target standing height of the model in meters (matches the gameplay capsule). */
 const HEIGHT = 1.8;
@@ -20,38 +22,8 @@ const LOWER_BONES = /^(Root|Body|Hips|UpperLeg|LowerLeg|Foot|PT)/;
 const WRIST_TWIST = 0.6;
 const FINGER_CURL = 0.82;
 
-/**
- * How each weapon model is held. Positions are measured on the model: along its length from
- * the butt (0) to the muzzle (1), and down from its top, both as fractions of its length.
- */
-interface GunFit {
-  /** Real-world length (meters). */
-  length: number;
-  /** Whether the model's muzzle already points down -Z after normalization. */
-  muzzleNegZ: boolean;
-  /** The middle of the pistol grip, where the firing hand closes. */
-  grip: [number, number];
-  /** How far the grip leans back from square to the barrel (radians). */
-  tilt: number;
-  /** The barrel's line, down from the top. */
-  bore: number;
-  /** The underside of the handguard / pump, where the support hand cups it (long guns). */
-  fore?: [number, number];
-  /** The nearest the support hand may come to the butt when the arm cannot reach the handguard. */
-  foreMin?: number;
-  /** The magazine (or loading port), where the support hand goes to reload. */
-  mag?: [number, number];
-}
-const GUN_FIT: Record<string, GunFit> = {
-  // (a touch oversized, like most third-person shooters, so the gun reads past the body)
-  ar: { length: 0.88, muzzleNegZ: true, grip: [0.307, 0.165], tilt: 0.3, bore: 0.046, fore: [0.72, 0.092], foreMin: 0.56, mag: [0.52, 0.21] },
-  smg: { length: 0.62, muzzleNegZ: false, grip: [0.165, 0.27], tilt: 0.25, bore: 0.064, fore: [0.7, 0.125], foreMin: 0.56, mag: [0.49, 0.33] },
-  shotgun: { length: 0.95, muzzleNegZ: false, grip: [0.125, 0.215], tilt: 0.8, bore: 0.028, fore: [0.6, 0.14], foreMin: 0.42, mag: [0.37, 0.15] },
-  pistol: { length: 0.27, muzzleNegZ: false, grip: [0.075, 0.25], tilt: 0.3, bore: 0.073 },
-  // no sniper model yet: the rifle, longer (placeholder art)
-  sniper: { length: 1.1, muzzleNegZ: true, grip: [0.307, 0.165], tilt: 0.3, bore: 0.046, fore: [0.68, 0.092], foreMin: 0.52, mag: [0.52, 0.21] },
-  grenade: { length: 0.11, muzzleNegZ: true, grip: [0.5, 0.66], tilt: 0, bore: 0.66 },
-};
+/** The grenade (a model file; every gun comes from gunKit): its size and where it sits in the hand. */
+const GRENADE_FIT = { length: 0.11, up: 0 };
 
 /** How a hand lies in its wrist bone's own space, measured on the rig in its bind pose. */
 interface HandFrame {
@@ -718,28 +690,35 @@ export class SkinnedCharacter implements CharacterVisual {
       this.gunMount.remove(this.gun);
       this.gun = null;
     }
-    const key = item === 'smoke' ? 'grenade' : item;
-    const template: ModelTemplate | null = item === 'none' ? null : this.assets.model(key === 'sniper' ? 'ar' : key);
-    const fit = GUN_FIT[key];
-    if (!template || !fit) {
+    if (item === 'none') {
       this.muzzle.position.set(0, 0, -0.3);
       return;
     }
+    // the guns (and the knife) are built by gunKit with the grip at the origin and the muzzle
+    // down -Z, at their drawing size: they go straight into the hand
+    const kit = makeGunModel(item);
+    if (kit) {
+      // the player's wrap on this gun (cosmetic only: a material swap)
+      applyWeaponSkin(kit, skinForGun(this.look, item), new THREE.Box3().setFromObject(kit).getSize(new THREE.Vector3()));
+      this.gun = kit;
+      this.gunMount.add(kit);
+      this.muzzle.position.copy(muzzleOf(item) ?? new THREE.Vector3(0, 0.07, -0.4));
+      return;
+    }
+    const template: ModelTemplate | null = this.assets.model('grenade');
+    if (!template) {
+      this.muzzle.position.set(0, 0, -0.3);
+      return;
+    }
+    const fit = GRENADE_FIT;
     const g = template.root.clone(true);
-    // AJ's wrap (a material swap only: same gun, same stats)
-    if (key !== 'grenade') applyWeaponSkin(g, this.look.weaponSkin, template.size);
     const s = fit.length / template.size.z;
     g.scale.setScalar(s);
-    // template: long axis on +Z, origin at bottom center. We want the barrel on -Z and the middle
-    // of the pistol grip at the origin (that is where the firing hand closes).
-    g.rotation.y = fit.muzzleNegZ ? 0 : Math.PI;
-    // after the turn the muzzle is at z = -length/2 and the butt at +length/2, so the grip
-    // (`grip[0]` of the way up from the butt) is at z = length * (0.5 - grip[0]): slide it to the
-    // origin; and the model's top goes `grip[1]` lengths above it
-    g.position.set(0, fit.grip[1] * fit.length - template.size.y * s, -fit.length * (0.5 - fit.grip[0]));
+    // (centered in the hand)
+    g.position.set(0, -template.size.y * s * 0.5 + fit.up, 0);
     this.gun = g;
     this.gunMount.add(g);
-    this.muzzle.position.set(0, (fit.grip[1] - fit.bore) * fit.length, -(fit.length * (1 - fit.grip[0])));
+    this.muzzle.position.set(0, 0, -0.05);
   }
 
   update(dt: number, pose: CharacterPose, visible = true): void {
@@ -817,8 +796,9 @@ export class SkinnedCharacter implements CharacterVisual {
     const mvR = pose.vx * cosY - pose.vz * sinY;
     const moving = speed > 0.35;
     const held: HeldItem = healKind >= 0 ? 'none' : pose.held;
-    const twoHand = held === 'ar' || held === 'smg' || held === 'shotgun' || held === 'sniper';
-    const pistol = held === 'pistol';
+    const wdef = held !== 'none' && held !== 'grenade' && held !== 'smoke' ? WEAPONS[held] : null;
+    const twoHand = wdef?.kind === 'primary';
+    const pistol = wdef?.kind === 'secondary';
     const armed = twoHand || pistol;
     const unarmed = held === 'none';
 
@@ -989,8 +969,10 @@ export class SkinnedCharacter implements CharacterVisual {
       // in the right shoulder, the right hand closed round the pistol grip, the left cupping
       // the handguard from below (from the hip the same, lower and off the shoulder). A
       // pistol: out in the right hand, up at eye level when aiming.
-      const fit = GUN_FIT[held] ?? GUN_FIT.ar;
-      const L = fit.length;
+      const fit = gunSockets(held) ?? gunSockets('draco')!;
+      const sc = fit.scale;
+      // (sockets are in the gun's own space: f forward, y up; times its drawing size)
+      const boreY = fit.muzzle[1] * sc;
       const q = this.gunMount.quaternion;
       const rq = this.root.quaternion;
       const sh = this.root.worldToLocal(this.arms.R.upper.getWorldPosition(new THREE.Vector3()));
@@ -999,7 +981,7 @@ export class SkinnedCharacter implements CharacterVisual {
       let want: THREE.Vector3;
       if (twoHand) {
         // aimed: the barrel just above the shoulder, the butt back against it
-        const aimY = 0.06 - (fit.grip[1] - fit.bore) * L, aimZ = -Math.max(0.27, Math.min(0.31, fit.grip[0] * L + 0.02));
+        const aimY = 0.06 - boreY, aimZ = -Math.max(0.24, Math.min(0.31, -fit.butt * sc * 0.72));
         // from the hip: lower, and out to the right so it shows past the body from behind
         want = new THREE.Vector3(lerp(0.075, -0.045, a), lerp(aimY - 0.14, aimY, a), lerp(aimZ + 0.03, aimZ, a));
       } else {
@@ -1030,7 +1012,7 @@ export class SkinnedCharacter implements CharacterVisual {
         axisL.addScaledVector(palmUp, -axisL.dot(palmUp)).normalize();
         // (for a left hand: across the knuckles = out of the palm x along the palm)
         const acrossL = new THREE.Vector3().crossVectors(palmUp, axisL);
-        const under = new THREE.Vector3(0, (fit.grip[1] - fit.fore[1]) * L, 0).applyQuaternion(q);
+        const under = new THREE.Vector3(0, fit.fore[1] * sc, 0).applyQuaternion(q);
         const wristOff = palmUp.clone().multiplyScalar(-0.02).addScaledVector(axisL, -(hl?.palm ?? 0.1) * 0.5);
         // as far out along the handguard as the arm reaches
         const shL = this.arms.L.upper.getWorldPosition(new THREE.Vector3());
@@ -1038,8 +1020,8 @@ export class SkinnedCharacter implements CharacterVisual {
         const wrL = this.arms.L.wrist.getWorldPosition(new THREE.Vector3());
         const armLen = (shL.distanceTo(elL) + elL.distanceTo(wrL)) * 0.985;
         const shLl = this.root.worldToLocal(shL.clone());
-        let along = (fit.fore[0] - fit.grip[0]) * L;
-        const nearest = ((fit.foreMin ?? fit.fore[0]) - fit.grip[0]) * L;
+        let along = fit.fore[0] * sc;
+        const nearest = (fit.foreMin ?? fit.fore[0]) * sc;
         const hand = new THREE.Vector3();
         for (let i = 0; i < 14; i++) {
           hand.copy(grip).addScaledVector(dir, along).add(under).add(wristOff);
@@ -1048,7 +1030,7 @@ export class SkinnedCharacter implements CharacterVisual {
         }
         if (reload > 0 && fit.mag) {
           // left hand down to the magazine and back
-          const mag = new THREE.Vector3(0, (fit.grip[1] - fit.mag[1]) * L, -(fit.mag[0] - fit.grip[0]) * L).applyQuaternion(q).add(grip).add(wristOff);
+          const mag = new THREE.Vector3(0, fit.mag[1] * sc, -fit.mag[0] * sc).applyQuaternion(q).add(grip).add(wristOff);
           hand.lerp(mag, reload);
         }
         reach(this.arms.L, this.root.localToWorld(hand), new THREE.Vector3(-1, -1.4, 0.3).applyQuaternion(rq));

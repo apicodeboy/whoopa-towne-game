@@ -51,37 +51,37 @@ function eventsOf(evs: number[][], type: number): number[][] {
   return evs.filter((e) => e[0] === type);
 }
 
-test('AR body shot damage matches the weapon table (with falloff)', async () => {
+test('Rifle body shot damage matches the weapon table (with falloff)', async () => {
   for (const dist of [10, 40, 90]) {
-    const { sim, a, b } = await duel(dist, { primary: 'ar', secondary: 'pistol', throwable: 'grenade' });
+    const { sim, a, b } = await duel(dist, { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' });
     // aim at the chest: pitch so the eye ray passes ~1.1m up on the target
     const pitch = Math.atan2(1.1 - PLAYER.eyeHeight, dist);
     const evs = step(sim, a, { buttons: BTN.FIRE | BTN.AIM, pitch });
     const hits = eventsOf(evs, EV.HIT);
-    const expected = WEAPONS.ar.damage * damageFalloff(WEAPONS.ar, dist);
+    const expected = WEAPONS.honeybadger.damage * damageFalloff(WEAPONS.honeybadger, dist);
     if (dist <= 40) {
       assert(hits.length === 1, `expected a hit at ${dist}m, got ${hits.length}`);
-      approx(100 - b.health, expected, 0.6, `AR damage at ${dist}m`);
+      approx(100 - b.health, expected, 0.6, `rifle damage at ${dist}m`);
       assert(hits[0][4] === 0, 'body shot is not a headshot');
     }
-    assert(a.state.mag0 === WEAPONS.ar.magSize - 1, 'one round spent');
+    assert(a.state.mag0 === WEAPONS.honeybadger.magSize - 1, 'one round spent');
     sim.dispose();
   }
 });
 
 test('headshots apply the multiplier', async () => {
-  const { sim, a, b } = await duel(12, { primary: 'ar', secondary: 'pistol', throwable: 'grenade' });
+  const { sim, a, b } = await duel(12, { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' });
   const pitch = Math.atan2(1.6 - PLAYER.eyeHeight, 12);
   const evs = step(sim, a, { buttons: BTN.FIRE | BTN.AIM, pitch });
   const hits = eventsOf(evs, EV.HIT);
   assert(hits.length === 1 && hits[0][4] === 1, 'expected a headshot');
-  approx(100 - b.health, WEAPONS.ar.damage * WEAPONS.ar.headMult, 0.5, 'headshot damage');
+  approx(100 - b.health, WEAPONS.honeybadger.damage * WEAPONS.honeybadger.headMult, 0.5, 'headshot damage');
   sim.dispose();
 });
 
 test('automatic fire rate, magazine, reload and reserve accounting', async () => {
-  const { sim, a } = await duel(60, { primary: 'smg', secondary: 'pistol', throwable: 'grenade' });
-  const w = WEAPONS.smg;
+  const { sim, a } = await duel(60, { primary: 'mp7', secondary: 'taurus', throwable: 'grenade', melee: 'fists' });
+  const w = WEAPONS.mp7;
   let shots = 0;
   for (let i = 0; i < 60; i++) shots += eventsOf(step(sim, a, { buttons: BTN.FIRE, pitch: 1.2 }), EV.SHOT).length;
   approx(shots, w.rpm / 60, 1, 'SMG shots in one second');
@@ -101,7 +101,7 @@ test('automatic fire rate, magazine, reload and reserve accounting', async () =>
 });
 
 test('semi-auto weapons need a fresh trigger pull per shot', async () => {
-  const { sim, a } = await duel(60, { primary: 'shotgun', secondary: 'pistol', throwable: 'grenade' });
+  const { sim, a } = await duel(60, { primary: 'doublebarrel', secondary: 'taurus', throwable: 'grenade', melee: 'fists' });
   // switch to the pistol
   for (let i = 0; i < 30; i++) step(sim, a, { slot: 1 });
   assert(a.state.slot === 1, 'pistol out');
@@ -113,17 +113,17 @@ test('semi-auto weapons need a fresh trigger pull per shot', async () => {
     const down = i % 6 < 3;
     tapped += eventsOf(step(sim, a, { slot: 1, buttons: down ? BTN.FIRE : 0, pitch: 1.2 }), EV.SHOT).length;
   }
-  assert(tapped >= 9 && tapped <= WEAPONS.pistol.magSize - 1, `tapping fires repeatedly up to the rpm cap, got ${tapped}`);
+  assert(tapped >= 9 && tapped <= WEAPONS.taurus.magSize - 1, `tapping fires repeatedly up to the rpm cap, got ${tapped}`);
   sim.dispose();
 });
 
 test('shotgun fires a spread of pellets and falls off hard with range', async () => {
-  const lo: Loadout = { primary: 'shotgun', secondary: 'pistol', throwable: 'grenade' };
+  const lo: Loadout = { primary: 'doublebarrel', secondary: 'taurus', throwable: 'grenade', melee: 'fists' };
   const near = await duel(4, lo);
   const pitchNear = Math.atan2(1.15 - PLAYER.eyeHeight, 4);
   const evNear = step(near.sim, near.a, { buttons: BTN.FIRE, pitch: pitchNear });
   const shot = eventsOf(evNear, EV.SHOT)[0];
-  assert(shot && shot[6] === WEAPONS.shotgun.pellets, 'all pellets traced');
+  assert(shot && shot[6] === WEAPONS.doublebarrel.pellets, 'all pellets traced');
   const nearDmg = 100 - near.b.health;
   assert(nearDmg >= 70, `point-blank shotgun should nearly kill, did ${nearDmg.toFixed(1)}`);
   near.sim.dispose();
@@ -189,7 +189,7 @@ test('third-person aim: the camera can see past cover that still blocks the bull
 });
 
 test('kills, kill feed event, respawn after 5s with 2s of spawn protection', async () => {
-  const { sim, a, b } = await duel(8, { primary: 'ar', secondary: 'pistol', throwable: 'grenade' });
+  const { sim, a, b } = await duel(8, { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' });
   const pitch = Math.atan2(1.1 - PLAYER.eyeHeight, 8);
   let kill: number[] | undefined;
   let shots = 0;
@@ -200,7 +200,7 @@ test('kills, kill feed event, respawn after 5s with 2s of spawn protection', asy
   }
   assert(kill, 'victim should die');
   assert(kill[1] === a.idx && kill[2] === b.idx, 'kill event names killer and victim');
-  assert(shots === Math.ceil(100 / WEAPONS.ar.damage), `AR kills in ${Math.ceil(100 / WEAPONS.ar.damage)} body shots, took ${shots}`);
+  assert(shots === Math.ceil(100 / WEAPONS.honeybadger.damage), `rifle kills in ${Math.ceil(100 / WEAPONS.honeybadger.damage)} body shots, took ${shots}`);
   assert(!b.alive && a.kills === 1 && b.deaths === 1 && sim.scores[0] === 1, 'score updated');
   const diedAt = sim.time;
   let respawnedAt = -1;
@@ -235,7 +235,7 @@ test('health regenerates after 5s out of combat', async () => {
 });
 
 test('lag compensation rewinds targets to where the shooter saw them', async () => {
-  const { sim, a, b } = await duel(20, { primary: 'ar', secondary: 'pistol', throwable: 'grenade' });
+  const { sim, a, b } = await duel(20, { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' });
   // target strafes east at walk speed for a while (its own inputs); start at the west curb for room
   b.state.x = -21.4;
   const bc = makeInputCmd();
@@ -269,7 +269,7 @@ test('lag compensation rewinds targets to where the shooter saw them', async () 
 
 test('grenades bounce, explode on the fuse and respect cover', async () => {
   const sim = await makeSim();
-  const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'ar', secondary: 'pistol', throwable: 'grenade' } })!;
+  const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' } })!;
   const b = sim.addPlayer({ id: 'b', name: 'B', team: 1 })!;
   const c = sim.addPlayer({ id: 'c', name: 'C', team: 1 })!;
   sim.start();
@@ -299,7 +299,7 @@ test('grenades bounce, explode on the fuse and respect cover', async () => {
 
 test('smoke blocks bot line of sight', async () => {
   const sim = await makeSim();
-  const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'ar', secondary: 'pistol', throwable: 'smoke' } })!;
+  const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'honeybadger', secondary: 'taurus', throwable: 'smoke', melee: 'fists' } })!;
   sim.start();
   place(a, -18, 30, 0);
   assert(sim.canSee(-18, 1.6, 30, -18, 1.2, 0), 'clear street');

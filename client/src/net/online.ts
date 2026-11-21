@@ -177,7 +177,7 @@ export class LobbyConnection {
         ready: !!p.ready,
         connected: p.connected !== false,
         ping: Number(p.ping) || 0,
-        primary: String(p.primary ?? 'ar'),
+        primary: String(p.primary ?? 'draco'),
         throwable: String(p.throwable ?? 'grenade'),
       });
     });

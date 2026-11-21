@@ -61,6 +61,8 @@ export class PhysicsWorld {
   readonly hitNormal = { x: 0, y: 1, z: 0 };
   /** Playable area (players in the air are kept inside it). */
   readonly bounds: MapDef['bounds'];
+  /** Round maps: the circle people stay inside. */
+  readonly round: MapDef['round'];
 
   private controller: CharacterController;
   private standProbe: Collider;
@@ -71,9 +73,24 @@ export class PhysicsWorld {
   private standShape: InstanceType<Rapier['Capsule']>;
   private ballCache = new Map<number, InstanceType<Rapier['Ball']>>();
 
+  /** Keeps a point (in the air) over the map: inside the bounds and, on a round map, the circle. */
+  keepOver(p: { x: number; z: number }, margin: number): void {
+    const b = this.bounds;
+    p.x = Math.min(b.maxX - margin, Math.max(b.minX + margin, p.x));
+    p.z = Math.min(b.maxZ - margin, Math.max(b.minZ + margin, p.z));
+    const r = this.round;
+    if (!r) return;
+    const dx = p.x - r.x, dz = p.z - r.z, d = Math.hypot(dx, dz), max = r.r - margin;
+    if (d > max) {
+      p.x = r.x + (dx / d) * max;
+      p.z = r.z + (dz / d) * max;
+    }
+  }
+
   constructor(R: Rapier, map: MapDef) {
     this.R = R;
     this.bounds = { ...map.bounds };
+    this.round = map.round ? { x: map.round.x, z: map.round.z, r: map.round.r } : undefined;
     this.world = new R.World({ x: 0, y: 0, z: 0 });
 
     for (const s of map.solids) {

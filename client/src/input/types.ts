@@ -51,6 +51,8 @@ export interface InputFrame {
   wheelMouseY: number;
   /** The wheel was let go this frame: pick what it points at. */
   wheelClose: boolean;
+  /** Mark danger where you are looking (this frame). */
+  mark: boolean;
 
   // menu navigation (controller)
   navX: number;
@@ -65,7 +67,7 @@ export function makeInputFrame(): InputFrame {
     fire: false, aim: false, jump: false, sprint: false, crouchHold: false, reload: false, throwBtn: false, scoreboard: false,
     use: false, heal: false, drop: false, useOrHeal: false,
     crouchPress: false, roll: false, sprintPress: false, swapShoulder: false, pause: false, slotSelect: -1, slotCycle: 0,
-    wheel: false, wheelStickX: 0, wheelStickY: 0, wheelMouseX: 0, wheelMouseY: 0, wheelClose: false,
+    wheel: false, wheelStickX: 0, wheelStickY: 0, wheelMouseX: 0, wheelMouseY: 0, wheelClose: false, mark: false,
     navX: 0, navY: 0, accept: false, back: false,
   };
 }
@@ -77,7 +79,7 @@ export function clearInputFrame(f: InputFrame): void {
   f.use = false; f.heal = false; f.drop = false; f.useOrHeal = false;
   f.crouchPress = false; f.roll = false; f.sprintPress = false; f.swapShoulder = false; f.pause = false;
   f.slotSelect = -1; f.slotCycle = 0;
-  f.wheel = false; f.wheelStickX = 0; f.wheelStickY = 0; f.wheelMouseX = 0; f.wheelMouseY = 0; f.wheelClose = false;
+  f.wheel = false; f.wheelStickX = 0; f.wheelStickY = 0; f.wheelMouseX = 0; f.wheelMouseY = 0; f.wheelClose = false; f.mark = false;
   f.navX = 0; f.navY = 0; f.accept = false; f.back = false;
 }
 

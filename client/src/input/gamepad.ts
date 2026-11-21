@@ -58,7 +58,8 @@ function applyDeadzone(x: number, y: number, dz: number, out: { x: number; y: nu
  * the buttons can be changed in Settings → Controls):
  *
  *   Left stick move · Right stick look · R2 fire · hold L1 aim · tap L2 / R1 previous / next gun
- *   hold L2 weapon & gadget wheel (point with the right stick, let go to pick) · Cross jump
+ *   hold L2 weapon & gadget wheel (point with the right stick, let go to pick; R2 in it marks
+ *   danger where you are looking) · Cross jump
  *   Circle crouch · Square reload · Triangle throw · R3 swap shoulder · L3 sprint
  *   D-pad weapon slots, ▼ use / heal · Create (or touchpad) scoreboard · Options pause
  */
@@ -76,6 +77,10 @@ export class GamepadSource implements InputSource {
   /** How long the previous-weapon / wheel button has been held (seconds; -1 = up). */
   private prevHeld = -1;
   private wheelOpen = false;
+  /** The wheel was put away by marking danger: it stays shut until its button is let go. */
+  private wheelCancelled = false;
+  /** Fire marked danger: no shooting until the trigger is let go. */
+  private fireBlocked = false;
   /** Fired when a controller is plugged in / removed. */
   onConnection: ((connected: boolean, kind: DeviceKind, id: string) => void) | null = null;
   private onConnect = (e: GamepadEvent) => {
@@ -166,13 +171,23 @@ export class GamepadSource implements InputSource {
       const m0 = bindings.pad;
       if (btn(m0.prev)) {
         this.prevHeld = this.prevHeld < 0 ? 0 : this.prevHeld + dt;
-        if (this.prevHeld >= WHEEL_HOLD) this.wheelOpen = true;
+        if (this.prevHeld >= WHEEL_HOLD && !this.wheelCancelled) this.wheelOpen = true;
       } else if (this.prevHeld >= 0) {
         if (this.wheelOpen) frame.wheelClose = true;
-        else frame.slotCycle = -1;
+        else if (!this.wheelCancelled) frame.slotCycle = -1;
         this.prevHeld = -1;
         this.wheelOpen = false;
+        this.wheelCancelled = false;
       }
+      // fire while the wheel is open: mark danger where you are looking, and put the wheel away
+      // (the trigger does not shoot until it is let go)
+      if (this.wheelOpen && pressed(m0.fire)) {
+        frame.mark = true;
+        this.wheelOpen = false;
+        this.wheelCancelled = true;
+        this.fireBlocked = true;
+      }
+      if (!btn(m0.fire)) this.fireBlocked = false;
       if (this.wheelOpen) {
         frame.wheel = true;
         frame.wheelStickX = rx;
@@ -202,7 +217,7 @@ export class GamepadSource implements InputSource {
       if (pressed(m.sprint)) frame.sprintPress = true;
       if (pressed(m.shoulder)) frame.swapShoulder = true;
       if (pressed(m.swap)) frame.slotCycle = 1;
-      if (this.wheelOpen) frame.fire = false;
+      if (this.wheelOpen || this.fireBlocked) frame.fire = false;
       if (pressed(B.LEFT)) frame.slotSelect = 0;
       if (pressed(B.RIGHT)) frame.slotSelect = 1;
       if (pressed(B.UP)) frame.slotSelect = 2;
@@ -216,6 +231,7 @@ export class GamepadSource implements InputSource {
     } else {
       this.prevHeld = -1;
       this.wheelOpen = false;
+      this.wheelCancelled = false;
       // ---- menu navigation: d-pad or left stick, with key-repeat ----
       let nx = 0, ny = 0;
       if (btn(B.LEFT) || lx < -0.6) nx = -1;

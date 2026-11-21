@@ -61,8 +61,19 @@ Useful scripts:
 - **Quick Play** drops you into an open public lobby for that mode (or starts one).
 - **Create Private Lobby** gives you a 6-character invite code (and a copyable invite link).
 - **Join with Code** enters a friend's lobby.
-- **Loadout** picks a primary (Stinger SMG, Kingpin AR, Block Sweeper shotgun), the Deuce
-  Pistol sidearm and one throwable (frag grenade or smoke). It is remembered on your device.
+- **Guns** opens the WHOOPA TOWNE weapon collection: every gun numbered like a sketchbook page
+  (Primary / Secondary / Melee / Special tabs), its stat bars (damage, fire rate, accuracy,
+  range, control), its reload, magazine and reticle. Equip a primary, a secondary, a throwable
+  and a melee weapon (remembered on your device), and buy skins for each gun with GRAMS (gold,
+  chrome, iced out, graffiti, neon, woodland). Skins are looks only: no gun gets stronger.
+
+**The guns:** Draco SR., DMR, Honey Badger, Intervention, VSS Vintorez, UZI, MP7,
+Double-Barrel, Bammer 1997 (pump shotgun), the Kriss Vector / P90 / Scorpion EVO / PP-19 Bizon
+(one card, four SMGs), the Taurus – Mia Edition and the Magnum .44, plus fists and a street
+knife. Each has its own handling: the Intervention hits hardest from far away but cycles slowly
+and takes a long reload; the Vector shreds up close and empties fast; shotguns fall off
+quickly; the DMR, VSS and Intervention aim through real scopes (ACOG, PSO, mil-dot), the others
+through their own reticles (red dot, holo, ring, chevron, brackets).
 
 **Lobby:** shows both crews, lets you switch crew and ready up. The host starts the match once
 everyone is ready, and can turn on *Fill with bots* (easy / normal / hard) so two friends can
@@ -88,6 +99,7 @@ headshot multipliers and damage falloff. In Turf War, standing in a zone alone c
 | Sprint | Shift | L3 (click) | LS (click) | Push the stick all the way forward |
 | Previous / next gun | Mouse wheel, 1 / 2 / 3 (/ 4) | L2 (tap) / R1 | LT (tap) / RB | SWAP |
 | Weapon & gadget wheel | B (hold, point with the mouse, let go) | L2 (hold, point with the right stick, let go) | LT (hold) | — |
+| Mark danger (your squad sees it) | Z, or click while holding B | R2 while holding L2 | RT while holding LT | — |
 | Throw grenade / smoke | G | △ | Y | THROW |
 | Swap camera shoulder | Q | R3 | RS | ⇄ |
 | Heal / take ibuprofen (hold) | H | D-pad down | D-pad down | HEAL |
@@ -106,6 +118,12 @@ The **weapon & gadget wheel** has the guns on top and the gadgets underneath, fe
 each other: grenades / smoke, ibuprofen, first-aid kits, drinks and bandages. Picking a gun or a
 throwable puts it in your hands; picking a healing item or ibuprofen starts using it on its own
 (firing stops it). Things you can't use right now are dimmed.
+
+**Marking danger:** with the wheel open, press fire (R2 on a DualSense, a click on a mouse), or
+tap Z on a keyboard: a red marker goes up where you are looking, with your name and how far it
+is, for 10 seconds, with a ping on the minimap. The wheel goes away without picking anything and
+the gun does not go off. The server works out the spot and sends it to your squad (your crew in
+the classic modes) and nobody else.
 
 ### Settings
 
@@ -172,7 +190,7 @@ uses roughly 9 KB/s of download per player.
 ## Tests
 
 ```bash
-npm test                 # 67 simulation + 8 client-logic + 23 economy/network tests
+npm test                 # 74 simulation + 8 client-logic + 26 economy/network tests
 npm run typecheck
 ```
 
@@ -201,10 +219,16 @@ land in `tools/out/`.
 
 Houses, apartments, shops, offices and warehouses you can walk into: rooms on every floor,
 stairs, roofs, fire escapes, doors that open, close and lock, windows that open, break and can
-be climbed through, all synced by the server. The JUMP OFF THE PORCH map is a 3×3 grid of
-districts (Babylon, The Hill, Hong Kong, Jungle, Whoopa Towne, Downtown, the Docks, Lake Linda,
-the Boardwalk), and the match now warms up in Babylon. Billboards around town carry ads and
-live sports scores. How it works, how to add buildings: [docs/BUILDINGS.md](docs/BUILDINGS.md).
+be climbed through, all synced by the server. The JUMP OFF THE PORCH map is round: a 3×3 grid of
+districts (Babylon, The Hill, Hong Kong, Jungle, CAP'S HOUSE, Downtown, the Docks, Lake Linda,
+the Boardwalk) inside one big circle, open country (the North Forty's fields and farmsteads,
+the Badlands) filling the ring out to a rim of rock, and Lake Linda to the south. In the middle
+is **CAP'S HOUSE**: a gigantic two-floor barndominium (shop, great room open to the loft,
+master suite, game room, bedrooms, a deck), an in-ground pool you can drop into, a red barn and
+silos, horses, cows, pigs, goats, sheep and chickens in their pens, a cornfield and an orchard.
+Every section is fenced off by rails you can jump. The classic map (Team Deathmatch and Turf
+War) is untouched. The match warms up in Babylon. Billboards around town carry ads and live
+sports scores. How it works, how to add buildings: [docs/BUILDINGS.md](docs/BUILDINGS.md).
 
 ## Characters
 
@@ -354,7 +378,11 @@ have not been tested yet (see below).
 - iPhone Safari does not allow web pages to go fullscreen; the game plays inside the browser
   window. Adding it to the home screen gives the most room.
 - Sound starts after the first click, key press, tap or controller input (a browser rule).
-- One map, no accounts, no progression, no saved stats, by design.
+- No progression or saved stats, by design.
+- The farm animals are scenery: they wander their pens on each player's screen (not synced),
+  have no collision and can't be shot. Corn is cover from sight, not from bullets.
+- The guns are procedural low-poly models built in code (`client/src/game/gunKit.ts`), not
+  hand-modelled art.
 - The server trusts nothing a player's browser tells it about position or damage, but there
   is no additional anti-cheat (for example against aim bots).
 

@@ -13,7 +13,7 @@ export const LobbyPlayer = schema(
     team: t.uint8().default(0),
     ready: t.boolean().default(false),
     connected: t.boolean().default(true),
-    primary: t.string().default('ar'),
+    primary: t.string().default('draco'),
     throwable: t.string().default('grenade'),
     ping: t.uint16().default(0),
   },

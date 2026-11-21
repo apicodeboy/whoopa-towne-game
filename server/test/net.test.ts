@@ -570,13 +570,13 @@ test('the server shrugs off malformed messages', async () => {
     room.send('ping', j);
     room.send('look', j);
   }
-  const loadout: Loadout = { primary: 'shotgun', secondary: 'pistol', throwable: 'smoke' };
+  const loadout: Loadout = { primary: 'doublebarrel', secondary: 'taurus', throwable: 'smoke', melee: 'fists' };
   a.lobby.setLoadout(loadout);
   await sleep(300);
   const sim = simOf(a.lobby.code);
   const pa = sim.players[a.session!.myIdx]!;
   assert(Number.isFinite(pa.state.x) && Number.isFinite(pa.state.yaw), 'state stays finite');
-  assert(pa.nextLoadout?.primary === 'shotgun', 'valid loadout change accepted for next spawn');
+  assert(pa.nextLoadout?.primary === 'doublebarrel', 'valid loadout change accepted for next spawn');
   const n = b.snaps.length;
   await sleep(200);
   assert(b.snaps.length > n, 'server still ticking');

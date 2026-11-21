@@ -28,7 +28,7 @@ import { CharacterScreen } from './ui/characterScreen';
 import { bindings } from './input/bindings';
 import { AjTalk } from './ui/ajTalk';
 import { AuthModal, GramsScreen, StoreScreen, TrapScreen } from './ui/economyScreens';
-import { LoadoutScreen } from './ui/loadoutScreen';
+import { GunPicker } from './ui/gunPicker';
 import { LobbyScreen } from './ui/lobbyScreen';
 import { MainMenu } from './ui/mainMenu';
 import { MenuNav } from './ui/menuNav';
@@ -80,7 +80,8 @@ export class App {
   private ui: HTMLElement;
   private menu: MainMenu;
   private lobbyScreen: LobbyScreen;
-  private loadoutScreen: LoadoutScreen;
+  /** The weapon collection: browse the guns, set the loadout, buy and wear skins. */
+  private loadoutScreen!: GunPicker;
   private characterScreen: CharacterScreen;
   /** GRAMS / AJ's / TRAP. */
   readonly account = new AccountService();
@@ -185,7 +186,6 @@ export class App {
       mainMenu: () => void this.leaveMatch(),
     });
     this.clickToPlay = new ClickToPlay(ui);
-    this.loadoutScreen = new LoadoutScreen(ui, this.profile, (l) => this.onLoadoutChanged(l), () => this.loadoutScreen.show(false));
     this.settingsScreen = new SettingsScreen(ui, this.settings, () => this.settingsScreen.show(false));
     this.characterScreen = new CharacterScreen(ui, {
       profile: this.profile,
@@ -212,6 +212,18 @@ export class App {
     const openGrams = () => this.openGrams();
     this.storeScreen = new StoreScreen(ui, { ...ecoDeps, auth: this.auth, openGrams, openTrap: () => this.trapScreen.show(true) });
     this.trapScreen = new TrapScreen(ui, { ...ecoDeps, auth: this.auth, openGrams, openStore: () => this.openStore() });
+    this.loadoutScreen = new GunPicker(ui, {
+      profile: this.profile,
+      account: this.account,
+      build: (look) => this.makeCharacter(0, 0, look),
+      onLoadout: (l) => this.onLoadoutChanged(l),
+      applyLook: (look) => this.applyLook(look),
+      signIn: (then) => this.auth.open(then, 'register'),
+      openGrams,
+      device: () => this.input.device,
+      assets: () => this.assets,
+      onClose: () => undefined,
+    });
     this.ajTalk = new AjTalk(ui, {
       shop: () => this.fromCounter(() => this.openStore()),
       grams: () => this.fromCounter(() => this.openGrams()),

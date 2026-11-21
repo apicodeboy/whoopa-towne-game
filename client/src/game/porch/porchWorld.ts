@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeGunModel } from '../gunKit';
 import { BAGS, ITEM } from '@shared/config/porch';
 import { WEAPONS, WEAPON_IDS } from '@shared/config/weapons';
 import type { PorchInit } from '@shared/protocol';
@@ -380,12 +381,9 @@ export class PorchWorld {
     };
     if (kind === ITEM.WEAPON) {
       const id = WEAPON_IDS[code];
-      const t = this.assets?.model(id === 'sniper' ? 'ar' : id);
-      if (t) {
-        const gun = t.root.clone(true);
-        const len = id === 'sniper' ? 1.18 : WEAPONS[id] ? ({ ar: 0.92, smg: 0.62, shotgun: 1, pistol: 0.26 } as Record<string, number>)[id] ?? 0.6 : 0.6;
-        gun.scale.setScalar(len / t.size.z);
-        gun.position.z = -len / 2;
+      const gun = id ? makeGunModel(id) : null;
+      if (gun) {
+        // (the kit's gun lies with its grip at the middle; turned so it lies on its side)
         const holder = new THREE.Group();
         holder.add(gun);
         holder.rotation.z = 0.25;

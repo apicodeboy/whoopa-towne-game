@@ -40,7 +40,7 @@ export function isWorn(look: Readonly<Appearance>, item: StoreItem): boolean {
 }
 
 /** The gun a weapon-skin preview holds. */
-const SKIN_PREVIEW_GUN = 'ar' as const;
+const SKIN_PREVIEW_GUN = 'draco' as const;
 
 // ===================================================================== pieces shared by the screens
 function header(title: string, sub: string, onBack: () => void, account: AccountService, onGrams: () => void): { root: HTMLElement; balance: HTMLElement } {

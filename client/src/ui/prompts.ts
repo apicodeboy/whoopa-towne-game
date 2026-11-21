@@ -6,7 +6,9 @@ export type Action =
   | 'move' | 'look' | 'fire' | 'aim' | 'reload' | 'jump' | 'crouch' | 'sprint'
   | 'swap' | 'prev' | 'weapons' | 'wheel' | 'throw' | 'shoulder' | 'scores' | 'pause' | 'accept' | 'back'
   // JUMP OFF THE PORCH
-  | 'slots' | 'use' | 'heal' | 'drop';
+  | 'slots' | 'use' | 'heal' | 'drop'
+  // squad calls
+  | 'mark';
 
 interface Glyph {
   /** Text inside the glyph. */
@@ -40,6 +42,7 @@ const KBM: GlyphSet = {
   use: { t: 'E' },
   heal: { t: 'H' },
   drop: { t: 'X' },
+  mark: { t: 'Z' },
 };
 
 const XBOX: GlyphSet = {
@@ -65,6 +68,7 @@ const XBOX: GlyphSet = {
   use: { t: '▼', c: 'sys' },
   heal: { t: '' },
   drop: { t: '' },
+  mark: { t: 'RT', c: 'trig' },
 };
 
 const PLAYSTATION: GlyphSet = {
@@ -90,6 +94,7 @@ const PLAYSTATION: GlyphSet = {
   use: { t: '▼', c: 'sys' },
   heal: { t: '' },
   drop: { t: '' },
+  mark: { t: 'R2', c: 'trig' },
 };
 
 /** Unknown pads: positional names without platform colors. */
@@ -136,16 +141,17 @@ export const ACTION_LABELS: Record<Action, string> = {
   use: 'Search / pick up',
   heal: 'Heal',
   drop: 'Drop',
+  mark: 'Mark danger',
 };
 
 /** Which binding an on-screen action reads its key / button from (Settings → Controls). */
 const KEY_OF: Partial<Record<Action, KeyAction>> = {
   jump: 'jump', crouch: 'crouch', sprint: 'sprint', reload: 'reload', throw: 'throw', shoulder: 'shoulder',
-  use: 'use', heal: 'heal', drop: 'drop', wheel: 'wheel', scores: 'scores',
+  use: 'use', heal: 'heal', drop: 'drop', wheel: 'wheel', scores: 'scores', mark: 'mark',
 };
 const PAD_OF: Partial<Record<Action, PadAction>> = {
   fire: 'fire', aim: 'aim', jump: 'jump', crouch: 'crouch', sprint: 'sprint', reload: 'reload', swap: 'swap', slots: 'swap',
-  prev: 'prev', wheel: 'prev', throw: 'throw', shoulder: 'shoulder', use: 'use', heal: 'heal', scores: 'scores',
+  prev: 'prev', wheel: 'prev', throw: 'throw', shoulder: 'shoulder', use: 'use', heal: 'heal', scores: 'scores', mark: 'fire',
 };
 
 /** The glyph for an action on a device, following the player's own bindings. */
@@ -165,6 +171,8 @@ function glyphOf(device: DeviceKind, action: Action): Glyph | null {
 export function glyphHtml(device: DeviceKind, action: Action): string {
   // previous / next weapon: both buttons on a controller
   if ((action === 'weapons' || action === 'slots') && device !== 'kbm' && device !== 'touch') return glyphHtml(device, 'prev') + glyphHtml(device, 'swap');
+  // marking danger on a controller: fire while the wheel is held open
+  if (action === 'mark' && device !== 'kbm' && device !== 'touch') return `${glyphHtml(device, 'wheel')}<span class="plus">+</span>${glyphHtml(device, 'fire')}`;
   const g = glyphOf(device, action);
   if (!g) return '';
   const kind = device === 'kbm' ? 'key' : 'pad';
@@ -183,9 +191,9 @@ export function legendHtml(device: DeviceKind, actions: readonly Action[]): stri
   return actions.filter((a) => glyphOf(device, a)?.t).map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
 }
 
-export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'weapons', 'wheel', 'throw', 'shoulder', 'scores', 'pause'];
+export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'weapons', 'wheel', 'mark', 'throw', 'shoulder', 'scores', 'pause'];
 /** JUMP OFF THE PORCH: inventory slots, searching, healing and dropping instead of the classic swap. */
-export const PORCH_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'slots', 'wheel', 'use', 'heal', 'drop', 'throw', 'scores', 'pause'];
+export const PORCH_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'slots', 'wheel', 'mark', 'use', 'heal', 'drop', 'throw', 'scores', 'pause'];
 export const FULL_LEGEND: readonly Action[] = ['move', 'look', ...GAMEPLAY_LEGEND];
 
 export function deviceName(device: DeviceKind): string {

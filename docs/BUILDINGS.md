@@ -11,6 +11,9 @@ player.
 | --- | --- |
 | Building layouts (all types, all floors) | `shared/src/map/architect.ts` |
 | Where buildings stand on the map, the districts | `shared/src/map/greaterTowne.ts` |
+| CAP'S HOUSE (the farm in the middle) | `shared/src/map/capsHouse.ts` |
+| The round map: the country ring, the rim | `shared/src/map/countryside.ts` |
+| How the farm looks (pool, crops, silos, windmill, tractor), the animals | `client/src/game/world/farm.ts`, `farmAnimals.ts` |
 | Door and window state, the rules for using them | `shared/src/sim/buildings.ts` |
 | Climbing through windows (the vault) | `shared/src/sim/player.ts` (`tryVault`), `VAULT` in `shared/src/config/game.ts` |
 | Collision for doors and glass | `shared/src/sim/physics.ts` (`addToggleBox`, `GROUP_GLASS`) |
@@ -22,20 +25,43 @@ player.
 | Tests | `shared/test/buildings.test.ts`, the door test in `server/test/net.test.ts` |
 | Floor plans (for checking layouts by eye) | `npx tsx tools/plan.ts [type ...]` |
 
-## The map: nine districts in a 3×3 grid
+## The map: nine districts in a round map
 
 ```
+                       .-''''  NORTH FORTY  ''''-.            the rim of rock: a circle,
+              BADLANDS     (fields, farmsteads)    '.          center (0, -16), radius 246
    x: -200            -86                 86              200
       +---------------+------------------+----------------+  z = -150
       |   BABYLON     |    THE HILL      |   HONG KONG    |
       +---------------+---- Porch St ----+----------------+  z = -56
-      |   JUNGLE      |   WHOOPA TOWNE   |   DOWNTOWN     |
+      |   JUNGLE      |   CAP'S HOUSE    |   DOWNTOWN     |
       +---------------+-- Ocean Drive ---+----------------+  z = 61..71
       |  THE DOCKS    |    LAKE LINDA    | THE BOARDWALK  |
-      +---------------+------------------+----------------+  z = 118, the lake
+      +---------------+------------------+----------------+  z = 118, the shore
+                    '-.,_     the lake     _,.-'
 ```
 
-- **Whoopa Towne** (the classic map) sits in the middle, unchanged.
+The JUMP OFF THE PORCH map is round (`MapDef.round`): the nine districts sit inside one big
+circle and the land between their old square edge and the circle is open country
+(`countryside.ts`): the **NORTH FORTY** north of The Hill (crop fields on a grid of farm
+tracks, County Road, the Millers' and the Okafors' farmsteads with a barn, a silo and a house
+each, a sheep pen, the FEED & SEED store), the **BADLANDS** north and west of Babylon (sand,
+rocks, ruins), more jungle west of the jungle, an orchard and sunflowers east of Hong Kong and
+Downtown. A rim of rock bluffs runs round the circle (`rim()`), and whatever of the circle lies
+past the shore is Lake Linda. Skydivers and balloons are held over the circle; the riot zone
+starts as the whole circle; the minimap is drawn round. The old square's edge walls and edge
+cliffs are gone (their random draws still happen, into a scrap builder, so The Hill is
+unchanged).
+
+- **CAP'S HOUSE** sits in the middle (`capsHouse.ts`): the classic town stays its own map
+  for Team Deathmatch and Turf War, untouched. A gigantic barndominium (type `barndo`, 50 ×
+  26 m, two 4.4 m floors under a black standing-seam roof, a covered porch with its name over
+  it), the drive in from Ocean Drive through a ranch gate, a fountain in the turnaround. Behind
+  the house the pool deck: an in-ground pool (a real hole in the ground, 1.4 m deep, with steps
+  at the east end and a diving board), loungers, umbrellas and a cabana. West: the red barn
+  (type `barn`) and two silos, the horse paddock, the chicken coop, the cow pasture with its
+  stock pond and windmill. East: the cornfield, the pig and goat pens, the orchard, the pole
+  barn with the tractor. Pens have post-and-rail fences (1.1 m: a jump clears them) with gates.
 - **The Hill** is the projects: Section 8 brick walk-ups (three and four floors, a unit on
   every floor, stairs to the roof, fire escapes), some windows already broken, tags on the
   walls, dirt yards with overflowing dumpsters, trash bags, litter in every gutter, burnt-out
@@ -85,6 +111,8 @@ elsewhere.
 | `office` | 2–6 floors of open-plan desks and a meeting room behind a glass door, a lobby with a front desk, stairs to the roof. |
 | `warehouse` | One tall floor, an open roll-up bay, a mezzanine office with steel stairs. |
 | `workshop`, `storage`, `garage` | Smaller industrial units: workbenches; aisles of racks; a car in the bay. |
+| `barndo` | CAP'S HOUSE. Two tall floors. Downstairs the shop (two roll-up bays standing open, trucks inside), the great room open to the loft (living room at the front, the kitchen with its island, glass doors out to the pool), the master suite (bedroom, walk-in closet, a bath that locks). Upstairs the loft, the game room over the shop, two bedrooms and a bath, a deck over the pool. |
+| `barn` | One tall floor under a steep metal roof, the big doors at both ends standing open, stalls, a hay loft over the back with stairs up. |
 
 Every layout is generated in the building's own frame (`u` along the front wall, `v` from the
 front to the back), so any type can face any way and fit any reasonable lot. All of it is plain
@@ -168,8 +196,10 @@ bottles you carry drop where you fell. The old armor vests are out of the loot p
 ## The districts are fenced off
 
 A low black railing (0.95 m) runs down the middle of every border road (West Line Rd, East
-Line Rd, Porch St, Ocean Drive) and across the sand between the docks, the lake and the
-boardwalk (`districtFences()` in `greaterTowne.ts`). You can't walk through it, but a jump
+Line Rd, Porch St, Ocean Drive), across the sand between the docks, the lake and the
+boardwalk, and along the old square's edge where the districts meet the open country
+(`districtFences()` in `greaterTowne.ts`). The pens at Cap's House and on the farms have
+their own post-and-rail fences (`pen()` in `capsHouse.ts`). You can't walk through it, but a jump
 clears it (a jump goes about 1.25 m up), and bullets and grenades go through it. Wherever
 something already stood on the line (a palm tree, the end of a wall) the railing stops around
 it. Bots jump it when it is in their way.
@@ -186,7 +216,8 @@ From the blimp and in the air, each district's name floats over it in its own le
 (`client/src/game/porch/airLabels.ts`, styles in `client/src/styles/theme.css`): all in Paytone
 One, a free chunky display face, in cream and pink with a dark outline. BABYLON is in a
 starburst, THE HILL is extruded, HONG KONG is striped and slanted, JUNGLE is hatched, WHOOPA
-TOWNE sits between rows of dots, DOWNTOWN is outlined, THE DOCKS is stacked, LAKE LINDA is in a
+TOWNE and CAP'S HOUSE sit between rows of dots, NORTH FORTY is in a speech bubble, BADLANDS is
+stacked, DOWNTOWN is outlined, THE DOCKS is stacked, LAKE LINDA is in a
 speech bubble, and the BOARDWALK sparkles.
 
 ## JUMP OFF THE PORCH warm-up
@@ -208,3 +239,7 @@ boards the blimp as before.
 - Interior lighting is the same light for every room; there are no light switches.
 - The Babylon mud houses, the jungle huts, the ranger station, the beach shops and the classic
   town keep their original single-room shells.
+- Farm animals are scenery each client wanders on its own (not synced, no collision). Crops
+  are visual only: corn hides you from sight, but bullets go through it.
+- Bots walk round the pool rather than through it; one that lands in it has to find the steps
+  (the nav grid is one level).

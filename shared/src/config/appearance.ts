@@ -28,6 +28,8 @@ export interface LookOption {
   pattern?: string;
 }
 
+import { GUN_IDS, type WeaponId } from './weapons';
+
 const opt = (id: string, name: string, extra: Partial<LookOption> = {}): LookOption => ({ id, name, ...extra });
 /** An AJ's exclusive (premium) option. */
 const aj = (id: string, name: string, extra: Partial<LookOption> = {}): LookOption => ({ id, name, premium: true, ...extra });
@@ -269,7 +271,10 @@ export const BODY_DETAILS = [opt('freckles', 'Freckles'), opt('scar', 'Facial Sc
 
 // ------------------------------------------------------------------ the saved configuration
 
-export interface Appearance {
+/** Every gun's own skin (`gs_<gun id>`: an option id of GUN_SKINS). */
+type GunSkinFields = { [K in GunSkinField]: string };
+
+export interface Appearance extends GunSkinFields {
   bodyType: string;
   build: string;
   height: string;
@@ -378,6 +383,21 @@ export const FACE_MARKS = [opt('none', 'None'), opt('star', 'Star'), opt('cross'
 export const BELTS = [
   opt('none', 'None'), opt('redstuds', 'Red Studded Belt'), opt('blackstuds', 'Black Studded Belt'), opt('whitestuds', 'White Studded Belt'),
 ];
+/**
+ * Skins for one gun at a time (bought with GRAMS in the gun picker; cosmetic only). Each gun
+ * has its own field (`gs_<gun id>`); a gun with no skin of its own wears the AJ'S wrap.
+ */
+export const GUN_SKINS = [
+  opt('none', 'Factory'),
+  aj('gold', '24K Gold'), aj('chrome', 'Mirror Chrome'), aj('ice', 'Iced Out'), aj('graffiti', 'Graffiti'), aj('neon', 'Neon Stripe'), aj('camo', 'Woodland'),
+];
+export type GunSkinField = `gs_${Exclude<WeaponId, 'fists' | 'knife'>}`;
+/** The look field holding a gun's own skin. */
+export function gunSkinField(gun: string): GunSkinField {
+  return `gs_${gun}` as GunSkinField;
+}
+const GUN_SKIN_FIELDS = Object.fromEntries(GUN_IDS.map((g) => [gunSkinField(g), GUN_SKINS])) as Record<GunSkinField, typeof GUN_SKINS>;
+
 /** A graphic on the left thigh of long pants. */
 export const LEG_PRINTS = [opt('none', 'None'), opt('gocrazy', 'Go Crazy + Scorpion'), opt('flames', 'Flames'), opt('stars', 'Stars')];
 
@@ -389,6 +409,8 @@ export const LEG_PRINTS = [opt('none', 'None'), opt('gocrazy', 'Go Crazy + Scorp
 export const EXTRA_FIELDS = {
   weaponSkin: WEAPON_SKINS, backpack: BACKPACKS, shoulders: SHOULDERS, headSize: HEAD_SIZES, mask: MASKS, carry: CARRY, waistChain: WAIST_CHAINS,
   face: FACES, faceMark: FACE_MARKS, belt: BELTS, legPrint: LEG_PRINTS,
+  // one per gun, in GUN_IDS order (append only)
+  ...GUN_SKIN_FIELDS,
 } as const;
 export type ExtraField = keyof typeof EXTRA_FIELDS;
 export const EXTRA_FIELD_KEYS = Object.keys(EXTRA_FIELDS) as ExtraField[];
@@ -468,6 +490,7 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   faceMark: 'none',
   belt: 'redstuds',
   legPrint: 'gocrazy',
+  ...(Object.fromEntries(GUN_IDS.map((g) => [gunSkinField(g), 'none'])) as Record<GunSkinField, string>),
   tattoos: Object.freeze({}) as Record<string, string>,
   details: Object.freeze([]) as unknown as string[],
 });

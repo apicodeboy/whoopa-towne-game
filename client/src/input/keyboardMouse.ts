@@ -23,6 +23,10 @@ export class KeyboardMouseSource implements InputSource {
   private wheel = 0;
   /** The weapon wheel key was down last frame. */
   private wheelKey = false;
+  /** The wheel was put away by marking danger: it stays shut until its key is let go. */
+  private wheelCancelled = false;
+  /** A click marked danger: no shooting until the button is let go. */
+  private fireBlocked = false;
   private active = false;
   private locked = false;
   private lockTarget: HTMLElement;
@@ -172,7 +176,17 @@ export class KeyboardMouseSource implements InputSource {
 
       const s = ctx.settings;
       // the weapon wheel (held): the mouse points at a slot instead of turning the camera
-      const wheelDown = k.has(bindings.keys.wheel);
+      const wheelKey = k.has(bindings.keys.wheel);
+      if (!wheelKey) this.wheelCancelled = false;
+      let wheelDown = wheelKey && !this.wheelCancelled;
+      // a click while the wheel is open marks danger where you are looking and puts the wheel away
+      if (wheelDown && (this.buttonsHit & 1)) {
+        frame.mark = true;
+        this.wheelCancelled = true;
+        this.fireBlocked = true;
+        this.wheelKey = false;
+        wheelDown = false;
+      }
       if (wheelDown) {
         frame.wheel = true;
         frame.wheelMouseX += this.dx;
@@ -186,7 +200,8 @@ export class KeyboardMouseSource implements InputSource {
       this.wheelKey = wheelDown;
 
       const btn = this.buttons | this.buttonsHit;
-      if (btn & 1 && !wheelDown) frame.fire = true;
+      if (!(this.buttons & 1)) this.fireBlocked = false;
+      if (btn & 1 && !wheelDown && !this.fireBlocked && !wheelKey) frame.fire = true;
       if (btn & 4) frame.aim = true;
       // keys from Settings → Controls (the default layout also keeps a few alternates)
       const b = bindings.keys;
@@ -201,6 +216,7 @@ export class KeyboardMouseSource implements InputSource {
       if (held(b.use) || (alt && held('KeyF'))) frame.use = true;
       if (held(b.heal)) frame.heal = true;
       if (held(b.drop)) frame.drop = true;
+      if (p.has(b.mark)) frame.mark = true;
 
       if (p.has(b.crouch)) frame.crouchPress = true;
       if (p.has(b.shoulder) || (alt && p.has('KeyV'))) frame.swapShoulder = true;

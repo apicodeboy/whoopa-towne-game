@@ -1429,8 +1429,16 @@
   font-style: normal;
   color: rgba(255, 255, 255, 0.55);
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.wwheel .ww-center .ww-h {
+  display: flex;
   align-items: center;
   gap: 4px;
+  font-style: normal;
+  white-space: nowrap;
 }
 .wwheel .ww-dot {
   position: absolute;
@@ -1443,3 +1451,241 @@
   background: #fff;
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.5);
 }
+
+/* ---------------------------------------------------------------- reticles (one per gun) */
+.crosshair .ch-ring,
+.crosshair .ch-chev,
+.crosshair .ch-brk {
+  position: absolute;
+  display: none;
+}
+/* holo / ring / circle-dot / wide: a circle sized by the spread */
+.crosshair .ch-ring {
+  --d: calc(var(--gap) * 2 + 6px);
+  width: var(--d);
+  height: var(--d);
+  left: calc(var(--d) / -2);
+  top: calc(var(--d) / -2);
+  border: 2px solid var(--col);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+}
+.crosshair[data-ret='holo'] .ch,
+.crosshair[data-ret='ring'] .ch,
+.crosshair[data-ret='wide'] .ch,
+.crosshair[data-ret='circledot'] .ch-up,
+.crosshair[data-ret='circledot'] .ch-down {
+  display: none;
+}
+.crosshair[data-ret='holo'] .ch-ring,
+.crosshair[data-ret='ring'] .ch-ring,
+.crosshair[data-ret='wide'] .ch-ring,
+.crosshair[data-ret='circledot'] .ch-ring {
+  display: block;
+}
+.crosshair[data-ret='holo'] .ch-ring { --col: #ff4d4d; border-width: 2px; }
+.crosshair[data-ret='holo'] .ch-dot { width: 4px; height: 4px; left: -2px; top: -2px; border-radius: 50%; background: #ff4d4d; }
+.crosshair[data-ret='ring'] .ch-ring { border-width: 1.5px; }
+.crosshair[data-ret='wide'] .ch-ring { border-style: dashed; border-width: 2px; }
+.crosshair[data-ret='circledot'] .ch-ring { --d: calc(var(--gap) * 2 + 2px); }
+.crosshair[data-ret='circledot'] .ch-left { left: calc(-1 * var(--gap) - var(--len) - 2px); }
+.crosshair[data-ret='circledot'] .ch-right { left: calc(var(--gap) + 2px); }
+/* chevron: a ^ under the point of aim (the magnum, the DMR's sight from the hip) */
+.crosshair .ch-chev {
+  width: 12px;
+  height: 12px;
+  left: -6px;
+  top: calc(var(--gap) * 0.5 - 1px);
+  border-left: 2px solid var(--col);
+  border-top: 2px solid var(--col);
+  transform: rotate(45deg);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+}
+.crosshair[data-ret='chevron'] .ch-up,
+.crosshair[data-ret='chevron'] .ch-down,
+.crosshair[data-ret='acog'] .ch-up,
+.crosshair[data-ret='acog'] .ch-down {
+  display: none;
+}
+.crosshair[data-ret='chevron'] .ch-chev,
+.crosshair[data-ret='acog'] .ch-chev {
+  display: block;
+}
+/* a dot between two brackets (pistols) */
+.crosshair .ch-brk {
+  width: 6px;
+  height: 16px;
+  top: -8px;
+  border: 2px solid var(--col);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+}
+.crosshair .ch-brk-l { left: calc(-1 * var(--gap) - 8px); border-right: 0; }
+.crosshair .ch-brk-r { left: calc(var(--gap) + 2px); border-left: 0; }
+.crosshair[data-ret='dotbrackets'] .ch { display: none; }
+.crosshair[data-ret='dotbrackets'] .ch-brk { display: block; }
+.crosshair[data-ret='dotbrackets'] .ch-dot { width: 4px; height: 4px; left: -2px; top: -2px; border-radius: 50%; }
+/* the sniper rifles from the hip: just a dot and short ticks (no scope yet) */
+.crosshair[data-ret='scope'] .ch,
+.crosshair[data-ret='pso'] .ch { --len: 5px; }
+/* melee: a small x */
+.crosshair[data-ret='melee'] .ch { display: none; }
+.crosshair[data-ret='melee'] .ch-dot { width: 5px; height: 5px; left: -2.5px; top: -2.5px; border-radius: 50%; }
+
+/* ---------------------------------------------------------------- the scope (aimed snipers, the DMR) */
+.scope-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --r: min(44vh, 44vw);
+}
+.scope-overlay.hidden {
+  display: none;
+}
+.scope-overlay .sc-glass {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, transparent calc(var(--r) - 2px), #050506 var(--r));
+}
+.scope-overlay .sc-glass::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--r) * 2);
+  height: calc(var(--r) * 2);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  box-shadow: inset 0 0 40px 14px rgba(0, 0, 0, 0.65);
+}
+.scope-overlay .sc-h,
+.scope-overlay .sc-v {
+  position: absolute;
+  background: #0a0a0a;
+}
+.scope-overlay .sc-h { left: calc(50% - var(--r)); width: calc(var(--r) * 2); top: calc(50% - 1px); height: 2px; }
+.scope-overlay .sc-v { top: calc(50% - var(--r)); height: calc(var(--r) * 2); left: calc(50% - 1px); width: 2px; }
+/* mil dots along both lines */
+.scope-overlay .sc-mils {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+.scope-overlay[data-ret='scope'] .sc-mils::before,
+.scope-overlay[data-ret='scope'] .sc-mils::after {
+  content: '';
+  position: absolute;
+  background: radial-gradient(circle, #0a0a0a 3px, transparent 3.5px) center / 32px 32px repeat-x;
+  width: calc(var(--r) * 1.2);
+  height: 12px;
+  left: calc(var(--r) * -0.6);
+  top: -6px;
+}
+.scope-overlay[data-ret='scope'] .sc-mils::after {
+  transform: rotate(90deg);
+}
+/* the PSO: thick posts, the chevrons and the range stadia */
+.scope-overlay[data-ret='pso'] .sc-h { left: calc(50% - var(--r)); width: calc(var(--r) * 0.8); height: 3px; }
+.scope-overlay[data-ret='pso'] .sc-v { display: none; }
+.scope-overlay .sc-chev {
+  position: absolute;
+  display: none;
+  left: calc(50% - 9px);
+  top: calc(50% + 2px);
+  width: 18px;
+  height: 18px;
+  border-left: 3px solid #0a0a0a;
+  border-top: 3px solid #0a0a0a;
+  transform: rotate(45deg);
+  transform-origin: 50% 0;
+}
+.scope-overlay[data-ret='pso'] .sc-chev,
+.scope-overlay[data-ret='acog'] .sc-chev {
+  display: block;
+}
+.scope-overlay .sc-stadia {
+  position: absolute;
+  display: none;
+  left: calc(50% - var(--r) * 0.62);
+  top: calc(50% - var(--r) * 0.3);
+  width: calc(var(--r) * 0.28);
+  height: calc(var(--r) * 0.32);
+  border-left: 2px solid #0a0a0a;
+  border-bottom: 2px solid #0a0a0a;
+  transform: skewY(-18deg);
+}
+.scope-overlay[data-ret='pso'] .sc-stadia {
+  display: block;
+}
+/* the DMR's 4x sight: smaller, a glowing red chevron and bullet-drop ticks */
+.scope-overlay[data-ret='acog'] {
+  --r: min(36vh, 36vw);
+}
+.scope-overlay[data-ret='acog'] .sc-h,
+.scope-overlay[data-ret='acog'] .sc-v {
+  display: none;
+}
+.scope-overlay[data-ret='acog'] .sc-chev {
+  border-color: #ff3b2f;
+  filter: drop-shadow(0 0 4px rgba(255, 60, 40, 0.9));
+}
+.scope-overlay[data-ret='acog'] .sc-mils::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 26px;
+  width: 2px;
+  height: calc(var(--r) * 0.5);
+  background: repeating-linear-gradient(#ff3b2f 0 2px, transparent 2px 26px);
+}
+
+/* ---------------------------------------------------------------- danger marks */
+.mark-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.danger-mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font: 400 13px/1 var(--font-display);
+  color: #fff;
+  -webkit-text-stroke: 0.6px #0a0a0d;
+  text-shadow: 0 2px 0 #0a0a0d;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.danger-mark .mk-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 4px;
+  transform: rotate(45deg);
+  background: #ff3b2f;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px #0a0a0d, 0 4px 10px rgba(0, 0, 0, 0.5);
+  font: 400 16px/1 var(--font-display);
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+.danger-mark .mk-icon i { display: block; transform: rotate(-45deg); font-style: normal; color: #fff; }
+.danger-mark .mk-name { color: #ffd2cc; }
+.danger-mark .mk-dist { font-size: 12px; color: #fff; }
+.danger-mark.mine .mk-icon { background: #ff6a1f; }
+.danger-mark.fresh .mk-icon { animation: mark-pop 0.6s ease-out 2; }
+.danger-mark.edge .mk-name { display: none; }
+.danger-mark.edge .mk-icon { width: 20px; height: 20px; font-size: 13px; }
+@keyframes mark-pop {
+  0% { box-shadow: 0 0 0 2px #0a0a0d, 0 0 0 0 rgba(255, 59, 47, 0.8); }
+  100% { box-shadow: 0 0 0 2px #0a0a0d, 0 0 0 18px rgba(255, 59, 47, 0); }
+}
+.lg .plus, .wheel-hint .plus { margin: 0 2px; opacity: 0.8; }

@@ -57,12 +57,16 @@ export const EV = {
   WINDOW: 31,
   /** [DENIED, doorId, by] tried a locked door from outside */
   DENIED: 32,
+  // ---- squad calls ----
+  /** [MARK, idx, x, y, z] (cm) someone marked danger; only their squad (or crew) is sent it */
+  MARK: 33,
 } as const;
 
 /** Kill-feed weapon codes: 0..5 are WEAPON_IDS, then these. */
-export const KILL_GRENADE = 10;
-export const KILL_WORLD = 11;
-export const KILL_RIOT = 12;
+// (clear of the weapon codes, which are WEAPON_IDS indices)
+export const KILL_GRENADE = 40;
+export const KILL_WORLD = 41;
+export const KILL_RIOT = 42;
 
 export const PHASE = { WARMUP: 0, PLAYING: 1, ENDED: 2 } as const;
 export type Phase = (typeof PHASE)[keyof typeof PHASE];
@@ -93,9 +97,9 @@ export const PF = {
 } as const;
 
 /** Held-item codes in snapshots: WEAPON_IDS indices, then these. */
-export const HELD_NONE = 15;
-export const HELD_GRENADE = 16;
-export const HELD_SMOKE = 17;
+export const HELD_NONE = 31;
+export const HELD_GRENADE = 32;
+export const HELD_SMOKE = 33;
 
 export interface RosterEntry {
   idx: number;

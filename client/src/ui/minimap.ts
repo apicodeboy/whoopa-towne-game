@@ -7,6 +7,9 @@ const AREA_FILL: Record<string, string> = {
   grass: '#2f4a2d', path: '#5c5647', sidewalk: '#3b3e44', alley: '#26282c', lot: '#2c2e33', court: '#6a3d2c',
   gravel: '#3a362f', crossing: '#4c4233', floor: '#3a332b', base0: '#16264a', base1: '#4a1616',
   jungle: '#25391f', dirt: '#4a3b28', sand: '#8c7b55', surf: '#9cc4c8', ocean: '#1c4a66', plaza: '#47484c', towel: '#8c7b55',
+  desert: '#6e5c3e', oasis: '#2f6f86',
+  // CAP'S HOUSE and the country
+  corn: '#4f6e2c', wheat: '#8a7436', sunflower: '#8f7a1c', soil: '#4a3826', stubble: '#6e6238', mud: '#3c2e22',
 };
 
 /**
@@ -70,6 +73,18 @@ export class Minimap {
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.fillStyle = '#1d1f24';
     g.fillRect(0, 0, this.fullW, this.fullH);
+    const R = this.map.round;
+    if (R) {
+      // a round map: grass out to the circle, the paved square in the middle
+      g.fillStyle = '#2f4a2d';
+      g.beginPath();
+      g.arc(this.X(R.x), this.Z(R.z), R.r * s, 0, Math.PI * 2);
+      g.fill();
+      if (R.paved) {
+        g.fillStyle = '#1d1f24';
+        g.fillRect(this.X(R.paved.x0), this.Z(R.paved.z0), (R.paved.x1 - R.paved.x0) * s, (R.paved.z1 - R.paved.z0) * s);
+      }
+    }
     for (const a of [...this.map.areas].sort((p, q) => (p.layer ?? 1) - (q.layer ?? 1))) {
       g.fillStyle = AREA_FILL[a.kind] ?? '#2a2c31';
       g.fillRect(this.X(a.x0), this.Z(a.z0), (a.x1 - a.x0) * s, (a.z1 - a.z0) * s);
@@ -136,6 +151,21 @@ export class Minimap {
         g.fillStyle = fill;
         g.fillRect((-x.sx * s) / 2, (-len * s) / 2, Math.max(0.8, x.sx * s), Math.max(0.8, len * s));
       }
+      g.restore();
+    }
+    if (R) {
+      // everything past the rim is out of bounds: dark, with the rim drawn round it
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, this.fullW, this.fullH);
+      g.arc(this.X(R.x), this.Z(R.z), R.r * s, 0, Math.PI * 2, true);
+      g.fillStyle = '#121316';
+      g.fill('evenodd');
+      g.beginPath();
+      g.arc(this.X(R.x), this.Z(R.z), R.r * s, 0, Math.PI * 2);
+      g.strokeStyle = '#5a5248';
+      g.lineWidth = 2;
+      g.stroke();
       g.restore();
     }
     // district names on big maps
@@ -242,6 +272,27 @@ export class Minimap {
       g.moveTo(x, y);
       g.lineTo(x - Math.sin(p.yaw) * 6.5, y - Math.cos(p.yaw) * 6.5);
       g.stroke();
+    }
+
+    // danger marks: a red diamond, with a ring pulsing out for its first moments
+    for (const m of st.marks ?? []) {
+      const x = this.X(m.x), y = this.Z(m.z);
+      g.save();
+      g.translate(x, y);
+      if (m.age < 1.5) {
+        g.beginPath();
+        g.arc(0, 0, 5 + (m.age % 0.75) * 16, 0, Math.PI * 2);
+        g.strokeStyle = `rgba(255,70,50,${(1 - (m.age % 0.75) / 0.75).toFixed(2)})`;
+        g.lineWidth = 2;
+        g.stroke();
+      }
+      g.rotate(Math.PI / 4);
+      g.fillStyle = '#ff3b2f';
+      g.fillRect(-4, -4, 8, 8);
+      g.lineWidth = 1.4;
+      g.strokeStyle = '#ffffff';
+      g.strokeRect(-4, -4, 8, 8);
+      g.restore();
     }
 
     // me: arrow pointing along the view yaw

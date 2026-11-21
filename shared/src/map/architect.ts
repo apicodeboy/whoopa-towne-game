@@ -134,6 +134,10 @@ export interface StructureOpts {
   /** Gaps in the parapet (where outside stairs reach the roof). */
   gaps?: Array<{ side: Side; at: number; w: number }>;
   story?: number;
+  /** Pitched roofs: how high the ridge rises over the walls (default: a house's gentle pitch). */
+  rise?: number;
+  /** Pitched roofs: 'shingle' (default) or 'metal' (standing seam). */
+  roofStyle?: string;
 }
 
 /**
@@ -287,6 +291,21 @@ export class Structure {
     return this;
   }
 
+  /**
+   * Leaves a piece of a floor out, so the room below is open to the one above (a great room
+   * under a loft), with a railing along the edges named in `rails`.
+   */
+  open(floor: number, u0: number, u1: number, v0: number, v1: number, rails: Array<'u-' | 'u+' | 'v-' | 'v+'>): this {
+    this.holes[floor].push({ u0, u1, v0, v1 });
+    const yy = this.y(floor);
+    const rail = (a: number, c: number, d: number, e: number) => this.box('rail', a, c, d, e, yy, yy + 1.0, { col: 'fence', meta: { int: 1 } });
+    if (rails.includes('u-')) rail(u0 - 0.03, u0 + 0.03, v0, v1);
+    if (rails.includes('u+')) rail(u1 - 0.03, u1 + 0.03, v0, v1);
+    if (rails.includes('v-')) rail(u0, u1, v0 - 0.03, v0 + 0.03);
+    if (rails.includes('v+')) rail(u0, u1, v1 - 0.03, v1 + 0.03);
+    return this;
+  }
+
   /** A piece of furniture: centered at (u, v) on a floor, its front facing `face`. */
   furn(floor: number, t: FurnType, u: number, v: number, face: Face = 'v-', scale: number | [number, number] = 1): this {
     const [w, d, h, solid] = FURN[t];
@@ -402,7 +421,7 @@ export class Structure {
     if (this.o.roof === 'pitched') {
       // a ceiling over the top floor, then two roof planes meeting at a ridge along u
       this.slab(EXT_T, W - EXT_T, EXT_T, D - EXT_T, top - SLAB_T, top, [], 'floorslab');
-      const over = 0.45, rise = Math.min(2.6, D * 0.32);
+      const over = 0.45, rise = this.o.rise ?? Math.min(2.6, D * 0.32);
       for (const sgn of [-1, 1]) {
         const v0 = sgn < 0 ? -over : D / 2, v1 = sgn < 0 ? D / 2 : D + over;
         const run = v1 - v0;
@@ -413,7 +432,7 @@ export class Structure {
         const yaw = this.lot.yaw(sgn < 0 ? 'v+' : 'v-');
         this.b.solids.push({
           kind: 'roofplane', x: cx, y: top + rise / 2 + 0.1, z: cz, sx: W + over * 2, sy: 0.22, sz: len, ry: yaw, rx: -a,
-          group: this.id, color: this.o.roofColor, style: 'shingle',
+          group: this.id, color: this.o.roofColor, style: this.o.roofStyle ?? 'shingle',
         });
       }
       // the gable ends: triangles on the side walls (drawn only; the attic is closed off)
@@ -459,7 +478,9 @@ export class Structure {
 // =================================================================================== building types
 export type BuildingType =
   | 'house1' | 'house2' | 'duplex' | 'townhouse' | 'apartment' | 'store' | 'barbershop' | 'laundromat'
-  | 'office' | 'restaurant' | 'warehouse' | 'garage' | 'workshop' | 'storage' | 'tenement';
+  | 'office' | 'restaurant' | 'warehouse' | 'garage' | 'workshop' | 'storage' | 'tenement'
+  // CAP'S HOUSE
+  | 'barndo' | 'barn';
 
 export interface BuildingSpec {
   id: string;
@@ -499,6 +520,8 @@ export function construct(b: MapBuilder, spec: BuildingSpec): Structure {
     case 'laundromat':
     case 'restaurant': return shop(b, lot, spec, rng);
     case 'office': return offices(b, lot, spec, rng);
+    case 'barndo': return barndo(b, lot, spec);
+    case 'barn': return barn(b, lot, spec, rng);
     default: return industrial(b, lot, spec, rng);
   }
 }
@@ -996,5 +1019,201 @@ function industrial(b: MapBuilder, lot: Lot, spec: BuildingSpec, rng: Rng): Stru
   s.finish();
   const p = lot.pt(W * 0.6, D * 0.5);
   b.prop('acunit', p[0], p[1], 0, 0, s.y(1));
+  return s;
+}
+
+/**
+ * CAP'S HOUSE: a gigantic barndominium, two tall floors under one long metal roof (about
+ * 50 × 26 m). Downstairs, left to right seen from the drive: the shop (two roll-up bays that
+ * stand open, the trucks inside), the great room (open to the loft above; the living room at the
+ * front, the kitchen with its island at the back, glass doors out to the pool) and the master
+ * suite (bedroom, walk-in closet, bath). Upstairs: the loft looking down into the great room, the
+ * game room over the shop, two bedrooms and a bath over the master, and a deck over the pool.
+ * A covered porch runs along the front.
+ */
+function barndo(b: MapBuilder, lot: Lot, spec: BuildingSpec): Structure {
+  const { W, D } = lot;
+  const s = new Structure(b, lot, {
+    id: spec.id, floors: 2, style: spec.style ?? 'panel', color: spec.color ?? 0xffffff, plaster: spec.plaster ?? 0xf0ead8,
+    roof: 'pitched', roofColor: spec.roofColor ?? 0x26282c, roofStyle: 'panel', rise: 4.6, story: spec.story ?? 4.4,
+  });
+  const E = EXT_T, I = INT_T / 2;
+  const SHOP = 14, MASTER = W - 14; // the shop is u < SHOP, the master suite u > MASTER
+  const MID = W / 2;
+  // the loft is open over the great room's front half
+  const VOID = { u0: SHOP + 3, u1: MASTER - 3, v1: 12 };
+
+  // ================================================================ downstairs
+  // ---- outside walls
+  s.opening(0, 'front', { at: 4, w: 5, top: 3.9 }); // the roll-up bays (up)
+  s.opening(0, 'front', { at: 10.5, w: 5, top: 3.9 });
+  s.opening(0, 'front', { at: MID, w: 2.0, door: 'glass', lock: true });
+  s.windows(0, 'front', [MID - 6, MID + 6], 3.2, 'fixed', 0.5, 3.8);
+  s.windows(0, 'front', [MASTER + 4.5, MASTER + 10], 1.8, 'slide', 0.9, 2.6);
+  s.opening(0, 'back', { at: 7, w: 1.0, door: 'metal', lock: true });
+  s.opening(0, 'back', { at: MID - 3.5, w: 2.2, door: 'glass' });
+  s.opening(0, 'back', { at: MID + 3.5, w: 2.2, door: 'glass' });
+  s.windows(0, 'back', [MID], 2.4, 'slide', 1.1, 2.5);
+  s.windows(0, 'back', [MASTER + 7], 1.2, 'hinge', 1.6, 2.5);
+  s.opening(0, 'left', { at: 20, w: 1.0, door: 'metal', lock: true });
+  s.windows(0, 'left', [8], 2.2, 'fixed', 2.2, 3.4);
+  s.windows(0, 'right', [6, 11], 1.6, 'slide', 0.9, 2.6);
+  s.windows(0, 'right', [21], 1.0, 'hinge', 1.6, 2.5);
+
+  // ---- the shop
+  s.partition(0, 'v', SHOP, E, D - E, [{ at: 20, w: 1.0, door: 'metal' }]);
+  s.room(0, E, SHOP, E, D - E, 'concrete', false);
+  s.light(0, 4, 8).light(0, 10.5, 8).light(0, 7, 18);
+  for (const [u, variant] of [[4, 3], [10.5, 1]] as const) {
+    const [cx, cz] = lot.pt(u, 6.5);
+    b.prop('truck', cx, cz, lot.yaw('v+'), variant);
+  }
+  s.furn(0, 'workbench', E + 0.38, 15, 'u+').furn(0, 'workbench', E + 0.38, 17.2, 'u+');
+  s.furn(0, 'tires', 3, D - E - 0.6).furn(0, 'tires', 3.9, D - E - 0.6);
+  s.furn(0, 'locker', 10, D - E - 0.27, 'v-').furn(0, 'locker', 11, D - E - 0.27, 'v-');
+  s.furn(0, 'cabinet', SHOP - I - 0.27, 13, 'u-').furn(0, 'pallets', 8, 15);
+  s.loot(0, 7, 13).loot(0, 5, D - E - 1.6);
+
+  // ---- the great room: living room up front, kitchen at the back
+  s.partition(0, 'v', MASTER, E, D - E, [{ at: 13.2, w: 1.0, door: 'wood', lock: true, inside: 1 }]);
+  s.room(0, SHOP, MASTER, E, D - E, 'wood', false);
+  // the stairs to the loft along the shop wall, climbing toward the back
+  s.stairsV(0, SHOP + I + 0.02, 1.4, 3, 9.2, 'u+');
+  s.furn(0, 'rug', MID + 2, 6, 'v+', [1.5, 1.6]);
+  s.furn(0, 'couch', MID - 1.6, 6, 'u+', [1.3, 1]).furn(0, 'couch', MID + 2, 2.2, 'v+', [1.3, 1]);
+  s.furn(0, 'coffeetable', MID + 1.2, 6, 'u+', 1.2);
+  s.furn(0, 'tvstand', MASTER - I - 0.24, 6, 'u-', [1.6, 1]);
+  s.furn(0, 'armchair', MID + 2.5, 9.6, 'v-').furn(0, 'lamp', MID - 2.6, 3.6).furn(0, 'plant', MASTER - I - 0.4, E + 0.4);
+  s.furn(0, 'bookcase', SHOP + I + 0.2, 12.5, 'u+').furn(0, 'plant', SHOP + I + 2.2, E + 0.4);
+  // kitchen: the island, counters and the sink along the back wall, the table by the stairs
+  s.room(0, MID - 7, MID + 7, 13.5, D - E, 'tile', false);
+  s.furn(0, 'counter', MID, 18, 'v+', [1.5, 1.4]);
+  s.furn(0, 'kitchensink', MID, D - E - 0.32, 'v-').furn(0, 'counter', MID - 1.3, D - E - 0.32, 'v-', [0.65, 1]).furn(0, 'counter', MID + 1.3, D - E - 0.32, 'v-', [0.65, 1]);
+  s.furn(0, 'fridge', MID + 6, D - E - 0.38, 'v-').furn(0, 'stove', MID + 7.2, D - E - 0.33, 'v-').furn(0, 'counter', MID + 9.2, D - E - 0.32, 'v-', [1.1, 1]);
+  s.furn(0, 'diningtable', SHOP + 4.5, 17, 'u+', [1.6, 1.2]);
+  for (const dv of [-0.75, 0.75]) s.furn(0, 'chair', SHOP + 3.3, 17 + dv, 'u+').furn(0, 'chair', SHOP + 5.7, 17 + dv, 'u-');
+  s.light(1, MID - 4, 6).light(1, MID + 4, 6).light(0, MID, 18).light(0, SHOP + 4.5, 17).light(0, MID + 7, 22);
+  s.loot(0, MID + 1, 9.6).loot(0, MID - 3, 21.5).loot(0, MID + 8, 15).loot(0, SHOP + 2.4, 22.5);
+
+  // ---- the master suite: the bedroom up front, the closet and the bath behind it
+  const BV = 16, BU = MASTER + 7.5;
+  s.partition(0, 'u', BV, MASTER, W - E, [{ at: MASTER + 3, w: 0.95, door: 'wood' }]);
+  s.partition(0, 'v', BU, BV, D - E, [{ at: 21, w: 0.9, door: 'wood', lock: true, inside: 1 }]);
+  s.room(0, MASTER, W - E, E, BV, 'carpet').room(0, MASTER, BU, BV, D - E, 'carpet').room(0, BU, W - E, BV, D - E, 'tile');
+  s.furn(0, 'bed', W - E - 1.22, 7.5, 'u-', 1.15);
+  s.furn(0, 'nightstand', W - E - 0.25, 5.7, 'u-').furn(0, 'nightstand', W - E - 0.25, 9.3, 'u-');
+  s.furn(0, 'dresser', MASTER + 7, E + 0.27, 'v+').furn(0, 'armchair', MASTER + 1.0, 2.2, 'u+').furn(0, 'rug', W - E - 3.2, 7.5, 'u-');
+  s.furn(0, 'wardrobe', MASTER + I + 0.32, 19.5, 'u+').furn(0, 'wardrobe', MASTER + I + 0.32, 22.5, 'u+').furn(0, 'dresser', MASTER + 4, D - E - 0.27, 'v-');
+  s.furn(0, 'tub', W - E - 0.42, D - E - 1.0, 'u-').furn(0, 'toilet', BU + 1.2, D - E - 0.36, 'v-');
+  s.furn(0, 'bathsink', BU + 2.5, BV + I + 0.25, 'v+').furn(0, 'bathsink', BU + 3.5, BV + I + 0.25, 'v+').furn(0, 'shower', W - E - 0.47, BV + I + 0.5, 'u-');
+  s.loot(0, MASTER + 3.5, 6).loot(0, MASTER + 3.5, 21);
+
+  // ================================================================ upstairs
+  s.windows(1, 'front', [4, 10.5], 1.8, 'slide', 0.9, 2.6);
+  s.windows(1, 'front', [MID - 5, MID, MID + 5], 3.0, 'fixed', 0.6, 3.6);
+  s.windows(1, 'front', [MASTER + 4.5, MASTER + 10], 1.6, 'slide', 0.9, 2.6);
+  s.windows(1, 'back', [4, 10.5, MASTER + 4.5, MASTER + 10], 1.6, 'slide', 0.9, 2.6);
+  s.opening(1, 'back', { at: MID, w: 2.2, door: 'glass' });
+  s.windows(1, 'back', [MID - 6, MID + 6], 2.0, 'fixed', 0.6, 3.2);
+  s.windows(1, 'left', [6, 19], 1.6, 'slide', 0.9, 2.6);
+  s.windows(1, 'right', [6, 19], 1.6, 'slide', 0.9, 2.6);
+  s.balcony(1, 'back', MID - 7, MID + 7, 3.0);
+
+  // ---- the loft, open over the great room
+  s.open(1, VOID.u0, VOID.u1, E, VOID.v1, ['u-', 'u+', 'v+']);
+  s.room(1, SHOP, VOID.u0, E, D - E, 'wood', false).room(1, VOID.u1, MASTER, E, D - E, 'wood', false).room(1, VOID.u0, VOID.u1, VOID.v1, D - E, 'wood', false);
+  s.furn(1, 'couch', MID, VOID.v1 + 1.0, 'v-', [1.4, 1]).furn(1, 'coffeetable', MID, VOID.v1 + 2.4, 'v-');
+  s.furn(1, 'officedesk', MID + 5.5, D - E - 1.6, 'v-').furn(1, 'chair', MID + 5.5, D - E - 2.3, 'v+');
+  s.furn(1, 'bookcase', MID - 5.5, D - E - 0.2, 'v-').furn(1, 'bookcase', MID - 4.3, D - E - 0.2, 'v-').furn(1, 'plant', VOID.u1 + 1.4, E + 0.4);
+  s.light(1, MID, 19).light(1, SHOP + 1.6, 18);
+  s.loot(1, MID - 2.6, 20).loot(1, VOID.u1 + 1.5, 6);
+
+  // ---- the game room over the shop
+  s.partition(1, 'v', SHOP, E, D - E, [{ at: 18, w: 1.0, door: 'wood' }]);
+  s.room(1, E, SHOP, E, D - E, 'carpet');
+  s.furn(1, 'diningtable', 7, 9, 'u+', [1.7, 1.45]); // the pool table
+  s.furn(1, 'couch', 7, D - E - 0.5, 'v-', [1.2, 1]).furn(1, 'tvstand', 7, 15.6, 'v+', [1.4, 1]).furn(1, 'coffeetable', 7, 19.5, 'v-');
+  s.furn(1, 'booth', E + 0.75, 3, 'u+').furn(1, 'cooler', SHOP - I - 0.4, 3.5, 'u-').furn(1, 'rug', 7, 20, 'v-', [1.3, 1.2]);
+  s.loot(1, 3, 15).loot(1, 11, 9);
+
+  // ---- two bedrooms and a bath over the master suite
+  const GV = 13, GU = MASTER + 8.5;
+  s.partition(1, 'v', MASTER, E, D - E, [{ at: 18, w: 0.95, door: 'wood' }]);
+  s.partition(1, 'u', GV, MASTER, W - E, [{ at: MASTER + 2, w: 0.9, door: 'wood', lock: true, inside: -1 }]);
+  s.partition(1, 'v', GU, 19.5, D - E, [{ at: 22.5, w: 0.85, door: 'wood', lock: true, inside: 1 }]);
+  s.partition(1, 'u', 19.5, GU, W - E);
+  s.room(1, MASTER, W - E, E, GV, 'carpet').room(1, MASTER, W - E, GV, D - E, 'carpet').room(1, GU, W - E, 19.5, D - E, 'tile', false);
+  s.furn(1, 'bed', W - E - 1.05, 6.5, 'u-').furn(1, 'nightstand', W - E - 0.25, 4.9, 'u-').furn(1, 'dresser', MASTER + 6, E + 0.27, 'v+');
+  s.furn(1, 'bedsingle', W - E - 1.05, 15.6, 'u-').furn(1, 'desk', MASTER + 4, D - E - 0.33, 'v-').furn(1, 'wardrobe', MASTER + I + 0.32, 15.2, 'u+');
+  s.furn(1, 'toilet', W - E - 0.36, D - E - 0.6, 'u-').furn(1, 'bathsink', GU + 1.0, D - E - 0.25, 'v-').furn(1, 'shower', W - E - 0.47, 20.1, 'u-');
+  s.loot(1, MASTER + 4, 8).loot(1, MASTER + 4, 17);
+
+  s.finish();
+
+  // ================================================================ outside
+  // the covered porch along the front, a step up off the drive
+  const P0 = SHOP - 0.5, PD = 3.4;
+  const pr = lot.rect(P0, W + 0.3, -PD, 0);
+  b.box('woodplat', pr.x0, pr.x1, pr.z0, pr.z1, 0, 0.22, { color: 0x8a6440, group: s.id });
+  const rr = lot.rect(P0 - 0.2, W + 0.5, -PD - 0.3, 0);
+  b.box('awningroof', rr.x0, rr.x1, rr.z0, rr.z1, 3.95, 4.1, { color: 0x26282c, group: s.id });
+  for (let u = P0 + 0.3; u <= W + 0.15; u += (W - P0) / 7) {
+    const [px, pz] = lot.pt(Math.min(u, W), -PD + 0.2);
+    b.box('post', px - 0.14, px + 0.14, pz - 0.14, pz + 0.14, 0.22, 3.95, { color: 0x6f4f33, group: s.id });
+  }
+  for (const u of [MID - 4.5, MID - 3.4, MID + 3.4, MID + 4.5]) {
+    const [cx, cz] = lot.pt(u, -1.2);
+    b.rbox('furn', cx, cz, 0.6, 0.7, 0.22, 0.95, lot.yaw('v-'), { group: s.id, meta: { t: 'chair' } });
+  }
+  // the name over the porch
+  const [sx, sz] = lot.pt(MID, -PD - 0.36);
+  b.sign({ text: "CAP'S HOUSE", x: sx, y: 4.45, z: sz, yaw: lot.yaw('v-') + Math.PI, width: 9, height: 1.0, style: 'store', color: '#f5c518', bg: '#1b1c1f' });
+  // a stone band round the bottom of the walls (drawn only)
+  for (const [u0, u1, v0, v1] of [[-0.06, W + 0.06, -0.06, 0.02], [-0.06, W + 0.06, D - 0.02, D + 0.06], [-0.06, 0.02, 0, D], [W - 0.02, W + 0.06, 0, D]] as const) {
+    const r = lot.rect(u0, u1, v0, v1);
+    b.box('wainscot', r.x0, r.x1, r.z0, r.z1, 0, 1.0, { col: 'none', group: s.id });
+  }
+  b.hotspot(...lot.pt(MID, D / 2));
+  return s;
+}
+
+/**
+ * A red barn: one tall floor under a steep roof, the big doors at both ends standing open,
+ * stalls down one side, a hay loft over the back with a stair up to it.
+ */
+function barn(b: MapBuilder, lot: Lot, spec: BuildingSpec, rng: Rng): Structure {
+  const { W, D } = lot;
+  const H = spec.story ?? 6.2;
+  const s = new Structure(b, lot, {
+    id: spec.id, floors: 1, style: spec.style ?? 'wood', color: spec.color ?? 0x9e2b25, plaster: 0xb9a37f,
+    roof: 'pitched', roofColor: spec.roofColor ?? 0x3a3d42, roofStyle: 'metal', rise: Math.min(4.2, D * 0.36), story: H,
+  });
+  const E = EXT_T;
+  s.opening(0, 'front', { at: W / 2, w: Math.min(4.6, W * 0.4), top: 4.6 });
+  s.opening(0, 'back', { at: W / 2, w: Math.min(4.6, W * 0.4), top: 4.6 });
+  s.windows(0, 'left', [D * 0.3, D * 0.7], 1.2, 'hinge', 1.6, 2.6);
+  s.windows(0, 'right', [D * 0.3, D * 0.7], 1.2, 'hinge', 1.6, 2.6);
+  s.room(0, E, W - E, E, D - E, 'concrete', false);
+  s.light(0, W / 2, D * 0.3).light(0, W / 2, D * 0.7);
+  // stalls down the left side
+  for (let v = E + 1.6; v < D - 6.4; v += 2.6) s.furn(0, 'stall', E + 0.65, v, 'u+', [1, 1.1]);
+  // the hay loft: over the back of the barn, a stair up along the right wall
+  const ly = 3.2, lv = D - 5.2;
+  const lr = lot.rect(E, W - E, lv, D - E);
+  b.box('woodplat', lr.x0, lr.x1, lr.z0, lr.z1, ly - 0.2, ly, { color: 0x7a5a3a, group: s.id, meta: { int: 1 } });
+  const rl = lot.rect(E, W - E - 1.3, lv - 0.05, lv);
+  b.box('rail', rl.x0, rl.x1, rl.z0, rl.z1, ly, ly + 1, { col: 'fence', meta: { int: 1 } });
+  const run = 4.4;
+  const [stx, stz] = lot.pt(W - E - 0.6, lv - run);
+  b.ramp({ kind: 'stairs', x: stx, z: stz, y0: 0, dir: lot.yaw('v+'), run, rise: ly, width: 1.1, rails: 'left', style: 'metal', group: s.id, thickness: 0.15 });
+  for (let i = 0; i < 4; i++) {
+    const [hx, hz] = lot.pt(E + 1.2 + i * 1.5, D - E - 0.9);
+    b.box('haybale', hx - 0.6, hx + 0.6, hz - 0.45, hz + 0.45, ly, ly + 0.9, { group: s.id, meta: { square: 1, int: 1 } });
+  }
+  s.furn(0, 'workbench', W - E - 0.38, D * 0.35, 'u-').furn(0, 'boxes', W - E - 0.6, E + 0.9);
+  s.loot(0, W / 2, D * 0.45).loot(0, W * 0.65, ly > 0 ? D - 2.6 : D - 2, );
+  b.loot(...lot.pt(W * 0.35, D - 2.4), ly);
+  s.finish();
+  void rng;
   return s;
 }

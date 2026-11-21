@@ -46,7 +46,9 @@ export type PropType =
   | 'tree' | 'lamp' | 'bench' | 'hoop' | 'hydrant' | 'busstop'
   | 'acunit' | 'signal' | 'buffer' | 'shelf' | 'trashcan' | 'cone' | 'pallet' | 'banner'
   // the outer districts (JUMP OFF THE PORCH)
-  | 'palm' | 'bush' | 'rock' | 'boulder' | 'log' | 'umbrella' | 'boat';
+  | 'palm' | 'bush' | 'rock' | 'boulder' | 'log' | 'umbrella' | 'boat'
+  // CAP'S HOUSE
+  | 'tractor';
 
 export interface Prop {
   type: PropType;
@@ -193,6 +195,31 @@ export interface MapDef {
   warmup?: { x0: number; x1: number; z0: number; z1: number };
   /** What lies beyond each edge, for the backdrop. Unset sides get a hazy skyline. */
   backdrop?: Partial<Record<'n' | 's' | 'e' | 'w', 'city' | 'hills' | 'ocean' | 'desert'>>;
+  /**
+   * A round map: the land people can reach is this circle (`bounds` is its bounding box). A rim
+   * of rock runs round the edge; whatever of the circle lies past the shore is water.
+   */
+  round?: {
+    x: number;
+    z: number;
+    r: number;
+    /** The paved square in the middle (the districts' streets); grass and fields beyond it. */
+    paved?: { x0: number; x1: number; z0: number; z1: number };
+  };
+  /** Farm animals grazing their pens. Scenery: no collision, not part of the match. */
+  pens?: PenDef[];
+}
+
+export type AnimalKind = 'cow' | 'horse' | 'pig' | 'goat' | 'sheep' | 'chicken';
+
+/** A fenced pen and the animals that wander it. */
+export interface PenDef {
+  kind: AnimalKind;
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  count: number;
 }
 
 /** Quaternion (x,y,z,w) for a solid's orientation. */

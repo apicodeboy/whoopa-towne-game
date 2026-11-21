@@ -212,6 +212,8 @@ export class AudioEngine implements GameAudio {
     this.make(ctx, 'hit_kill', 0.3, (t) => Math.sin(TAU * 1320 * t) * expDecay(t, 0.03) + (t > 0.08 ? Math.sin(TAU * 1980 * (t - 0.08)) * expDecay(t - 0.08, 0.06) : 0));
     // JUMP OFF THE PORCH: balloon pop, loot zip, punch, riot siren
     this.make(ctx, 'pop', 0.16, (t) => rnd() * expDecay(t, 0.012) * 1.2 + Math.sin(TAU * 1200 * t) * expDecay(t, 0.02) * 0.4);
+    // a danger mark: two quick high blips
+    this.make(ctx, 'mark', 0.32, (t) => (t < 0.12 ? Math.sin(TAU * 1320 * t) * expDecay(t, 0.05) : Math.sin(TAU * 1760 * (t - 0.12)) * expDecay(t - 0.12, 0.07)) * 0.6);
     this.make(ctx, 'loot', 0.22, (t) => Math.sin(TAU * (700 + 900 * Math.min(1, t / 0.1)) * t) * expDecay(t, 0.07) * 0.7);
     const pn = lpNoise(600);
     this.make(ctx, 'punch', 0.16, (t) => pn() * expDecay(t, 0.02) + Math.sin(TAU * 90 * t) * expDecay(t, 0.04) * 0.9);
@@ -403,6 +405,11 @@ export class AudioEngine implements GameAudio {
   /** A balloon popping on landing. */
   pop(pos: THREE.Vector3 | null): void {
     this.play('pop', 0.5, pos, 0.9 + Math.random() * 0.2, 14);
+  }
+
+  /** Someone on your squad marked danger. */
+  mark(): void {
+    this.play('mark', 0.32);
   }
 
   /** Something went into your inventory. */

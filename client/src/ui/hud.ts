@@ -1,6 +1,6 @@
 import { CREWS, crewLogoSvg, type TeamId } from '@shared/config/crews';
 import { MODES, type ModeId } from '@shared/config/game';
-import { THROWABLES, WEAPONS, WEAPON_IDS, type Loadout } from '@shared/config/weapons';
+import { THROWABLES, WEAPONS, WEAPON_IDS, type Loadout, type WeaponId } from '@shared/config/weapons';
 import type { MapDef } from '@shared/map/types';
 import { DEG, wrapAngle, yawToward } from '@shared/math';
 import { KILL_GRENADE, KILL_RIOT, KILL_WORLD, PHASE, type Phase, type SnapZone } from '@shared/protocol';
@@ -60,6 +60,8 @@ export interface HudState {
   killer: string;
   showScoreboard: boolean;
   players: HudPlayerRow[];
+  /** Danger marks up right now (yours and your squad's), for the minimap. */
+  marks?: Array<{ x: number; z: number; age: number }>;
   myX: number;
   myZ: number;
   viewYaw: number;
@@ -72,6 +74,10 @@ export interface HudState {
   weaponName?: string;
   /** Id of what is in hand for its picture (weapon or throwable id; '' = nothing / fists). */
   weaponId?: string;
+  /** The crosshair of what is in hand (see Reticle in the weapons config). */
+  reticle?: string;
+  /** Looking down a scope: the scope fills the screen. */
+  scoped?: boolean;
   gun?: boolean;
   melee?: boolean;
   /** JUMP OFF THE PORCH: the safe area and where the riot is heading (minimap). */
@@ -82,7 +88,7 @@ export function makeHudState(): HudState {
   return {
     mode: 'tdm', phase: PHASE.WARMUP, timeLeft: 0, scores: [0, 0], zones: [], myZone: -1, myTeam: 0,
     alive: true, health: 100, armor: -1, spawnProtected: false,
-    loadout: { primary: 'ar', secondary: 'pistol', throwable: 'grenade' }, slot: 0,
+    loadout: { primary: 'draco', secondary: 'taurus', throwable: 'grenade', melee: 'knife' }, slot: 0,
     mag: 0, reserve: 0, magSize: 30, reload: -1, throwables: 0,
     spreadDeg: 1, fovV: 60, aimT: 0, blocked: false, onTarget: false,
     respawnIn: 0, killer: '', showScoreboard: false, players: [],
@@ -108,7 +114,15 @@ function weaponIcon(code: number): string {
   if (code === KILL_GRENADE) return WEAPON_ICONS.grenade;
   if (code === KILL_WORLD) return WEAPON_ICONS.world;
   if (code === KILL_RIOT) return WEAPON_ICONS.riot;
-  return WEAPON_ICONS[WEAPON_IDS[code] ?? 'ar'];
+  return iconFor(WEAPON_IDS[code] ?? 'draco');
+}
+
+/** A gun's little outline (by the kind of gun it is). */
+function iconFor(id: string): string {
+  const cls = WEAPONS[id as WeaponId]?.cls;
+  const key = cls === 'rifle' ? 'ar' : cls === 'dmr' || cls === 'sniper' ? 'sniper' : cls === 'smg' ? 'smg' : cls === 'shotgun' ? 'shotgun'
+    : cls === 'pistol' || cls === 'revolver' ? 'pistol' : cls === 'melee' ? 'fists' : id;
+  return WEAPON_ICONS[key] ?? WEAPON_ICONS.ar;
 }
 
 function fmtTime(sec: number): string {
@@ -158,6 +172,8 @@ export class Hud {
   private slotEls: HTMLElement[] = [];
   private throwCount: HTMLElement;
   private cross: HTMLElement;
+  /** The scope over the whole screen (sniper rifles and the DMR, aimed). */
+  private scopeEl: HTMLElement;
   private crossLines: HTMLElement[] = [];
   private crossBlocked: HTMLElement;
   private hitEl: HTMLElement;
@@ -229,6 +245,10 @@ export class Hud {
       this.cross.append(l);
     }
     this.cross.append(el('i', 'ch-dot'));
+    // the other reticle shapes (each gun shows the ones its reticle uses)
+    this.cross.append(el('i', 'ch-ring'), el('i', 'ch-chev'), el('i', 'ch-brk ch-brk-l'), el('i', 'ch-brk ch-brk-r'));
+    this.scopeEl = el('div', 'scope-overlay hidden');
+    this.scopeEl.innerHTML = '<div class="sc-glass"></div><i class="sc-h"></i><i class="sc-v"></i><i class="sc-mils"></i><i class="sc-chev"></i><i class="sc-stadia"></i>';
     this.crossBlocked = el('i', 'ch-blocked', '✕');
     this.cross.append(this.crossBlocked);
     this.hitEl = el('div', 'hitmarker');
@@ -300,7 +320,7 @@ export class Hud {
 
     this.root.append(
       this.legendEl, this.hintEl,
-      this.vignette, this.flashEl, bar, mapBox, this.feedEl, this.arcsEl, this.cross, this.hitEl,
+      this.scopeEl, this.vignette, this.flashEl, bar, mapBox, this.feedEl, this.arcsEl, this.cross, this.hitEl,
       this.gunPic, this.healthBox, this.ammoBox, this.objectiveEl, this.confirmEl, this.announceEl, this.respawnEl, this.boardEl, this.netEl,
     );
     parent.append(this.root);
@@ -448,8 +468,8 @@ export class Hud {
     if (s.reload >= 0) this.reloadFill.style.width = `${Math.round(s.reload * 100)}%`;
     this.set('slot', s.slot, () => this.slotEls.forEach((n, i) => n.classList.toggle('active', i === s.slot)));
     this.set('loadout', `${s.loadout.primary}|${s.loadout.secondary}|${s.loadout.throwable}`, () => {
-      this.slotEls[0].querySelector('.sicon')!.innerHTML = WEAPON_ICONS[s.loadout.primary];
-      this.slotEls[1].querySelector('.sicon')!.innerHTML = WEAPON_ICONS[s.loadout.secondary];
+      this.slotEls[0].querySelector('.sicon')!.innerHTML = iconFor(s.loadout.primary);
+      this.slotEls[1].querySelector('.sicon')!.innerHTML = iconFor(s.loadout.secondary);
       this.slotEls[2].querySelector('.sicon')!.innerHTML = WEAPON_ICONS.grenade;
       this.slotEls[2].dataset.kind = s.loadout.throwable;
     });
@@ -459,8 +479,14 @@ export class Hud {
     });
 
     // ---- reticle ----
-    const showCross = s.alive && s.phase !== PHASE.ENDED && !s.showScoreboard;
+    const scoped = !!s.scoped && s.alive && s.phase !== PHASE.ENDED;
+    this.set('scoped', `${scoped}|${s.reticle}`, () => {
+      this.scopeEl.classList.toggle('hidden', !scoped);
+      this.scopeEl.dataset.ret = s.reticle ?? '';
+    });
+    const showCross = s.alive && s.phase !== PHASE.ENDED && !s.showScoreboard && !scoped;
     this.set('cross', showCross, () => this.cross.classList.toggle('hidden', !showCross));
+    this.set('ret', s.reticle ?? 'cross', () => (this.cross.dataset.ret = s.reticle ?? 'cross'));
     if (showCross) {
       const px = (Math.tan(s.spreadDeg * DEG) / Math.tan((s.fovV * DEG) / 2)) * (this.height / 2);
       const gap = Math.round(Math.max(3, px) * 2) / 2;

@@ -1,7 +1,7 @@
 import { botAppearance, encodeAppearance, sanitizeAppearance, type Appearance } from '../config/appearance';
 import type { TeamId } from '../config/crews';
 import {
-  ENDED_SECONDS, GRENADE, MAX_PLAYERS, MAX_REWIND_MS, MODES, NET, PLAYER, SMOKE, THROW, TICK_DT, TICK_MS, TURF,
+  ENDED_SECONDS, GRENADE, MARK, MAX_PLAYERS, MAX_REWIND_MS, MODES, NET, PLAYER, SMOKE, THROW, TICK_DT, TICK_MS, TURF,
   WARMUP_SECONDS, type ModeId,
 } from '../config/game';
 import { PORCH, sanitizeSquadMode, type SquadMode } from '../config/porch';
@@ -20,9 +20,9 @@ import { BotBrain, randomBotLoadout } from './bots';
 import { BuildingRules, Buildings } from './buildings';
 import { HIT_PLAYER, makeShotResult, pelletDamage, shotSeed, spreadDirection, traceShot, type ShotTarget } from './combat';
 import { NavGrid } from './nav';
-import { PhysicsWorld, Q_PROJECTILE, type Rapier } from './physics';
+import { PhysicsWorld, Q_BULLET, Q_PROJECTILE, type Rapier } from './physics';
 import {
-  AIR_RIDING, AIR_SKYDIVE, copyInputCmd, eyeHeight, makeInputCmd, makePlayerState, makeStepActions, playerStateToArray, spawnPlayerState,
+  AIR_RIDING, AIR_SKYDIVE, BTN, copyInputCmd, eyeHeight, makeInputCmd, makePlayerState, makeStepActions, playerStateToArray, spawnPlayerState,
   stepPlayer, weaponInSlot, type InputCmd, type PlayerState, type StepActions,
 } from './player';
 import { PorchRules } from './porch';
@@ -59,6 +59,9 @@ export interface SimPlayer {
   life: number;
   ping: number;
   lastSeq: number;
+  /** Marking danger: when the last mark went up (ms), and whether MARK was down last input. */
+  markAt: number;
+  markDown: boolean;
   inputs: InputCmd[];
   budget: number;
   idleTicks: number;
@@ -333,6 +336,8 @@ export class GameSim {
       life: 0,
       ping: 0,
       lastSeq: 0,
+      markAt: -1e9,
+      markDown: false,
       inputs: [],
       budget: 2,
       idleTicks: 0,
@@ -546,7 +551,11 @@ export class GameSim {
 
   private applyInput(p: SimPlayer, cmd: InputCmd, frozen: boolean): void {
     p.lastSeq = cmd.seq;
+    const mark = (cmd.buttons & BTN.MARK) !== 0;
+    const marked = mark && !p.markDown;
+    p.markDown = mark;
     if (!p.alive) return;
+    if (marked && !frozen) this.markDanger(p, cmd);
     const looted = this.porch?.onInput(p, cmd) ?? false;
     if (p.brain) this.bld.botAssist(p.idx, cmd);
     else this.bld.onInput(p.idx, cmd, TICK_DT, looted);
@@ -558,6 +567,30 @@ export class GameSim {
     if (act.healed >= 0) this.porch?.healed(p, act.healed);
     if (act.touchdown) this.events.push([EV.TOUCHDOWN, p.idx]);
   }
+
+  /**
+   * Marks danger where a player is looking: the first thing a bullet would hit along their
+   * view (from their camera, kept near their head as for shots). Their squad (or crew) is sent
+   * where; nobody else is.
+   */
+  private markDanger(p: SimPlayer, cmd: InputCmd): void {
+    if (this.time - p.markAt < MARK.cooldown * 1000) return;
+    const s = p.state;
+    if (s.air === AIR_RIDING) return;
+    const eyeX = s.x, eyeY = s.y + eyeHeight(s.crouching), eyeZ = s.z;
+    let ox = eyeX, oy = eyeY, oz = eyeZ;
+    if (!p.isBot && Math.hypot(cmd.ox - eyeX, cmd.oy - eyeY, cmd.oz - eyeZ) <= NET.maxAimOriginDist) {
+      ox = cmd.ox;
+      oy = cmd.oy;
+      oz = cmd.oz;
+    }
+    const f = forwardFromYawPitch(cmd.yaw, cmd.pitch, this.markDir);
+    const hit = this.phys.raycast(ox, oy, oz, f.x, f.y, f.z, MARK.range, Q_BULLET);
+    if (hit < 0) return;
+    p.markAt = this.time;
+    this.events.push([EV.MARK, p.idx, Math.round((ox + f.x * hit) * 100), Math.round((oy + f.y * hit) * 100), Math.round((oz + f.z * hit) * 100)]);
+  }
+  private markDir: Vec3 = { x: 0, y: 0, z: 0 };
 
   // ------------------------------------------------------------------ combat
   private fire(p: SimPlayer, cmd: InputCmd, act: StepActions): void {
@@ -1062,8 +1095,18 @@ export class GameSim {
       s: me ? playerStateToArray(me.state, this.stateArr).slice() : null,
       l: me ? me.life : 0,
       r: me && !me.alive ? Math.max(0, Math.round(me.respawnAt - this.time)) : 0,
-      e: events,
+      e: this.eventsFor(me, events),
     };
+  }
+
+  /** The events one player is sent: everything, except danger marks from outside their squad. */
+  private eventsFor(me: SimPlayer | null, events: number[][]): number[][] {
+    if (!events.some((e) => e[0] === EV.MARK)) return events;
+    return events.filter((e) => {
+      if (e[0] !== EV.MARK) return true;
+      const by = this.players[e[1]];
+      return !!me && !!by && (by === me || this.allies(by, me));
+    });
   }
 
   /** Final standings for the end-of-match screen. */

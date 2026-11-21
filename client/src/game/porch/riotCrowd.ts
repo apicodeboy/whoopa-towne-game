@@ -159,11 +159,13 @@ export class RiotCrowd {
   private torchN = 0;
   private phys: PhysicsWorld;
   private bounds: MapDef['bounds'];
+  private round: MapDef['round'];
   private disposables: Array<{ dispose(): void }> = [];
 
   constructor(phys: PhysicsWorld, map: MapDef) {
     this.phys = phys;
     this.bounds = map.bounds;
+    this.round = map.round;
     this.group.name = 'riot-crowd';
     const std = (opts: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, ...opts });
 
@@ -355,13 +357,15 @@ export class RiotCrowd {
   private spot(key: number, x: number, z: number): Spot | null {
     const b = this.bounds;
     if (x < b.minX - 1 || x > b.maxX + 1 || z < b.minZ - 1 || z > b.maxZ - 0.5) return null;
+    const R = this.round;
+    if (R && Math.hypot(x - R.x, z - R.z) > R.r) return null;
     let s = this.spots.get(key);
     if (!s || Math.abs(s.x - x) + Math.abs(s.z - z) > 0.7) {
       const from = 2.4;
       const hit = this.phys.raycast(x, from, z, 0, -1, 0, 3, Q_PROJECTILE);
       const y = hit < 0 ? 0 : from - hit;
       // started inside a wall (hit at once), or standing on top of a car / counter: nobody here
-      const ok = hit !== 0 && y < 0.6;
+      const ok = hit !== 0 && y < 0.6 && y > -0.2;
       s = { x, z, y: Math.max(0, y), ok };
       this.spots.set(key, s);
     }

@@ -5,6 +5,8 @@
  * (which runs the rules) and the client (HUD, prediction).
  */
 
+import { WEAPONS, WEAPON_IDS, type WeaponId } from './weapons';
+
 export type SquadMode = 'solo' | 'duos' | 'squads';
 
 export const SQUAD_MODES: Record<SquadMode, { name: string; size: number; blurb: string }> = {
@@ -195,22 +197,36 @@ export const BAGS = [
 export const RARITY_LUCK: Record<Rarity, number> = { common: 0, uncommon: 0.5, rare: 1, epic: 1.4 };
 
 const W = ITEM.WEAPON, A = ITEM.AMMO, H = ITEM.HEAL, I = ITEM.IBUPROFEN, T = ITEM.THROWABLE;
+const gun = (id: WeaponId, weight: number, rarity: Rarity): LootEntry => ({ item: { kind: W, code: WEAPON_IDS.indexOf(id), count: 0 }, weight, rarity });
 /**
- * The loot pool. Weapon codes follow WEAPON_IDS (0 smg, 1 ar, 2 shotgun, 3 pistol, 4 sniper);
- * ammo codes follow AMMO_TYPES (0 light, 1 medium, 2 shells, 3 heavy); heal codes HEAL_KINDS;
+ * The loot pool. Guns are listed by id (their wire code is their place in WEAPON_IDS); ammo
+ * codes follow AMMO_TYPES (0 light, 1 medium, 2 shells, 3 heavy); heal codes HEAL_KINDS;
  * throwable codes THROWABLE_IDS (0 grenade, 1 smoke). A looted gun comes with a full magazine
- * and a little ammo for it (see AMMO_WITH_WEAPON).
+ * and a little ammo for it (its `lootAmmo`).
  */
 export const LOOT: LootEntry[] = [
-  { item: { kind: W, code: 3, count: 0 }, weight: 12, rarity: 'common' }, // pistol
-  { item: { kind: W, code: 0, count: 0 }, weight: 9, rarity: 'common' }, // smg
-  { item: { kind: W, code: 2, count: 0 }, weight: 7, rarity: 'uncommon' }, // shotgun
-  { item: { kind: W, code: 1, count: 0 }, weight: 6, rarity: 'uncommon' }, // ar
-  { item: { kind: W, code: 4, count: 0 }, weight: 2, rarity: 'rare' }, // sniper
+  // handguns and the common street guns
+  gun('taurus', 10, 'common'),
+  gun('uzi', 6, 'common'),
+  gun('mp7', 5, 'common'),
+  gun('bammer', 5, 'common'),
+  gun('draco', 5, 'common'),
+  // better
+  gun('honeybadger', 3.5, 'uncommon'),
+  gun('scorpion', 3, 'uncommon'),
+  gun('bizon', 3, 'uncommon'),
+  gun('doublebarrel', 3, 'uncommon'),
+  gun('dmr', 2.5, 'uncommon'),
+  gun('magnum', 2.5, 'uncommon'),
+  // the good stuff
+  gun('vector', 1.6, 'rare'),
+  gun('p90', 1.6, 'rare'),
+  gun('vss', 1.4, 'rare'),
+  gun('intervention', 0.9, 'epic'),
   { item: { kind: A, code: 0, count: 40 }, weight: 10, rarity: 'common' },
   { item: { kind: A, code: 1, count: 30 }, weight: 9, rarity: 'common' },
   { item: { kind: A, code: 2, count: 10 }, weight: 7, rarity: 'common' },
-  { item: { kind: A, code: 3, count: 6 }, weight: 4, rarity: 'uncommon' },
+  { item: { kind: A, code: 3, count: 8 }, weight: 5, rarity: 'uncommon' },
   { item: { kind: H, code: 0, count: 3 }, weight: 9, rarity: 'common' }, // bandages
   { item: { kind: H, code: 2, count: 1 }, weight: 6, rarity: 'common' }, // drink
   { item: { kind: H, code: 1, count: 1 }, weight: 3, rarity: 'rare' }, // first-aid kit
@@ -221,4 +237,5 @@ export const LOOT: LootEntry[] = [
 ];
 
 /** Rounds of spare ammo that come with a looted gun (by weapon index). */
-export const AMMO_WITH_WEAPON = [32, 30, 8, 12, 5];
+export const AMMO_WITH_WEAPON: readonly number[] = WEAPON_IDS.map((id) => WEAPONS[id].lootAmmo);
+

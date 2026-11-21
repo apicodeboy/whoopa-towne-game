@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WEAPONS } from '@shared/config/weapons';
 import { BOTTOM_COLORS, SHOE_COLORS, SKIN_TONES, type Appearance } from '@shared/config/appearance';
 import { crewColorHex, type TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp, lerpAngle, wrapAngle } from '@shared/math';
@@ -60,8 +61,10 @@ export function buildWeaponModel(item: HeldItem): WeaponModel {
     group: g, muzzleZ: -0.5, leftGrip: new THREE.Vector3(0, -0.03, -0.32),
     hip: new THREE.Vector3(0.17, -0.1, -0.34), ads: new THREE.Vector3(0.085, 0.15, -0.3), twoHanded: true,
   };
-  switch (item) {
-    case 'sniper':
+  // (the stand-in figure draws a rough shape per kind of gun)
+  const cls = item === 'grenade' || item === 'smoke' || item === 'none' ? item : WEAPONS[item]?.cls;
+  const shape = cls === 'smg' ? 'smg' : cls === 'shotgun' ? 'shotgun' : cls === 'pistol' || cls === 'revolver' ? 'pistol' : cls === 'rifle' || cls === 'dmr' || cls === 'sniper' ? 'ar' : item;
+  switch (shape) {
     case 'ar':
       g.add(box(0.06, 0.09, 0.42, metal, 0, 0.02, -0.12));
       g.add(box(0.03, 0.03, 0.3, dark, 0, 0.035, -0.46));
@@ -251,7 +254,7 @@ export class ProceduralCharacter implements CharacterVisual {
     this.weaponModel = buildWeaponModel('none');
     this.weaponMount.add(this.weaponModel.group);
     this.weaponMount.add(this.muzzle);
-    this.setHeld('ar');
+    this.setHeld('draco');
   }
 
   private setHeld(item: HeldItem): void {

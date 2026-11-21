@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  CATALOG, DEFAULT_APPEARANCE, GRAMS_PACKAGES, decodeAppearance, encodeAppearance, formatGrams, sanitizeAppearance,
+  CATALOG, DEFAULT_APPEARANCE, GRAMS_PACKAGES, GUN_SKIN_ITEMS, decodeAppearance, encodeAppearance, formatGrams, gunSkinItemId, sanitizeAppearance,
   stripUnowned, type GramsPackage,
 } from '../../shared/src/index.ts';
 import { assert, test } from '../../shared/test/harness.ts';
@@ -223,6 +223,34 @@ test('TRAP: equip only what you own; balance, items and look survive a restart',
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('gun skins: bought per gun with GRAMS, worn on that gun only, never without owning them', async () => {
+  const dev = new DevProvider('http://x');
+  const eco = new Economy(new FileEconomyStore(null), dev);
+  const { token, acc } = await account(eco);
+  // every gun has every skin for sale, cosmetic only (an appearance field, nothing in the weapon stats)
+  assert(GUN_SKIN_ITEMS.length === 15 * 6 && GUN_SKIN_ITEMS.every((i) => Object.keys(i.equip).every((f) => f.startsWith('gs_'))), `${GUN_SKIN_ITEMS.length} gun skins, each only a look`);
+  const gold = gunSkinItemId('draco', 'gold');
+  let err: unknown;
+  try { await eco.buy(acc(), gold, reqId()); } catch (e) { err = e; }
+  assert(err instanceof EconomyError && err.code === 'insufficient_funds', 'no GRAMS: refused');
+  await topUp(eco, dev, token, 'grams-3.5'); // 35 units
+  const out = await eco.buy(acc(), gold, reqId());
+  assert(out.balance === 35 - 20 && acc().owned[gold], `2 GRAMS for gold on the Draco (left ${formatGrams(acc().balance)})`);
+  // wearing it on the Draco is fine; the same skin on another gun is not (it was bought for the Draco)
+  const saved = await eco.equip(acc(), encodeAppearance({ ...DEFAULT_APPEARANCE, gs_draco: 'gold' }));
+  assert(decodeAppearance(saved).gs_draco === 'gold', 'gold Draco on');
+  err = null;
+  try { await eco.equip(acc(), encodeAppearance({ ...DEFAULT_APPEARANCE, gs_draco: 'gold', gs_vector: 'gold' })); } catch (e) { err = e; }
+  assert(err instanceof EconomyError && err.code === 'not_owned', 'a skin bought for one gun cannot go on another');
+  // and what other players see is stripped the same way
+  const worn = stripUnowned(sanitizeAppearance({ ...DEFAULT_APPEARANCE, gs_draco: 'gold', gs_vector: 'ice' }), eco.ownedKeys(acc()));
+  assert(worn.gs_draco === 'gold' && worn.gs_vector === 'none', 'unowned gun skins are stripped');
+  // looks saved before gun skins existed still decode, with every gun on its factory finish
+  const old = encodeAppearance(DEFAULT_APPEARANCE).slice(0, -15);
+  const back = decodeAppearance(old);
+  assert(back.gs_draco === 'none' && back.gs_p90 === 'none', 'old looks: factory finish');
 });
 
 test('the HTTP API: sign up, test checkout, buy, equip, history', async () => {

@@ -1,6 +1,6 @@
 import { HITBOX, PLAYER, THROW, TICK_DT } from '../config/game';
 import { PORCH, SQUAD_MODES } from '../config/porch';
-import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, type Loadout, type WeaponId } from '../config/weapons';
+import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, type Loadout, type WeaponClass, type WeaponId } from '../config/weapons';
 import { DEG, Rng, clamp, hash32, wrapAngle, yawToward } from '../math';
 import { PHASE, type BotDifficulty } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
@@ -38,14 +38,16 @@ export const BOT_NAMES = [
   'Bubba', 'Q2Times', 'Reek', 'Flex', 'Munch', 'Spook', 'DTrain', 'Biscuit', 'Wavy', 'Rello',
 ];
 
-/** Preferred fighting distance per weapon [min, max]. */
-const RANGE_BAND: Record<WeaponId, [number, number]> = {
+/** Preferred fighting distance per kind of gun [min, max]. */
+const RANGE_BAND: Record<WeaponClass, [number, number]> = {
   shotgun: [2.5, 8],
   smg: [5, 15],
-  ar: [9, 30],
+  rifle: [9, 30],
+  dmr: [14, 45],
   pistol: [5, 16],
+  revolver: [6, 20],
   sniper: [18, 70],
-  fists: [0.5, 1.15],
+  melee: [0.5, 1.15],
 };
 
 /** Throw distance for a handful of pitch angles (flat ground), computed once. */
@@ -62,10 +64,23 @@ const THROW_TABLE: Array<{ pitch: number; range: number }> = (() => {
   return out;
 })();
 
+/** What bots carry in the modes with loadouts: mostly rifles and SMGs, some shotguns. */
+const BOT_PRIMARIES: ReadonlyArray<[WeaponId, number]> = [
+  ['draco', 3], ['honeybadger', 2.5], ['mp7', 2], ['uzi', 1.5], ['vector', 1.5], ['p90', 1], ['scorpion', 1], ['bizon', 1],
+  ['bammer', 1.5], ['doublebarrel', 1], ['dmr', 0.8], ['vss', 0.6],
+];
+
 export function randomBotLoadout(rng: Rng): Loadout {
-  const r = rng.next();
-  const primary: WeaponId = r < 0.45 ? 'ar' : r < 0.8 ? 'smg' : 'shotgun';
-  return { primary, secondary: 'pistol', throwable: rng.chance(0.7) ? 'grenade' : 'smoke' };
+  let r = rng.next() * BOT_PRIMARIES.reduce((a, [, w]) => a + w, 0);
+  let primary: WeaponId = BOT_PRIMARIES[0][0];
+  for (const [id, w] of BOT_PRIMARIES) {
+    r -= w;
+    if (r <= 0) {
+      primary = id;
+      break;
+    }
+  }
+  return { primary, secondary: rng.chance(0.75) ? 'taurus' : 'magnum', throwable: rng.chance(0.7) ? 'grenade' : 'smoke', melee: rng.chance(0.5) ? 'knife' : 'fists' };
 }
 
 /**
@@ -239,9 +254,9 @@ export class BotBrain {
     let best = SLOT_PRIMARY, bestScore = -1;
     for (const slot of [SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY]) {
       const w = weaponInSlot(s, slot);
-      if (!w || w.id === 'fists') continue;
+      if (!w || w.kind === 'melee') continue;
       if (magOf(s, slot) + reserveOf(s, slot) <= 0) continue;
-      const score = slot === SLOT_SECONDARY ? 1 : w.id === 'sniper' ? 1.5 : 2;
+      const score = slot === SLOT_SECONDARY ? 1 : w.cls === 'sniper' ? 1.5 : 2;
       if (score > bestScore) {
         bestScore = score;
         best = slot;
@@ -255,7 +270,7 @@ export class BotBrain {
     const s = this.me.state;
     for (const slot of [SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY]) {
       const w = weaponInSlot(s, slot);
-      if (w && w.id !== 'fists' && magOf(s, slot) + reserveOf(s, slot) > w.magSize) return true;
+      if (w && w.kind !== 'melee' && magOf(s, slot) + reserveOf(s, slot) > w.magSize) return true;
     }
     return false;
   }
@@ -353,7 +368,7 @@ export class BotBrain {
       lookZ = tz;
       haveLook = true;
 
-      const band = RANGE_BAND[weapon ? weapon.id : 'fists'];
+      const band = RANGE_BAND[weapon ? weapon.cls : 'melee'];
       if (d > band[1]) {
         // close the distance along a path (straight lines get hung up on cars and barriers)
         if (!this.hasGoal || now >= this.repathAt) this.setGoal(tx, tz, 700);
@@ -413,7 +428,7 @@ export class BotBrain {
             if (now < this.tapUntil) buttons |= BTN.FIRE;
           }
         }
-        if (d > 12 && weapon.id !== 'shotgun') buttons |= BTN.AIM;
+        if (d > 12 && weapon.cls !== 'shotgun') buttons |= BTN.AIM;
       }
       if (now < this.crouchUntil) buttons |= BTN.CROUCH;
 
@@ -504,7 +519,7 @@ export class BotBrain {
     // ---------------------------------------------------------------- loot
     if (porch && s.healT <= 0) {
       const { bag, pickup } = porch.reachable(s);
-      const want = bag || (pickup && (pickup.kind !== 1 || !this.armed() || weaponInSlot(s, SLOT_PRIMARY_B)?.id === 'fists'));
+      const want = bag || (pickup && (pickup.kind !== 1 || !this.armed() || weaponInSlot(s, SLOT_PRIMARY_B)?.kind === 'melee'));
       // a bag takes a moment to go through; things lying loose are quicker to grab
       if (!want) this.searchAt = 0;
       else if (this.searchAt === 0) this.searchAt = now + (bag ? this.rng.range(700, 1300) : this.rng.range(250, 500));

@@ -6,9 +6,11 @@ import { approx, assert, test } from './harness';
 import { makeWorld } from './env';
 
 const act = makeStepActions();
+/** A loadout whose primary slows you to 0.95 (what these speeds were measured with). */
+const LOADOUT = { ...DEFAULT_LOADOUT, primary: 'bammer' as const };
 
 function place(s: PlayerState, x: number, z: number, yaw: number, y = 0): void {
-  spawnPlayerState(s, { x, y, z, yaw }, DEFAULT_LOADOUT);
+  spawnPlayerState(s, { x, y, z, yaw }, LOADOUT);
 }
 
 /** Runs `ticks` steps holding the given input. */
@@ -18,7 +20,7 @@ function run(phys: PhysicsWorld, s: PlayerState, ticks: number, over: Partial<In
   Object.assign(cmd, over);
   for (let i = 0; i < ticks; i++) {
     cmd.seq++;
-    stepPlayer(s, cmd, TICK_DT, phys, DEFAULT_LOADOUT, act);
+    stepPlayer(s, cmd, TICK_DT, phys, LOADOUT, act);
   }
 }
 
@@ -58,7 +60,7 @@ test('walk speed, sprint speed and crouch speed', async () => {
   run(phys, s, 30, { mz: 1 }); // get up to speed
   let z0 = s.z;
   run(phys, s, 60, { mz: 1 });
-  approx(z0 - s.z, PLAYER.walkSpeed * 0.95, 0.15, 'walk distance in 1s (AR move mult 0.95)');
+  approx(z0 - s.z, PLAYER.walkSpeed * 0.95, 0.15, 'walk distance in 1s (a 0.95 move-mult gun)');
 
   place(s, -18, 20, NORTH);
   run(phys, s, 30, { mz: 1, buttons: BTN.SPRINT });

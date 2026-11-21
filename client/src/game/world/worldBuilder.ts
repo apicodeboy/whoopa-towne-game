@@ -8,6 +8,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { StaticModelBatch, type Assets } from '../assets';
 import { LIGHTING } from '../lighting';
 import { BoxBatch, type BoxOptions } from './boxBatch';
+import { crops, disposeFarmShapes, farmSolid, FARM_AREAS, orchardTree, tractor, type Draw } from './farm';
+import { FarmAnimals } from './farmAnimals';
 import { GeoBatch, trs } from './geoBatch';
 import { SignAtlas } from './signAtlas';
 import { glowTexture, makeSignCanvas, makeTextures, svgTexture } from './textures';
@@ -111,6 +113,8 @@ const STYLES: Record<string, { tex: string; color: number; tile: number }> = {
   store: { tex: 'stucco', color: 0xe3d2ac, tile: 3 },
   siding: { tex: 'siding', color: 0x9fb2c4, tile: 1.6 },
   metal: { tex: 'metal', color: 0x8f9aa3, tile: 2.2 },
+  // ribbed steel on a new build (CAP'S HOUSE)
+  panel: { tex: 'panel', color: 0xffffff, tile: 2.4 },
   concrete: { tex: 'concrete', color: 0xc4c4be, tile: 4 },
   wood: { tex: 'wood', color: 0x9a7a55, tile: 1.4 },
   glass: { tex: 'metal', color: 0x6f8fa8, tile: 3 },
@@ -221,6 +225,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   const box = (key: string): BoxBatch => (boxes[inChunk ? `${key}@${inChunk}` : key] ??= new BoxBatch());
   const geos: Record<string, GeoBatch> = {};
   const geo = (key: string): GeoBatch => (geos[inChunk ? `${key}@${inChunk}` : key] ??= new GeoBatch());
+  const draw: Draw = { box, geo };
   /** Placed CC0 models (cars, dumpsters...), baked into a few merged meshes. */
   const models = new StaticModelBatch();
   /** Every sign and graffiti tag shares one texture atlas. */
@@ -252,9 +257,10 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   };
 
   // ================================================================== ground, areas, roads
-  box('asphalt').addQuad(b.minX - 8, b.minZ - 8, b.maxX + 8, b.maxZ + 8, 0, { tile: 6 });
+  if (map.round) roundGround(map.round);
+  else box('asphalt').addQuad(b.minX - 8, b.minZ - 8, b.maxX + 8, b.maxZ + 8, 0, { tile: 6 });
   for (const a of [...map.areas].sort((p, q) => (p.layer ?? 1) - (q.layer ?? 1))) {
-    const st = AREA_STYLE[a.kind] ?? { tex: 'paint', color: 0x555555, tile: 4 };
+    const st = AREA_STYLE[a.kind] ?? FARM_AREAS[a.kind] ?? { tex: 'paint', color: 0x555555, tile: 4 };
     const y = 0.008 * (a.layer ?? 1);
     let color = a.color ?? st.color;
     if (a.kind === 'base0' || a.kind === 'base1') {
@@ -269,6 +275,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     box(`ground:${st.tex}`).addQuad(a.x0, a.z0, a.x1, a.z1, y, { color, tile: st.tile });
     if (a.kind === 'court') paintCourt(a.x0, a.x1, a.z0, a.z1, y + 0.006);
     if (a.kind === 'lot') paintParking(a.x0, a.x1, a.z0, a.z1, y + 0.006);
+    if (FARM_AREAS[a.kind]) crops(draw, a, y);
   }
 
   for (const r of map.roads) {
@@ -302,11 +309,12 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       }
     }
   }
-  if (map.id === 'whoopa-towne' || map.id === 'greater-towne') paintStreetMarkings();
+  if (map.id === 'whoopa-towne') paintStreetMarkings();
 
   // ================================================================== solids
   let solidIndex = 0;
   let trashBagGeo: THREE.IcosahedronGeometry | null = null;
+  let rimRock: THREE.DodecahedronGeometry | null = null;
   for (const s of map.solids) {
     solidIndex++;
     if (s.kind === 'ground' || s.kind === 'perimeter' || s.kind === 'bound') continue;
@@ -314,6 +322,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const spec = { x: s.x, y: s.y, z: s.z, sx: s.sx, sy: s.sy, sz: s.sz, q: solidQuat(s) };
     const onGround = !s.rx && s.y - s.sy / 2 <= 0.02;
     inChunk = s.meta?.int ? chunkOf(s.x, s.z) : null;
+    if (farmSolid(draw, s, onGround, solidIndex)) continue;
     switch (s.kind) {
       case 'attic':
         break; // collision only
@@ -385,6 +394,11 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         // glazed tiles (Hong Kong) are a clean color; shingles take the texture
         if (s.style === 'tile') {
           box('smooth').add(spec, { color: s.color ?? 0x2f7a5a });
+          break;
+        }
+        // standing-seam metal (the barns, Cap's barndominium)
+        if (s.style === 'metal' || s.style === 'panel') {
+          box(s.style).add(spec, { color: s.color ?? 0x3a3d42, tile: 1.2 });
           break;
         }
         box('shingle').add(spec, { color: s.color ?? [0x4a4442, 0x5a3f38, 0x3d4650, 0x4d4a3c][Math.floor(hash(solidIndex) * 4)], tile: 2.5 });
@@ -499,6 +513,18 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         break;
       case 'cliff':
         box('concrete').add(spec, { color: [0x7d7466, 0x8a8172, 0x6f685c][solidIndex % 3], tile: 5, skipBottom: true });
+        if (s.meta?.rim) {
+          // the round map's rim: tumbled rock along its foot and its top, to break up the wall
+          rimRock ??= new THREE.DodecahedronGeometry(1, 0);
+          const ry = s.ry ?? 0, tx = Math.cos(ry), tz = -Math.sin(ry), nx = Math.sin(ry), nz = Math.cos(ry);
+          for (let k = 0; k < 3; k++) {
+            const t = (hash(solidIndex * 7 + k) - 0.5) * s.sx * 0.8, r = 1.4 + hash(solidIndex * 11 + k) * 2.2;
+            const fx = s.x + tx * t - nx * (s.sz / 2 + r * 0.3), fz = s.z + tz * t - nz * (s.sz / 2 + r * 0.3);
+            geo('faceted').add(rimRock, trs(fx, r * 0.35, fz, hash(solidIndex + k) * 6, r * 1.2, r * 0.8, r), [0x7d7466, 0x8a8172, 0x6f685c][(solidIndex + k) % 3]);
+          }
+          const r2 = 2.5 + hash(solidIndex * 13) * 3;
+          geo('faceted').add(rimRock, trs(s.x, s.y + s.sy / 2, s.z, hash(solidIndex) * 6, r2 * 1.6, r2 * 0.7, r2 * 1.3), [0x8a8172, 0x6f685c, 0x7d7466][solidIndex % 3]);
+        }
         break;
       case 'ruin':
         box('concrete').add(spec, { color: [0x9b9a86, 0x8f8e78, 0xa3a08a][solidIndex % 3], tile: 2, skipBottom: onGround });
@@ -534,6 +560,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   }
   inChunk = null;
   trashBagGeo?.dispose();
+  rimRock?.dispose();
+  disposeFarmShapes();
 
   // window frames and sills, door casings (the doors and the glass themselves move: see BuildingVisual)
   for (const w of map.windows ?? []) windowFrame(w);
@@ -580,12 +608,15 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     'ground:concrete': std({ map: tex.concrete, ...groundOffset }),
     'ground:wood': std({ map: tex.wood, ...groundOffset }),
     'ground:water': std({ roughness: 0.16, metalness: 0.2, ...groundOffset }),
+    // Cap's pool: you see the tiles through it, from above and from under the surface
+    poolwater: std({ roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }),
     'ground:paint': std({ ...groundOffset }),
     paint: std({ polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, roughness: 0.8 }),
     brick: std({ map: tex.brick }),
     stucco: std({ map: tex.stucco }),
     siding: std({ map: tex.siding }),
     metal: std({ map: tex.metal, roughness: 0.7, metalness: 0.25 }),
+    panel: std({ map: tex.panel, roughness: 0.5, metalness: 0.15 }),
     concrete: std({ map: tex.concrete }),
     wood: std({ map: tex.wood }),
     crate: std({ map: tex.crate }),
@@ -602,7 +633,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   };
   for (const m of Object.values(materials)) disposables.push(m);
 
-  const noShadowCast = new Set(['asphalt', 'paint', 'lit', 'chain', 'bars', 'glass', 'glassDark']);
+  const noShadowCast = new Set(['asphalt', 'paint', 'lit', 'chain', 'bars', 'glass', 'glassDark', 'poolwater']);
   /** Interior chunks: drawn only within INTERIOR_RANGE of the camera. */
   const chunks = new Map<string, { group: THREE.Group; x: number; z: number }>();
   const addMesh = (g: THREE.BufferGeometry, fullKey: string): void => {
@@ -613,7 +644,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const groundish = key.startsWith('ground:') || key === 'asphalt' || key === 'paint';
     mesh.castShadow = !groundish && !noShadowCast.has(key);
     mesh.receiveShadow = key !== 'lit' && key !== 'glass';
-    if (key === 'glass') mesh.renderOrder = 5;
+    if (key === 'glass' || key === 'poolwater') mesh.renderOrder = 5;
     mesh.matrixAutoUpdate = false;
     disposables.push(g);
     if (at < 0) {
@@ -697,6 +728,10 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   const sky = makeSky();
   group.add(sky);
 
+  // ================================================================== the farm animals (and the windmill turning)
+  const animals = map.pens?.length || map.solids.some((x) => x.kind === 'windmill') ? new FarmAnimals(map) : null;
+  if (animals) group.add(animals.group);
+
   // ================================================================== capture zone markers
   const zones: ZoneMarker[] = map.zones.map((z) => {
     const g = new THREE.Group();
@@ -739,8 +774,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       if (msg) live.games = msg.games;
       live.page = -1; // redraw on the next frame
     },
-    update(_dt: number, time: number, camera?: THREE.Vector3) {
+    update(dt: number, time: number, camera?: THREE.Vector3) {
       if (camera) sky.position.copy(camera);
+      animals?.update(Math.min(dt, 0.1));
       // the scoreboards turn a page every few seconds
       if (liveQuads.length) {
         const page = Math.floor(time / 6);
@@ -760,6 +796,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     },
     dispose() {
       for (const d of disposables) d.dispose();
+      animals?.dispose();
       group.removeFromParent();
     },
   };
@@ -1078,6 +1115,12 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         fpart(s, 'flat', 0, H, 0, W + 0.04, 0.04, D + 0.04, 0xd4a32a);
         fpart(s, 'lit', -W * 0.3, H + 0.04, 0, 0.05, 0.25, 0.05, 0xffb35c);
         fpart(s, 'lit', W * 0.3, H + 0.04, 0, 0.05, 0.25, 0.05, 0xffb35c);
+        break;
+      case 'lounger':
+        // a pool lounger: a white frame, a cushion, the back propped up at one end
+        fpart(s, 'flat', 0, 0, 0, W, 0.26, D - 0.1, white);
+        fpart(s, 'flat', 0, 0.26, 0.15, W - 0.08, 0.08, D - 0.6, [0x2a9d8f, 0xf4a261, 0x457b9d, 0xe9c46a][Math.floor(r * 4)]);
+        fpart(s, 'flat', 0, 0.26, -D / 2 + 0.25, W - 0.08, 0.42, 0.3, white);
         break;
       case 'stall': {
         const awn = [0xc8323a, 0x2f7ad1, 0xe0a030, 0x37a05a][Math.floor(r * 4)];
@@ -1518,12 +1561,41 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   }
 
   /**
-   * The land past the edges of the big map, so the view from the blimp is forest and desert
-   * rather than haze: one ground sheet (dunes in the west, forest floor elsewhere), a deep band
-   * of trees to the north and east, rocks and mesas across the desert. Visual only.
+   * Round maps: the ground. Grass out to the circle (cut off at the shore), the paved square of
+   * the districts' streets, and a hole wherever there is a pool (it is a real hole).
+   */
+  function roundGround(R: NonNullable<MapDef['round']>): void {
+    const shore = b.maxZ;
+    const pools = map.solids.filter((x) => x.kind === 'poolwater');
+    const rectPts = (x0: number, z0: number, x1: number, z1: number): Array<[number, number]> => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+    const holes = pools.map((x) => rectPts(x.x - x.sx / 2, x.z - x.sz / 2, x.x + x.sx / 2, x.z + x.sz / 2));
+    const P = R.paved;
+    // the arc from the east end of the shore round through the north to the west end
+    const ae = Math.asin(Math.min(1, (shore + 0.5 - R.z) / R.r)), aw = Math.PI - ae - Math.PI * 2;
+    const outline: Array<[number, number]> = [];
+    const N = 160;
+    for (let k = 0; k <= N; k++) {
+      const a = ae + ((aw - ae) * k) / N;
+      outline.push([R.x + Math.cos(a) * R.r, R.z + Math.sin(a) * R.r]);
+    }
+    if (P) {
+      const inner: Array<[number, number]> = rectPts(P.x0, P.z0, P.x1, Math.min(P.z1, shore - 0.01));
+      box('ground:grass').addPolygon(outline, [inner, ...holes.filter((h) => !P || !(h[0][0] > P.x0 && h[1][0] < P.x1 && h[0][1] > P.z0 && h[2][1] < P.z1))], 0, { tile: 5 });
+      box('asphalt').addPolygon(inner, holes.filter((h) => h[0][0] > P.x0 && h[1][0] < P.x1 && h[0][1] > P.z0 && h[2][1] < P.z1), 0, { tile: 6 });
+    } else {
+      box('ground:grass').addPolygon(outline, holes, 0, { tile: 5 });
+    }
+  }
+
+  /**
+   * The land past the rim of the round map, so the view from the blimp is forest and desert
+   * rather than haze: one ground sheet (dunes to the north-west, beyond the badlands; forest
+   * floor elsewhere; a sandy shore round the far side of LAKE LINDA), a deep band of trees all
+   * the way round, rocks and mesas across the desert. Visual only.
    */
   function outskirts(): void {
-    if (map.id !== 'greater-towne') return;
+    const R = map.round;
+    if (!R) return;
     const noise = (x: number, z: number): number => {
       const xi = Math.floor(x), zi = Math.floor(z), fx = x - xi, fz = z - zi;
       const h = (a: number, c: number) => hash(((a * 73856093) ^ (c * 19349663)) & 0x7fffffff);
@@ -1531,31 +1603,41 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       const u = s(fx), v = s(fz);
       return (h(xi, zi) * (1 - u) + h(xi + 1, zi) * u) * (1 - v) + (h(xi, zi + 1) * (1 - u) + h(xi + 1, zi + 1) * u) * v;
     };
-    /** How far outside the playable area a point is (0 inside). */
-    const outside = (x: number, z: number) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
-    // the desert lies beyond BABYLON (the north-west corner); forest everywhere else
-    const desertAt = (x: number, z: number) => (x < -205 && z < -40) || (z < b.minZ - 10 && x < -95);
+    const shore = b.maxZ;
+    /** How far outside the circle a point is (0 inside). */
+    const outside = (x: number, z: number) => Math.max(0, Math.hypot(x - R.x, z - R.z) - R.r);
+    // the desert lies beyond the badlands (north-west); forest everywhere else
+    const desertAt = (x: number, z: number) => {
+      const a = Math.atan2(z - R.z, x - R.x);
+      return a < -1.9 && a > -3.05;
+    };
+    const groundY = (x: number, z: number) => {
+      const d = outside(x, z);
+      // inside the circle the sheet hides under the map (and under the lake)
+      if (d <= 0) return -3;
+      const n = noise(x / 60, z / 60);
+      const rise = Math.min(1, d / 140);
+      return 0.25 + rise * (desertAt(x, z) ? 3 + n * 14 + noise(x / 23, z / 23) * 5 : 1 + n * 7);
+    };
 
-    // ---- the ground sheet (stops at the shore; the ocean is drawn already) ----
-    const W0 = -1800, W1 = 1800, Z0 = -1800, Z1 = b.maxZ - 0.6;
-    const g = new THREE.PlaneGeometry(W1 - W0, Z1 - Z0, 96, Math.round((96 * (Z1 - Z0)) / (W1 - W0)));
+    // ---- the ground sheet ----
+    const W0 = -1800, W1 = 1800;
+    const SEG = 220;
+    const g = new THREE.PlaneGeometry(W1 - W0, W1 - W0, SEG, SEG);
     g.rotateX(-Math.PI / 2);
-    g.translate((W0 + W1) / 2, 0, (Z0 + Z1) / 2);
     const pos = g.attributes.position;
     const col = new Float32Array(pos.count * 3);
     const sand = new THREE.Color(0xdcbb82), sandDark = new THREE.Color(0xc9a46b), green = new THREE.Color(0x5d7f45), greenDark = new THREE.Color(0x4a6b3a);
+    const beach = new THREE.Color(0xd9c79a);
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
-      const d = outside(x, z);
+      pos.setY(i, groundY(x, z));
       const n = noise(x / 60, z / 60);
-      const desert = desertAt(x, z) ? 1 : 0;
-      // dunes rise out of the desert away from the edge (never into the playable area)
-      const rise = Math.min(1, Math.max(0, (d - 30) / 120));
-      const y = -0.12 + rise * (desert ? 3 + n * 14 + noise(x / 23, z / 23) * 5 : n * 4);
-      pos.setY(i, y);
-      if (desert) c.copy(sand).lerp(sandDark, noise(x / 31, z / 31) * 0.8);
+      if (desertAt(x, z)) c.copy(sand).lerp(sandDark, noise(x / 31, z / 31) * 0.8);
       else c.copy(green).lerp(greenDark, n);
+      // the lake's far shore: sand by the water
+      if (z > shore - 6 && outside(x, z) < 16) c.lerp(beach, 1 - outside(x, z) / 16);
       col.set([c.r, c.g, c.b], i * 3);
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -1566,13 +1648,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     ground.matrixAutoUpdate = false;
     group.add(ground);
     disposables.push(g, groundMat);
-    const groundY = (x: number, z: number) => {
-      const d = outside(x, z), n = noise(x / 60, z / 60);
-      const rise = Math.min(1, Math.max(0, (d - 30) / 120));
-      return -0.12 + rise * (desertAt(x, z) ? 3 + n * 14 + noise(x / 23, z / 23) * 5 : n * 4);
-    };
 
-    // ---- the woods: a deep band of trees along the north and east ----
+    // ---- the woods: a deep band of trees all the way round the rim ----
     const trunk = new THREE.CylinderGeometry(0.25, 0.4, 2.6, 5);
     trunk.translate(0, 1.3, 0);
     const crown = new THREE.IcosahedronGeometry(2.6, 0);
@@ -1581,152 +1658,78 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     pine.translate(0, 5.2, 0);
     const GREENS = [0x3f7a3a, 0x4d8a42, 0x356b35, 0x5a9446];
     let k = 0;
-    const tree = (x: number, z: number) => {
-      const y = groundY(x, z), s = 0.8 + hash(k + 3) * 0.9, ry = hash(k + 7) * 6;
+    const tree = (x: number, z: number, big = 1) => {
+      const y = groundY(x, z), s = (0.8 + hash(k + 3) * 0.9) * big, ry = hash(k + 7) * 6;
       geo('faceted').add(trunk, trs(x, y, z, ry, s, s, s), 0x6b4a2c);
       geo('faceted').add(hash(k + 11) < 0.45 ? pine : crown, trs(x, y, z, ry, s, s * (0.9 + hash(k + 13) * 0.4), s), GREENS[k % GREENS.length]);
       k++;
     };
-    const cityN = (x: number) => x > -90; // the Hill and downtown back onto city blocks: trees start further out
-    for (let x = -205; x < b.maxX + 280; x += 8) {
-      for (let z = b.minZ - 14; z > b.minZ - 320; z -= 8) {
-        const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
+    for (let x = R.x - R.r - 260; x < R.x + R.r + 260; x += 9) {
+      for (let z = R.z - R.r - 260; z < R.z + R.r + 260; z += 9) {
+        const px = x + (hash(k * 3 + 1) - 0.5) * 7, pz = z + (hash(k * 3 + 2) - 0.5) * 7;
         k++;
-        const d = b.minZ - pz;
-        if (cityN(px) && d < 75) continue;
-        if (hash(k * 5) > 0.75 - d / 900) continue;
-        tree(px, pz);
-      }
-    }
-    // west of the jungle and the docks
-    for (let x = b.minX - 14; x > b.minX - 300; x -= 8) {
-      for (let z = -30; z < b.maxZ - 2; z += 8) {
-        const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
-        k++;
-        if (desertAt(px, pz) || hash(k * 5) > 0.75 - (b.minX - px) / 900) continue;
-        tree(px, pz);
-      }
-    }
-    for (let x = b.maxX + 75; x < b.maxX + 320; x += 8) {
-      for (let z = b.minZ - 14; z < 61; z += 8) {
-        const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
-        k++;
-        if (hash(k * 5) > 0.7 - (px - b.maxX) / 900) continue;
-        tree(px, pz);
+        const d = outside(px, pz);
+        if (d < 15 || d > 250 || desertAt(px, pz)) continue;
+        if (hash(k * 5) > 0.72 - d / 900) continue;
+        tree(px, pz, z > shore ? 1.2 : 1);
       }
     }
 
     // ---- the desert: rocks out on the dunes, flat-topped mesas on the horizon ----
     const rock = new THREE.IcosahedronGeometry(1, 0);
     const ROCKS = [0xb48a5a, 0xa47a4e, 0xc49a68];
-    for (let i = 0; i < 220; i++) {
-      const x = b.minX - 25 - hash(i * 7 + 1) * 700, z = b.minZ - 200 + hash(i * 7 + 2) * 150;
+    for (let i = 0; i < 260; i++) {
+      const a = -1.9 - hash(i * 7 + 1) * 1.15, dist = R.r + 18 + hash(i * 7 + 2) * 560;
+      const x = R.x + Math.cos(a) * dist, z = R.z + Math.sin(a) * dist;
       const r = 1.2 + hash(i * 7 + 3) * 4.5;
-      geo('faceted').add(rock, trs(x, groundY(x, z) - r * 0.3, z, hash(i) * 6, r * 1.3, r * 0.8, r), ROCKS[i % 3]);
-    }
-    for (let i = 0; i < 70; i++) {
-      // north-west corner of the desert too
-      const x = -205 - hash(i * 5 + 300) * 600, z = b.minZ - 20 - hash(i * 5 + 301) * 500;
-      const r = 1.5 + hash(i * 5 + 302) * 4;
       geo('faceted').add(rock, trs(x, groundY(x, z) - r * 0.3, z, hash(i) * 6, r * 1.3, r * 0.8, r), ROCKS[i % 3]);
     }
     const mesa = new THREE.CylinderGeometry(1, 1.25, 1, 7);
     mesa.translate(0, 0.5, 0);
     const MESAS = [0xb07a4c, 0xa56f45, 0xbd8657];
     for (let i = 0; i < 16; i++) {
-      const a = Math.PI * (0.55 + hash(i + 900) * 0.75); // spread around the west
-      const dist = 520 + hash(i + 910) * 700;
-      const x = b.minX + Math.cos(a) * dist, z = -20 + Math.sin(a) * dist * -1;
-      if (z > -80) continue;
+      const a = -1.85 - hash(i + 900) * 1.3;
+      const dist = R.r + 420 + hash(i + 910) * 700;
+      const x = R.x + Math.cos(a) * dist, z = R.z + Math.sin(a) * dist;
       const r = 40 + hash(i + 920) * 90, h = 30 + hash(i + 930) * 60;
       geo('faceted').add(mesa, trs(x, -2, z, hash(i + 940) * 6, r, h, r * (0.6 + hash(i + 950) * 0.5)), MESAS[i % 3]);
       geo('faceted').add(mesa, trs(x, -2 + h * 0.62, z, hash(i + 940) * 6, r * 1.02, h * 0.06, r * (0.6 + hash(i + 950) * 0.5) * 1.02), 0x8f5f3a);
     }
-    // ---- LAKE LINDA's far shore: green hills and woods across the water, and down both sides ----
+
+    // ---- LAKE LINDA's far shore: wooded ridges beyond, cabins and a jetty by the water ----
     {
-      const SHORE = b.maxZ, FAR = SHORE + 420, SIDE = 300;
-      const shore = (x0: number, x1: number, z0: number, z1: number, seg: number) => {
-        const sg = new THREE.PlaneGeometry(x1 - x0, z1 - z0, seg, Math.max(2, Math.round((seg * (z1 - z0)) / (x1 - x0))));
-        sg.rotateX(-Math.PI / 2);
-        sg.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
-        const sp = sg.attributes.position;
-        const sc = new Float32Array(sp.count * 3);
-        for (let i = 0; i < sp.count; i++) {
-          const x = sp.getX(i), z = sp.getZ(i);
-          // rises gently away from the water's edge
-          const edge = Math.min(Math.abs(z - z0), Math.abs(z - z1), Math.abs(x - x0), Math.abs(x - x1));
-          const n = noise(x / 70, z / 70);
-          sp.setY(i, -0.3 + Math.min(1, edge / 90) * (2 + n * 22));
-          c.copy(green).lerp(greenDark, n);
-          sc.set([c.r, c.g, c.b], i * 3);
+      const rp: number[] = [], rc: number[] = [];
+      const ridge = (z: number, base: number, amp: number, hex: number, seed: number) => {
+        const colr = new THREE.Color(hex);
+        const top = (x: number) => base + noise(x / 140 + seed, seed) * amp + noise(x / 37 + seed, 3) * amp * 0.25;
+        for (let x = -1700; x < 1700; x += 24) {
+          const y0 = top(x), y1 = top(x + 24);
+          rp.push(x, -2, z, x + 24, -2, z, x + 24, y1, z, x, -2, z, x + 24, y1, z, x, y0, z);
+          for (let q = 0; q < 6; q++) rc.push(colr.r, colr.g, colr.b);
         }
-        sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
-        sg.computeVertexNormals();
-        const m = new THREE.Mesh(sg, groundMat);
-        m.matrixAutoUpdate = false;
-        group.add(m);
-        disposables.push(sg);
       };
-      shore(-1800, 1800, FAR, 1800, 90);
-      shore(-1800, b.minX - SIDE, SHORE, FAR, 30);
-      shore(b.maxX + SIDE, 1800, SHORE, FAR, 30);
-      const shoreY = (x: number, z: number) => {
-        const n = noise(x / 70, z / 70);
-        const edge = z >= FAR ? z - FAR : x < 0 ? b.minX - SIDE - x : x - (b.maxX + SIDE);
-        return -0.3 + Math.min(1, Math.max(0, edge) / 90) * (2 + n * 22);
-      };
-      for (let x = -1100; x < 1100; x += 9) {
-        for (let z = FAR + 6; z < FAR + 260; z += 9) {
-          const px = x + (hash(k * 3 + 1) - 0.5) * 7, pz = z + (hash(k * 3 + 2) - 0.5) * 7;
-          k++;
-          if (hash(k * 5) > 0.72 - (pz - FAR) / 700) continue;
-          const sc = 1.3 + hash(k) * 0.8;
-          geo('faceted').add(hash(k + 11) < 0.5 ? pine : crown, trs(px, shoreY(px, pz), pz, hash(k + 7) * 6, sc, sc, sc), GREENS[k % GREENS.length]);
-        }
-      }
-      for (const side of [-1, 1]) {
-        for (let d = 6; d < 220; d += 9) {
-          for (let z = SHORE + 6; z < FAR; z += 9) {
-            const px = side < 0 ? b.minX - SIDE - d : b.maxX + SIDE + d, pz = z + (hash(k * 3 + 2) - 0.5) * 7;
-            k++;
-            if (hash(k * 5) > 0.7) continue;
-            const sc = 1.2 + hash(k) * 0.8;
-            geo('faceted').add(hash(k + 11) < 0.5 ? pine : crown, trs(px, shoreY(px, pz), pz, hash(k + 7) * 6, sc, sc, sc), GREENS[k % GREENS.length]);
-          }
-        }
-      }
-      // the far shore as you see it from the beach: wooded ridges across the water, drawn
-      // through the haze (the real trees over there are past the fog from ground level)
-      {
-        const rp: number[] = [], rc: number[] = [];
-        const ridge = (z: number, base: number, amp: number, hex: number, seed: number) => {
-          const col = new THREE.Color(hex);
-          const top = (x: number) => base + noise(x / 140 + seed, seed) * amp + noise(x / 37 + seed, 3) * amp * 0.25;
-          for (let x = -1700; x < 1700; x += 24) {
-            const y0 = top(x), y1 = top(x + 24);
-            rp.push(x, -2, z, x + 24, -2, z, x + 24, y1, z, x, -2, z, x + 24, y1, z, x, y0, z);
-            for (let k = 0; k < 6; k++) rc.push(col.r, col.g, col.b);
-          }
-        };
-        ridge(SHORE + 560, 26, 60, 0xa9c2bd, 7);
-        ridge(SHORE + 430, 14, 38, 0x86a898, 3);
-        ridge(SHORE + 330, 7, 20, 0x5f8a66, 1);
-        const rg = new THREE.BufferGeometry();
-        rg.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3));
-        rg.setAttribute('color', new THREE.Float32BufferAttribute(rc, 3));
-        const rm = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide });
-        const mesh = new THREE.Mesh(rg, rm);
-        mesh.matrixAutoUpdate = false;
-        mesh.frustumCulled = false;
-        group.add(mesh);
-        disposables.push(rg, rm);
-      }
-      // a few cabins and a jetty on the far side
-      for (let i = 0; i < 9; i++) {
-        const x = -700 + i * 170 + (hash(i + 70) - 0.5) * 80, z = FAR + 30 + hash(i + 71) * 60;
-        const y = shoreY(x, z);
-        box('wood').add({ x, y: y + 2, z, sx: 9, sy: 4, sz: 7, q: yawQ(hash(i) * 0.4) }, { color: 0x8a6440, tile: 1.4 });
-        box('shingle').add({ x, y: y + 4.6, z, sx: 10, sy: 1.2, sz: 8, q: yawQ(hash(i) * 0.4) }, { color: 0x4d3a30, tile: 2.5 });
+      ridge(shore + 560, 26, 60, 0xa9c2bd, 7);
+      ridge(shore + 430, 14, 38, 0x86a898, 3);
+      const rg = new THREE.BufferGeometry();
+      rg.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3));
+      rg.setAttribute('color', new THREE.Float32BufferAttribute(rc, 3));
+      const rm = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(rg, rm);
+      mesh.matrixAutoUpdate = false;
+      mesh.frustumCulled = false;
+      group.add(mesh);
+      disposables.push(rg, rm);
+      // cabins round the far side of the lake, each with a little jetty
+      const ae = Math.asin(Math.min(1, (shore - R.z) / R.r));
+      for (let i = 0; i < 7; i++) {
+        const a = ae + 0.18 + (i / 6) * (Math.PI - 2 * ae - 0.36);
+        const dist = R.r + 22 + hash(i + 71) * 10;
+        const x = R.x + Math.cos(a) * dist, z = R.z + Math.sin(a) * dist;
+        const y = groundY(x, z), q = yawQ(Math.atan2(Math.cos(a), Math.sin(a)));
+        box('wood').add({ x, y: y + 2, z, sx: 9, sy: 4, sz: 7, q }, { color: 0x8a6440, tile: 1.4 });
+        box('shingle').add({ x, y: y + 4.6, z, sx: 10, sy: 1.2, sz: 8, q }, { color: 0x4d3a30, tile: 2.5 });
+        const jx = R.x + Math.cos(a) * (R.r + 3), jz = R.z + Math.sin(a) * (R.r + 3);
+        box('wood').add({ x: jx, y: 0.35, z: jz, sx: 1.6, sy: 0.12, sz: 12, q }, { color: 0x7a5a3a, tile: 1.3 });
       }
     }
     for (const gq of [trunk, crown, pine, rock, mesa]) gq.dispose();
@@ -1744,11 +1747,16 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       if (i % 3) return;
       let ox = c.x - ccx, oz = c.z - ccz;
       // push straight out from the edge the cliff sits on
-      if (c.x < b.minX + 0.01) { ox = -1; oz = 0; } else if (c.x > b.maxX - 0.01) { ox = 1; oz = 0; } else { ox = 0; oz = c.z < ccz ? -1 : 1; }
+      if (map.round) {
+        const R = map.round, l = Math.hypot(c.x - R.x, c.z - R.z) || 1;
+        ox = (c.x - R.x) / l;
+        oz = (c.z - R.z) / l;
+      } else if (c.x < b.minX + 0.01) { ox = -1; oz = 0; } else if (c.x > b.maxX - 0.01) { ox = 1; oz = 0; } else { ox = 0; oz = c.z < ccz ? -1 : 1; }
       const out = 70 + hash(i + 700) * 70;
       const r = 32 + hash(i + 800) * 30;
       const hill = new THREE.IcosahedronGeometry(1, 2);
-      const desertSide = backdrop.w === 'desert' && (c.x < b.minX + 0.01 || c.x < -205);
+      const ra = map.round ? Math.atan2(c.z - map.round.z, c.x - map.round.x) : 0;
+      const desertSide = map.round ? ra < -1.9 && ra > -3.05 : backdrop.w === 'desert' && (c.x < b.minX + 0.01 || c.x < -205);
       const tones = desertSide ? [0xc9a46b, 0xb8935c, 0xd4b077] : [0x3f6a38, 0x4a7a40, 0x36603a];
       geo('faceted').add(hill, trs(c.x + ox * out, -r * 0.4, c.z + oz * out, hash(i) * 6, r, r * (0.5 + hash(i + 820) * 0.3), r), tones[i % 3]);
       hill.dispose();
@@ -2175,7 +2183,14 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         t.dispose();
         break;
       }
+      case 'tractor':
+        tractor(draw, p);
+        break;
       case 'tree': {
+        if (p.variant >= 3) {
+          orchardTree(draw, p, i);
+          break;
+        }
         const trunk = new THREE.CylinderGeometry(0.17, 0.27, 4.4, 7);
         geo('faceted').add(trunk, trs(p.x, p.y + 2.2, p.z), 0x5a4632);
         trunk.dispose();

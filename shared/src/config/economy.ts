@@ -7,6 +7,9 @@
  * goes through floating point.
  */
 
+import { GUN_SKINS, gunSkinField, type GunSkinField } from './appearance';
+import { GUN_IDS, WEAPONS } from './weapons';
+
 /** Units per GRAM. */
 export const GRAM_UNITS = 10;
 
@@ -48,8 +51,8 @@ export type ItemRarity = 'common' | 'rare' | 'epic' | 'legendary';
 export const RARITIES: readonly ItemRarity[] = ['common', 'rare', 'epic', 'legendary'];
 export const RARITY_COLORS: Record<ItemRarity, string> = { common: '#b8bec8', rare: '#4da3ff', epic: '#b06bff', legendary: '#f6b73c' };
 
-/** AJ's aisles. */
-export type StoreCategory = 'outfits' | 'tops' | 'sneakers' | 'weapons' | 'accessories' | 'backpacks';
+/** AJ's aisles (gun skins are sold in the gun picker instead, so they have no aisle). */
+export type StoreCategory = 'outfits' | 'tops' | 'sneakers' | 'weapons' | 'accessories' | 'backpacks' | 'gunskins';
 export const STORE_CATEGORIES: ReadonlyArray<{ id: StoreCategory; name: string }> = [
   { id: 'outfits', name: 'Full Fits' },
   { id: 'tops', name: 'Hoodies & Tops' },
@@ -71,13 +74,13 @@ export const TRAP_CATEGORIES: ReadonlyArray<{ id: TrapCategory; name: string }> 
   { id: 'special', name: 'Special Items' },
 ];
 const TRAP_OF: Record<StoreCategory, TrapCategory> = {
-  outfits: 'characters', tops: 'clothing', sneakers: 'sneakers', weapons: 'weapons', accessories: 'accessories', backpacks: 'backpacks',
+  outfits: 'characters', tops: 'clothing', sneakers: 'sneakers', weapons: 'weapons', accessories: 'accessories', backpacks: 'backpacks', gunskins: 'weapons',
 };
 
 /** Appearance fields a store item can set (see appearance.ts). */
 export type CosmeticField =
   | 'top' | 'topColor' | 'bottom' | 'bottomColor' | 'shoes' | 'shoeColor' | 'hat' | 'glasses'
-  | 'necklace' | 'wrist' | 'earrings' | 'weaponSkin' | 'backpack';
+  | 'necklace' | 'wrist' | 'earrings' | 'weaponSkin' | 'backpack' | GunSkinField;
 
 export interface StoreItem {
   id: string;
@@ -167,8 +170,37 @@ export const CATALOG: readonly StoreItem[] = [
   { id: 'bag-camo', name: 'Camo Pack', category: 'backpacks', rarity: 'rare', price: G(1.5), placeholder: true, blurb: 'Woodland camo, padded straps.', equip: { backpack: 'camopack' } },
 ];
 
+/** What each skin costs on one gun (GRAMS), and how rare it is. */
+export const GUN_SKIN_PRICES: Record<string, { grams: number; rarity: ItemRarity; blurb: string }> = {
+  gold: { grams: 2, rarity: 'legendary', blurb: 'Solid 24K, front sight to stock.' },
+  chrome: { grams: 1.5, rarity: 'epic', blurb: 'Polished like a rim.' },
+  ice: { grams: 1.5, rarity: 'epic', blurb: 'Bust-down: every inch set with stones.' },
+  graffiti: { grams: 1, rarity: 'rare', blurb: 'Tagged up in every color.' },
+  neon: { grams: 1, rarity: 'rare', blurb: 'Glowing green and pink stripes.' },
+  camo: { grams: 0.5, rarity: 'common', blurb: 'Green and brown woodland camo.' },
+};
+
+/** The catalog id of one skin for one gun. */
+export function gunSkinItemId(gun: string, skin: string): string {
+  return `gun-${gun}-${skin}`;
+}
+
+/** Every gun's skins, for sale in the gun picker (cosmetic only: no effect on any gun). */
+export const GUN_SKIN_ITEMS: readonly StoreItem[] = GUN_IDS.flatMap((gun) =>
+  GUN_SKINS.filter((o) => o.id !== 'none').map((o): StoreItem => {
+    const p = GUN_SKIN_PRICES[o.id];
+    return {
+      id: gunSkinItemId(gun, o.id), name: `${WEAPONS[gun].name} · ${o.name}`, category: 'gunskins', rarity: p.rarity, price: G(p.grams),
+      placeholder: false, blurb: p.blurb, equip: { [gunSkinField(gun)]: o.id },
+    };
+  }),
+);
+
+/** Everything sold: AJ'S aisles and the gun skins. */
+const ALL_ITEMS: readonly StoreItem[] = [...CATALOG, ...GUN_SKIN_ITEMS];
+
 export function catalogItem(id: unknown): StoreItem | null {
-  return CATALOG.find((i) => i.id === id) ?? null;
+  return ALL_ITEMS.find((i) => i.id === id) ?? null;
 }
 
 /** TRAP shelf of an item (limited items also count as Special Items). */

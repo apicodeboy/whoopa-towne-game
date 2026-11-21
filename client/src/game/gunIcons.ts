@@ -1,14 +1,11 @@
 import * as THREE from 'three';
 import type { Assets } from './assets';
 import { applyWeaponSkin } from './characters/weaponSkins';
+import { makeGunModel } from './gunKit';
 
 /** Which model each held thing uses, and which way its muzzle points after loading. */
 const MODELS: Record<string, { model: string; muzzleNegZ: boolean; stretch?: number }> = {
-  ar: { model: 'ar', muzzleNegZ: true },
-  smg: { model: 'smg', muzzleNegZ: false },
-  shotgun: { model: 'shotgun', muzzleNegZ: false },
-  pistol: { model: 'pistol', muzzleNegZ: false },
-  sniper: { model: 'ar', muzzleNegZ: true, stretch: 1.25 },
+  // (the guns themselves come from gunKit; only the throwables are model files)
   grenade: { model: 'grenade', muzzleNegZ: true },
   smoke: { model: 'grenade', muzzleNegZ: true },
 };
@@ -27,11 +24,11 @@ export class GunIcons {
   private target: THREE.WebGLRenderTarget;
 
   constructor(private renderer: THREE.WebGLRenderer, private assets: Assets | null) {
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5a66, 2.2));
-    const key = new THREE.DirectionalLight(0xffffff, 2.4);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6a6a76, 3.2));
+    const key = new THREE.DirectionalLight(0xffffff, 3.2);
     key.position.set(1.5, 3, 4);
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0xbfd9ff, 1.2);
+    const rim = new THREE.DirectionalLight(0xbfd9ff, 1.8);
     rim.position.set(-3, 1, -2);
     this.scene.add(rim);
     this.target = new THREE.WebGLRenderTarget(W, H, { samples: 4 });
@@ -49,16 +46,24 @@ export class GunIcons {
   }
 
   private render(id: string, skin: string): string {
-    const spec = MODELS[id];
-    const tpl = spec && this.assets ? this.assets.model(spec.model) : null;
-    if (!spec || !tpl) return '';
-    const g = tpl.root.clone(true);
-    if (id !== 'grenade' && id !== 'smoke') applyWeaponSkin(g, skin, tpl.size);
     const holder = new THREE.Group();
-    // muzzle to the right (+X), seen from the side, a little from above
-    g.rotation.y = (spec.muzzleNegZ ? 0 : Math.PI) - Math.PI / 2;
-    if (spec.stretch) g.scale.set(1, 1, spec.stretch);
-    holder.add(g);
+    const kit = makeGunModel(id);
+    if (kit) {
+      // the weapon collection's own models (muzzle down -Z): muzzle to the right
+      applyWeaponSkin(kit, skin, new THREE.Box3().setFromObject(kit).getSize(new THREE.Vector3()));
+      kit.rotation.y = -Math.PI / 2;
+      holder.add(kit);
+    } else {
+      const spec = MODELS[id];
+      const tpl = spec && this.assets ? this.assets.model(spec.model) : null;
+      if (!spec || !tpl) return '';
+      const g = tpl.root.clone(true);
+      if (id !== 'grenade' && id !== 'smoke') applyWeaponSkin(g, skin, tpl.size);
+      // muzzle to the right (+X), seen from the side, a little from above
+      g.rotation.y = (spec.muzzleNegZ ? 0 : Math.PI) - Math.PI / 2;
+      if (spec.stretch) g.scale.set(1, 1, spec.stretch);
+      holder.add(g);
+    }
     holder.rotation.set(0.18, 0, -0.04);
     this.scene.add(holder);
     // fit the box in the frame

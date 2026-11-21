@@ -1,5 +1,5 @@
 import {
-  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, DISTRICT_FENCE_H, HEAL_KINDS, Q_BULLET, Q_PROJECTILE, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
+  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, DISTRICT_FENCE_H, HEAL_KINDS, KILL_RIOT, WEAPONS, WEAPON_IDS, Q_BULLET, Q_PROJECTILE, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
   copyPlayerState, makeInputCmd, makePlayerState, makeStepActions, stepPlayer, weaponInSlot, DEFAULT_LOADOUT,
   type InputCmd, type SimPlayer, type SquadMode,
 } from '../src/index';
@@ -205,21 +205,22 @@ test("porch: fists reach arm's length (not across the street), guns draw from th
   assert(of(miss, EV.HIT).length === 0, 'punched from 4 m away');
 
   // a pistol with 3 in the clip and 20 light rounds in the pool
-  sim.porch!.give(a, { kind: ITEM.WEAPON, code: 3, count: 3 });
+  const T = WEAPON_IDS.indexOf('taurus'), mag = WEAPONS.taurus.magSize;
+  sim.porch!.give(a, { kind: ITEM.WEAPON, code: T, count: 3 });
   sim.porch!.give(a, { kind: ITEM.AMMO, code: 0, count: 20 });
-  assert(a.state.wH === 4 && a.state.mag1 === 3 && a.state.ammoL === 20, 'pistol + ammo in the inventory');
+  assert(a.state.wH === T + 1 && a.state.mag1 === 3 && a.state.ammoL === 20, 'pistol + ammo in the inventory');
   step(sim, a, { slot: 1 });
   wait(sim, 0.4, a, { slot: 1 });
   step(sim, a, { slot: 1, buttons: BTN.RELOAD });
   wait(sim, 1.6, a, { slot: 1 });
-  assert((a.state.mag1 as number) === 12 && (a.state.ammoL as number) === 11, `reload from the pool: ${a.state.mag1} / ${a.state.ammoL}`);
+  assert((a.state.mag1 as number) === mag && (a.state.ammoL as number) === 20 - (mag - 3), `reload from the pool: ${a.state.mag1} / ${a.state.ammoL}`);
   // drop it
   const dropped = step(sim, a, { slot: 1, buttons: BTN.DROP });
   assert((a.state.wH as number) === 0 && of(dropped, EV.PICKUP_ADD).length === 1, 'dropped as a pickup');
   // and pick it back up
   step(sim, a, { slot: 1 });
   const took = step(sim, a, { slot: 1, buttons: BTN.USE });
-  assert((a.state.wH as number) === 4 && (a.state.mag1 as number) === 12 && of(took, EV.PICKUP_GONE).length === 1, 'picked back up');
+  assert((a.state.wH as number) === T + 1 && (a.state.mag1 as number) === mag && of(took, EV.PICKUP_GONE).length === 1, 'picked back up');
   sim.dispose();
 });
 const WEAPON_FIST_DAMAGE = 22;
@@ -370,7 +371,7 @@ test('porch: 20 bots play a whole match to a single winner', async () => {
         const t = landedAt.get(e[1]);
         if (t !== undefined && sim.time - t < firstGun) firstGun = sim.time - t;
       }
-      if (e[0] === EV.KILL && e[3] === 12) riot++;
+      if (e[0] === EV.KILL && e[3] === KILL_RIOT) riot++;
     }
   }
   const ms = (performance.now() - t0) / (sim.tickCount || 1);
@@ -436,7 +437,7 @@ test('warm-up: a minute on foot in BABYLON, bots turning up one by one, then eve
 test('porch: the districts are fenced off: you walk into the railing, and jump it', async () => {
   const { sim, me } = await porchSim();
   sim.tick();
-  // West Line Rd between the jungle and Whoopa Towne, the railing down the middle (x = -86)
+  // West Line Rd between the jungle and Cap's House, the railing down the middle (x = -86)
   const top = sim.phys.raycast(-86, 3, -30, 0, -1, 0, 4, Q_PROJECTILE);
   approx(3 - top, DISTRICT_FENCE_H, 0.02, 'a railing on the line');
   assert(sim.phys.raycast(-86, 1.4, -30, 0, -1, 0, 0.3, Q_PROJECTILE) < 0, 'nothing above it');
