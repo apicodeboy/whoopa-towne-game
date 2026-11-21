@@ -24,6 +24,11 @@ interface PickupVis {
   mesh: THREE.Object3D;
 }
 
+/** An angle brought into -PI..PI. */
+function wrap(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
+}
+
 function mat(color: number, extra: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05, ...extra });
 }
@@ -219,6 +224,12 @@ export class PorchWorld {
     const b = makeBlimp();
     this.blimp = b.group;
     this.blimpProps = b.props;
+    // a landmark in the sky: never lost in the haze
+    this.blimp.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      for (const mm of Array.isArray(m) ? m : m ? [m] : []) (mm as THREE.MeshStandardMaterial).fog = false;
+      o.frustumCulled = false;
+    });
     this.group.add(this.blimp);
 
     // bookbags: one instanced mesh per style
@@ -339,7 +350,7 @@ export class PorchWorld {
 
   addPickup(id: number, kind: number, code: number, count: number, x: number, y: number, z: number): void {
     this.removePickup(id);
-    const mesh = this.pickupMesh(kind, code);
+    const mesh = this.pickupMesh(kind, code, count);
     mesh.position.set(x, y + 0.35, z);
     this.group.add(mesh);
     this.pickups.set(id, { kind, code, count, x, y, z, mesh });
@@ -359,7 +370,7 @@ export class PorchWorld {
     this.pickups.delete(id);
   }
 
-  private pickupMesh(kind: number, code: number): THREE.Object3D {
+  private pickupMesh(kind: number, code: number, count = 1): THREE.Object3D {
     const g = new THREE.Group();
     const own = (m: THREE.Mesh) => {
       m.userData.own = true;
@@ -397,10 +408,28 @@ export class PorchWorld {
       own(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, 0.14), mat(code >= 100 ? 0x2e3a8c : 0x3a7bd5, { roughness: 0.5 })));
     } else if (kind === ITEM.THROWABLE) {
       own(new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), mat(code === 0 ? 0x3c4a2f : 0xa9b0b8)));
+    } else if (kind === ITEM.IBUPROFEN) {
+      // orange pill bottles with white child-proof caps and labels
+      for (let i = 0; i < Math.min(2, Math.max(1, count)); i++) {
+        const b = new THREE.Group();
+        // (bigger than life, like the rest of the loot, so they read from across a room)
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.26, 14), mat(0xff8a1f, { roughness: 0.25, transparent: true, opacity: 0.9, emissive: 0x7a3300, emissiveIntensity: 0.35 }));
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.075, 14), mat(0xf6f4ee, { roughness: 0.5 }));
+        cap.position.y = 0.165;
+        const label = new THREE.Mesh(new THREE.CylinderGeometry(0.103, 0.103, 0.12, 14, 1, true), mat(0xffffff, { roughness: 0.7 }));
+        for (const m of [body, cap, label]) {
+          m.castShadow = true;
+          m.userData.own = true;
+          b.add(m);
+        }
+        b.position.set(i * 0.26 - (count > 1 ? 0.13 : 0), -0.02, 0);
+        b.rotation.z = i ? 0.12 : -0.05;
+        g.add(b);
+      }
     }
     // a little glow underneath so loot reads from a distance
     const glow = own(new THREE.Mesh(new THREE.CircleGeometry(0.45, 20).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({
-      color: kind === ITEM.WEAPON ? 0xffd23f : kind === ITEM.ARMOR ? 0x6fb0ff : kind === ITEM.HEAL ? 0x8dff9a : 0xffffff,
+      color: kind === ITEM.WEAPON ? 0xffd23f : kind === ITEM.ARMOR || kind === ITEM.IBUPROFEN ? 0x6fb0ff : kind === ITEM.HEAL ? 0x8dff9a : 0xffffff,
       transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false,
     })));
     glow.position.y = -0.33;
@@ -422,15 +451,36 @@ export class PorchWorld {
   }
 
   // ------------------------------------------------------------------ per frame
-  /** `serverTime` (ms) places the blimp; `takeoff` < 0 = still waiting to take off. */
-  update(dt: number, serverTime: number, takeoff: number): void {
+  /**
+   * `serverTime` (ms) places the blimp; `takeoff` < 0 = not boarded yet, `boardIn` = seconds
+   * until everyone boards (the warm-up).
+   */
+  update(dt: number, serverTime: number, takeoff: number, boardIn = 0): void {
     this.time += dt;
-    // blimp along its route, nose first
+    // blimp along its route, nose first. It never sits still: before boarding it cruises in
+    // along the same line and reaches the start of the route just as everyone gets on.
     const route = this.init.route;
     const t0 = takeoff >= 0 ? takeoff : Infinity;
     transportAt(route, this.init.speed, t0, serverTime, _p);
+    let heading = Math.atan2(route[2] - route[0], route[3] - route[1]);
+    if (takeoff < 0 && boardIn > 0) {
+      // the warm-up: circling the town at its own altitude (in sight from everywhere), timed to
+      // come round to the start of the route just as everyone boards
+      const cx = (route[0] + route[2]) / 2, cz = (route[1] + route[3]) / 2;
+      const R = Math.hypot(route[0] - cx, route[1] - cz) * 0.62;
+      const a0 = Math.atan2(route[1] - cz, route[0] - cx);
+      const a = a0 - (boardIn * this.init.speed) / R;
+      // the last stretch eases out from the circle to the route's start
+      const k = Math.min(1, Math.max(0, 1 - boardIn / 14));
+      const rr = R + (Math.hypot(route[0] - cx, route[1] - cz) - R) * k * k * (3 - 2 * k);
+      _p.x = cx + Math.cos(a) * rr;
+      _p.z = cz + Math.sin(a) * rr;
+      // nose along the circle (counter-clockwise), turning onto the route at the end
+      const tan = Math.atan2(-Math.sin(a), Math.cos(a));
+      heading = tan + wrap(heading - tan) * k;
+    }
     this.blimp.position.set(_p.x, this.init.altitude + 4.2, _p.z);
-    this.blimp.rotation.y = Math.atan2(route[2] - route[0], route[3] - route[1]);
+    this.blimp.rotation.y += wrap(heading - this.blimp.rotation.y) * Math.min(1, dt * 2.5);
     this.blimp.position.y += Math.sin(this.time * 0.8) * 0.3;
     const len = Math.hypot(route[2] - route[0], route[3] - route[1]);
     this.blimp.visible = takeoff < 0 || (serverTime - takeoff) / 1000 * this.init.speed < len + 40;

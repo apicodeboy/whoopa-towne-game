@@ -27,6 +27,10 @@ export class InputManager {
   private lastGunSlot = 0;
   /** Device touched most recently. */
   device: DeviceKind = 'kbm';
+  /** The weapon wheel: open, where it points (x right, y down; length 0..1), and the last pick. */
+  wheelOpen = false;
+  readonly wheelAim = { x: 0, y: 0 };
+  private wheelPick: { x: number; y: number } | null = null;
 
   constructor(settings: SettingsStore, lockTarget: HTMLElement) {
     this.ctx = { settings: settings.values, gameplay: false, aiming: false, zoomScale: 1, assistScale: 1 };
@@ -57,6 +61,8 @@ export class InputManager {
     if (!on) {
       this.crouch = false;
       this.sprintLatch = false;
+      this.wheelOpen = false;
+      this.wheelPick = null;
     }
   }
 
@@ -82,6 +88,29 @@ export class InputManager {
     clearInputFrame(f);
     for (const src of this.sources) {
       if (src.apply(f, this.ctx, dt)) this.setDevice(src.deviceKind());
+    }
+
+    // the weapon wheel: a stick points straight at a slot; the mouse nudges a pointer around
+    if (this.ctx.gameplay && f.wheel) {
+      if (!this.wheelOpen) {
+        this.wheelOpen = true;
+        this.wheelAim.x = this.wheelAim.y = 0;
+      }
+      const a = this.wheelAim;
+      if (Math.hypot(f.wheelStickX, f.wheelStickY) > 0.35) {
+        a.x = f.wheelStickX;
+        a.y = f.wheelStickY;
+      }
+      a.x += f.wheelMouseX / 110;
+      a.y += f.wheelMouseY / 110;
+      const len = Math.hypot(a.x, a.y);
+      if (len > 1) {
+        a.x /= len;
+        a.y /= len;
+      }
+    } else if (this.wheelOpen) {
+      this.wheelOpen = false;
+      if (f.wheelClose && this.ctx.gameplay) this.wheelPick = { ...this.wheelAim };
     }
 
     if (this.ctx.gameplay) {
@@ -115,6 +144,13 @@ export class InputManager {
       else if (f.slotCycle !== 0) this.selectSlot(this.slot === 0 ? 1 : 0);
     }
     return f;
+  }
+
+  /** Where the weapon wheel pointed when it was let go (once), or null. */
+  takeWheelPick(): { x: number; y: number } | null {
+    const p = this.wheelPick;
+    this.wheelPick = null;
+    return p;
   }
 
   /** True if the player should be crouching this frame. */

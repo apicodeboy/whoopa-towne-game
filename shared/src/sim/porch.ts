@@ -199,6 +199,27 @@ export class PorchRules {
       if (!nav.isWalkable(x, z) || !free(x, z)) continue;
       place(x, 0, z);
     }
+    // ibuprofen lying around: orange pill bottles on counters, sidewalks, in yards
+    for (let n = 0, guard = 0; n < PORCH.ibuprofen.loose && guard < 2000; guard++) {
+      let x: number, z: number, floor = 0;
+      if (spots.length && rng.chance(0.4)) {
+        const sp = rng.pick(spots);
+        x = sp.x + rng.range(-1.2, 1.2);
+        z = sp.z + rng.range(-1.2, 1.2);
+        floor = sp.y;
+      } else {
+        const idx = nav.randomWalkable(rng);
+        x = nav.cellX(idx) + rng.range(-0.3, 0.3);
+        z = nav.cellZ(idx) + rng.range(-0.3, 0.3);
+      }
+      if ((floor === 0 && !nav.isWalkable(x, z)) || !free(x, z, 9)) continue;
+      taken.push({ x, z });
+      const hit = sim.phys.raycast(x, floor + 1.2, z, 0, -1, 0, 3, Q_PROJECTILE);
+      const y = hit >= 0 ? floor + 1.2 - hit : floor;
+      const pk: Pickup = { id: this.nextPickupId++, kind: ITEM.IBUPROFEN, code: 0, count: rng.chance(0.25) ? 2 : 1, x, y, z };
+      this.pickups.set(pk.id, pk);
+      n++;
+    }
   }
 
   /** Random contents for a bag (server only). */
@@ -421,11 +442,20 @@ export class PorchRules {
       }
       case ITEM.HEAL: {
         const kind = HEAL_KINDS[it.code];
+        if (kind === 'ibuprofen') return this.give(p, { kind: ITEM.IBUPROFEN, code: 0, count: it.count });
         const field = kind === 'bandage' ? 'bandages' : kind === 'medkit' ? 'medkits' : 'drinks';
         const room = carry[kind] - s[field];
         const take = Math.min(room, it.count);
         if (take <= 0) return it;
         s[field] += take;
+        if (take < it.count) left = { ...it, count: it.count - take };
+        break;
+      }
+      case ITEM.IBUPROFEN: {
+        // bottles go in your pockets (taking one is up to you: HEAL, or the weapon wheel)
+        const take = Math.min(it.count, carry.ibuprofen - s.pills);
+        if (take <= 0) return it;
+        s.pills += take;
         if (take < it.count) left = { ...it, count: it.count - take };
         break;
       }
@@ -487,19 +517,24 @@ export class PorchRules {
     if (s.medkits > 0) items.push({ kind: ITEM.HEAL, code: 1, count: s.medkits });
     if (s.drinks > 0) items.push({ kind: ITEM.HEAL, code: 2, count: s.drinks });
     if (s.thr > 0 && s.throwables > 0) items.push({ kind: ITEM.THROWABLE, code: s.thr - 1, count: s.throwables });
-    if (p.armor >= 25) items.push({ kind: ITEM.ARMOR, code: Math.round(p.armor), count: 1 });
+    if (s.pills > 0) items.push({ kind: ITEM.IBUPROFEN, code: 0, count: s.pills });
     items.forEach((it, k) => this.drop(it, s.x, s.y, s.z, k));
     s.wA = s.wB = s.wH = s.thr = 0;
     s.ammoL = s.ammoM = s.ammoS = s.ammoH = 0;
-    s.bandages = s.medkits = s.drinks = s.throwables = 0;
+    s.bandages = s.medkits = s.drinks = s.throwables = s.pills = 0;
     p.armor = 0;
   }
 
-  /** Healing item finished: apply it (health is the server's to give). */
+  /** Healing item finished: apply it (health and armor are the server's to give). */
   healed(p: SimPlayer, kind: number): void {
     const h = PORCH.heals[HEAL_KINDS[kind]];
     if (!h) return;
-    p.health = Math.min(Math.max(p.health, Math.min(h.cap, p.health + h.amount)), PLAYER.maxHealth);
+    if (h.armor) {
+      p.armor = Math.min(Math.max(p.armor, Math.min(h.cap, p.armor + h.amount)), PORCH.maxArmor);
+      p.state.armor = Math.round(p.armor);
+    } else {
+      p.health = Math.min(Math.max(p.health, Math.min(h.cap, p.health + h.amount)), PLAYER.maxHealth);
+    }
     this.sim.pushEvent([EV.HEALED, p.idx, kind]);
   }
 

@@ -476,6 +476,8 @@ export interface BuildingSpec {
   fireEscape?: boolean;
   /** Floor-to-floor height (default STORY). */
   story?: number;
+  /** Inside wall color (default: one of the clean plasters). */
+  plaster?: number;
   /** Gaps in the roof's parapet. */
   gaps?: Array<{ side: Side; at: number; w: number }>;
   seed?: number;
@@ -702,7 +704,7 @@ function apartments(b: MapBuilder, lot: Lot, spec: BuildingSpec, rng: Rng): Stru
   const F = Math.max(2, Math.min(6, spec.floors ?? 3));
   const hk = spec.type === 'tenement';
   const s = new Structure(b, lot, {
-    id: spec.id, floors: F, style: spec.style ?? (hk ? 'stucco' : 'apartment'), color: spec.color, plaster: rng.pick(PLASTERS), roof: 'flat', floor: 'wood',
+    id: spec.id, floors: F, style: spec.style ?? (hk ? 'stucco' : 'apartment'), color: spec.color, plaster: spec.plaster ?? rng.pick(PLASTERS), roof: 'flat', floor: 'wood',
     story: spec.story, gaps: spec.gaps,
   });
   const E = EXT_T, I = INT_T / 2;

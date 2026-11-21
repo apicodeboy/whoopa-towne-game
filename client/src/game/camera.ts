@@ -45,6 +45,11 @@ export class CameraRig {
   /** FOV multiplier of the current weapon when fully aimed. */
   aimFovMult = 0.75;
   /**
+   * Weapons that zoom in further than usual (AR, SMG) pull the aiming camera back and out by
+   * this much, so you and your gun stay framed the same while the world is magnified more.
+   */
+  aimFrame = 1;
+  /**
    * Special views (JUMP OFF THE PORCH): a long boom around the blimp, the camera up above a
    * skydiver. `dist` = boom length, `height` = pivot height above the target position.
    */
@@ -117,8 +122,9 @@ export class CameraRig {
     const ceiling = mode ? -1 : phys.raycast(px, py + 1.2, pz, 0, 1, 0, 2.6, Q_CAMERA);
     this.indoorT = approach(this.indoorT, ceiling >= 0 ? 1 : 0, dt * 3);
     const indoorE = this.indoorT * this.indoorT * (3 - 2 * this.indoorT);
-    const wantShoulder = mode ? 0 : lerp(SHOULDER_HIP, SHOULDER_AIM, aimE) * this.sideT * lerp(1, INDOOR_SHOULDER, indoorE);
-    const wantDist = mode ? mode.dist : lerp(DIST_HIP, DIST_AIM, aimE) * lerp(1, INDOOR_DIST, indoorE * (1 - aimE * 0.6));
+    // (the shoulder moves out only a little: at a tight zoom a wide offset would push you off screen)
+    const wantShoulder = mode ? 0 : lerp(SHOULDER_HIP, SHOULDER_AIM * (1 + (this.aimFrame - 1) * 0.25), aimE) * this.sideT * lerp(1, INDOOR_SHOULDER, indoorE);
+    const wantDist = mode ? mode.dist : lerp(DIST_HIP, DIST_AIM * this.aimFrame, aimE) * lerp(1, INDOOR_DIST, indoorE * (1 - aimE * 0.6));
 
     forwardFromYawPitch(yaw, pitch, _fwd);
     rightFromYaw(yaw, _right);

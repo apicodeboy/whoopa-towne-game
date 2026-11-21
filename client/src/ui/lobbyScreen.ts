@@ -21,6 +21,7 @@ export interface LobbyActions {
 /** Pre-match lobby: both crews, ready-up, invite code, host controls. */
 export class LobbyScreen {
   readonly root: HTMLElement;
+  private loadoutBtn!: HTMLButtonElement;
   private titleEl: HTMLElement;
   private blurbEl: HTMLElement;
   private codeEl: HTMLElement;
@@ -76,6 +77,7 @@ export class LobbyScreen {
     });
     const characterBtn = button('CHARACTER', 'btn ghost', () => actions.openCharacter());
     const loadoutBtn = button('LOADOUT', 'btn ghost', () => actions.openLoadout());
+    this.loadoutBtn = loadoutBtn;
     const leaveBtn = button('LEAVE', 'btn ghost danger', () => actions.leave());
 
     // ---- host controls ----
@@ -186,6 +188,8 @@ export class LobbyScreen {
     this.botsToggle.classList.toggle('on', v.fillBots);
     // JUMP OFF THE PORCH has no bot settings (it always fills up, and bot levels vary by themselves)
     this.botsToggle.classList.toggle('hidden', v.mode === 'porch');
+    // no loadouts in JUMP OFF THE PORCH: everyone finds their guns
+    this.loadoutBtn.classList.toggle('hidden', v.mode === 'porch');
     this.diffSeg.classList.toggle('hidden', !v.fillBots || v.mode === 'porch');
     for (const [id, b] of this.diffButtons) b.classList.toggle('on', id === v.botDifficulty);
 

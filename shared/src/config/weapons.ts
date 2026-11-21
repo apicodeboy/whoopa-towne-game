@@ -1,4 +1,4 @@
-/** Weapon and loadout definitions. All weapons are hitscan (fists are a 2 m "shot"). */
+/** Weapon and loadout definitions. All weapons are hitscan (fists are an arm's-reach "shot" from the body). */
 
 export type WeaponId = 'smg' | 'ar' | 'shotgun' | 'pistol' | 'sniper' | 'fists';
 export type ThrowableId = 'grenade' | 'smoke';
@@ -94,7 +94,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     falloffEnd: 36,
     minDamageMult: 0.5,
     range: 120,
-    aimFov: 0.8,
+    aimFov: 0.62,
     moveMult: 1.0,
   },
   ar: {
@@ -125,7 +125,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     falloffEnd: 70,
     minDamageMult: 0.65,
     range: 160,
-    aimFov: 0.68,
+    aimFov: 0.5,
     moveMult: 0.95,
   },
   shotgun: {
@@ -248,7 +248,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     falloffStart: 10,
     falloffEnd: 20,
     minDamageMult: 1,
-    range: 2.2,
+    /** Arm's reach from the body (the punch is traced from the eyes, not the camera). */
+    range: 1.3,
     aimFov: 1,
     moveMult: 1.05,
   },

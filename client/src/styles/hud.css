@@ -419,6 +419,27 @@
   letter-spacing: 1.6px;
   color: var(--muted);
 }
+/* ibuprofen armor: four blue segments over the health bar */
+.health .armor-segs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 5px 74px;
+}
+.health .armor-segs i {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(120, 170, 255, 0.16);
+  overflow: hidden;
+}
+.health .armor-segs i b {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #2f7bff, #7ec2ff);
+  box-shadow: 0 0 8px rgba(80, 160, 255, 0.6);
+  transition: width 0.25s;
+}
 .health .row {
   display: flex;
   align-items: center;
@@ -1285,4 +1306,140 @@
 }
 .hud[data-device='touch'] .dmg-pop {
   font-size: 20px;
+}
+
+/* ---------------------------------------------------------------- the weapon and gadget wheel */
+.wwheel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(430px, 78vmin);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 30;
+  animation: ww-in 0.12s ease-out;
+}
+.wwheel.hidden {
+  display: none;
+}
+@keyframes ww-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+}
+.wwheel .ww-ring {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.55));
+}
+.wwheel .seg path {
+  fill: rgba(10, 10, 13, 0.82);
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1.5;
+  transition: fill 0.08s;
+}
+.wwheel .seg[data-kind='gadget'] path {
+  fill: rgba(18, 12, 20, 0.82);
+}
+.wwheel .seg.active path {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.wwheel .seg.hover path {
+  fill: rgba(77, 255, 58, 0.26);
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.wwheel .seg[data-kind='gadget'].hover path {
+  fill: rgba(255, 63, 210, 0.26);
+  stroke: var(--accent-2);
+}
+.wwheel .seg.empty {
+  opacity: 0.45;
+}
+.wwheel .seg.empty.hover path {
+  fill: rgba(255, 255, 255, 0.08);
+  stroke: rgba(255, 255, 255, 0.4);
+}
+.wwheel .seg text {
+  fill: #fff;
+  text-anchor: middle;
+  font-family: var(--font-ui, system-ui), sans-serif;
+  pointer-events: none;
+}
+.wwheel .seg .lbl {
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.wwheel .seg .cnt {
+  font-size: 12px;
+  font-weight: 700;
+  fill: rgba(255, 255, 255, 0.7);
+}
+/* the fence between the guns and the gadgets */
+.wwheel .fence {
+  stroke: var(--accent-2);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 2 7;
+}
+.wwheel .ww-sec {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 900 13px var(--font-ui, system-ui), sans-serif;
+  letter-spacing: 0.22em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(10, 10, 13, 0.8);
+}
+.wwheel .ww-sec.top {
+  top: -6px;
+  color: var(--accent);
+}
+.wwheel .ww-sec.bottom {
+  bottom: -6px;
+  color: var(--accent-2);
+}
+.wwheel .ww-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  color: #fff;
+}
+.wwheel .ww-center b {
+  font: 900 15px var(--font-ui, system-ui), sans-serif;
+  text-transform: uppercase;
+}
+.wwheel .ww-center span {
+  font: 600 11px var(--font-ui, system-ui), sans-serif;
+  color: rgba(255, 255, 255, 0.75);
+}
+.wwheel .ww-center i {
+  font: 700 10px var(--font-ui, system-ui), sans-serif;
+  font-style: normal;
+  color: rgba(255, 255, 255, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wwheel .ww-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.5);
 }

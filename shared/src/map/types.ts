@@ -157,6 +157,8 @@ export interface WindowDef {
   breakable: boolean;
   /** Which side of the wall is outside (+1 the normal side (cos a, 0, -sin a), -1 the other). */
   out?: 1 | -1;
+  /** Already broken when the match starts (run-down buildings). */
+  broken?: boolean;
 }
 
 export interface LabelDef {

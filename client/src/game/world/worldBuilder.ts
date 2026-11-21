@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CREWS, crewColorHex, crewLogoSvg, type TeamId } from '@shared/config/crews';
 import { PROP_BOXES, PROP_SIZES } from '@shared/map/props';
 import type { MapDef, Prop, Solid } from '@shared/map/types';
+import type { ScoreGame, ScoresMsg } from '@shared/protocol';
 import { solidQuat } from '@shared/map/types';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { StaticModelBatch, type Assets } from '../assets';
@@ -29,9 +30,73 @@ export interface WorldVisual {
   group: THREE.Group;
   zones: ZoneMarker[];
   lights: LightSpot[];
+  /** True when this map has live scoreboard billboards (so the scores are worth fetching). */
+  scoreboards: boolean;
+  /** Live scores for the scoreboard billboards (null = the feed cannot be reached). */
+  setScores(msg: ScoresMsg | null): void;
   /** `camera` lets the sky follow the viewer. */
   update(dt: number, time: number, camera?: THREE.Vector3): void;
   dispose(): void;
+}
+
+/** Billboard ads for the local spots: [title, line under it, background top, bottom, title color]. */
+const ADS: Record<string, [string, string, string, string, string]> = {
+  ajs: ["AJ'S", 'FRESH FITS · PORCH ST', '#17120a', '#4a3210', '#f6b73c'],
+  mart: ['TOWNE FOOD MART', 'COLD DRINKS · OPEN LATE', '#8c1414', '#c2261e', '#ffe14d'],
+  suds: ['SUDS LAUNDRY', '24 HOURS · THE HILL', '#123a52', '#2a6f97', '#ffffff'],
+  tower: ['WHOOPA TOWER', 'OFFICES NOW LEASING', '#0f1a26', '#2b4560', '#dfeaf5'],
+  dimsum: ['茶樓 DIM SUM PALACE', 'HONG KONG · LANTERN ST', '#5c0d0d', '#a11a1a', '#ffd977'],
+  lake: ['LAKE LINDA', 'SUN · SAND · TIKI BAR', '#0e5a7a', '#39a9c9', '#fff3c4'],
+  jotp: ['JUMP OFF THE PORCH', 'LAST SQUAD STANDING', '#1a1206', '#f0a020', '#ffffff'],
+  grams: ['GRAMS', "GET YOURS AT AJ'S", '#101012', '#2a2a30', '#ffd23f'],
+  shack: ['SHRIMP SHACK', 'ON THE BOARDWALK', '#0f4f55', '#1e7f86', '#ffffff'],
+  kicks: ['KICKS', 'DOWNTOWN · NEW DROPS', '#3a0f0f', '#7a1f1f', '#ffffff'],
+  wings: ['WINGS & THINGS', 'OCEAN DRIVE · 2 FLOORS', '#7a1410', '#d9451e', '#ffe14d'],
+  ibu: ['IBUPROFEN', 'TAKE THE EDGE OFF · +25 ARMOR', '#c25a08', '#ff8a1f', '#ffffff'],
+  hk: ['唐人街 HONG KONG', 'NIGHT MARKET · EVERY NIGHT', '#24101a', '#5c1438', '#3ff0ff'],
+  docks: ['PIER 9', 'WAREHOUSE SPACE · THE DOCKS', '#1c2a36', '#3d5a70', '#ffd23f'],
+};
+
+/** A billboard ad, painted. */
+function adCanvas(key: string): HTMLCanvasElement {
+  const [title, sub, c0, c1, tc] = ADS[key] ?? ADS.jotp;
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, c0);
+  grad.addColorStop(1, c1);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 512, 256);
+  // a slash of the title color across the corner
+  g.fillStyle = tc;
+  g.globalAlpha = 0.16;
+  g.beginPath();
+  g.moveTo(330, 0); g.lineTo(512, 0); g.lineTo(512, 256); g.lineTo(420, 256);
+  g.closePath();
+  g.fill();
+  g.globalAlpha = 1;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  let size = 92;
+  g.font = `900 ${size}px Impact, "Arial Narrow Bold", "Helvetica Neue", sans-serif`;
+  const w = g.measureText(title).width;
+  if (w > 460) {
+    size = Math.floor((size * 460) / w);
+    g.font = `900 ${size}px Impact, "Arial Narrow Bold", "Helvetica Neue", sans-serif`;
+  }
+  g.fillStyle = 'rgba(0,0,0,0.45)';
+  g.fillText(title, 259, 107);
+  g.fillStyle = tc;
+  g.fillText(title, 256, 104);
+  g.font = '700 26px "Helvetica Neue", Arial, sans-serif';
+  g.fillStyle = 'rgba(255,255,255,0.92)';
+  g.fillText(sub, 256, 186);
+  g.strokeStyle = 'rgba(255,255,255,0.5)';
+  g.lineWidth = 6;
+  g.strokeRect(9, 9, 494, 238);
+  return c;
 }
 
 // ------------------------------------------------------------------ palettes
@@ -91,6 +156,9 @@ const AREA_STYLE: Record<string, { tex: string; color: number; tile: number }> =
   floor_tile: { tex: 'concrete', color: 0xe6e1d6, tile: 0.9 },
   floor_carpet: { tex: 'paint', color: 0x7d8a99, tile: 1 },
   floor_concrete: { tex: 'concrete', color: 0xa9a7a2, tile: 3 },
+  // THE HILL: standing water in the yards
+  puddle: { tex: 'water', color: 0x4d524c, tile: 1 },
+  concrete: { tex: 'concrete', color: 0xb8b0a2, tile: 3 },
 };
 
 /** Deterministic pseudo-random in [0,1) from an integer (same world every load). */
@@ -163,6 +231,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   const cones: THREE.BufferGeometry[] = [];
   const lights: LightSpot[] = [];
   const extras: THREE.Object3D[] = [];
+  /** Corners of the live scoreboard screens (two triangles each). */
+  const liveQuads: number[] = [];
 
   const b = map.bounds;
   const yawQ = (ry: number) => solidQuat({ ry });
@@ -236,6 +306,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
 
   // ================================================================== solids
   let solidIndex = 0;
+  let trashBagGeo: THREE.IcosahedronGeometry | null = null;
   for (const s of map.solids) {
     solidIndex++;
     if (s.kind === 'ground' || s.kind === 'perimeter' || s.kind === 'bound') continue;
@@ -246,6 +317,51 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     switch (s.kind) {
       case 'attic':
         break; // collision only
+      // ---- THE HILL's trash ----
+      case 'litter':
+        if (s.sy < 0.02) box('paint').add(spec, { color: s.color ?? 0xd9d2bf });
+        else box('flat').add(spec, { color: s.color ?? 0xc23a2a });
+        break;
+      case 'trashbag': {
+        trashBagGeo ??= new THREE.IcosahedronGeometry(0.5, 1);
+        geo('faceted').add(trashBagGeo, trs(s.x, s.y, s.z, s.ry ?? 0, s.sx, s.sy, s.sz), s.color ?? 0x1b1c1e);
+        // the knot on top
+        geo('faceted').add(trashBagGeo, trs(s.x, s.y + s.sy * 0.46, s.z, s.ry ?? 0, s.sx * 0.22, s.sy * 0.3, s.sz * 0.22), shade(s.color ?? 0x1b1c1e, 1.25));
+        break;
+      }
+      case 'mattress':
+        box('smooth').add(spec, { color: 0xb9ad94 });
+        // stains
+        box('paint').add({ ...spec, y: s.y + s.sy / 2 + 0.004, sx: s.sx * 0.45, sy: 0.004, sz: s.sz * 0.3, x: s.x + 0.1 }, { color: 0x7d6a4a });
+        box('paint').add({ ...spec, y: s.y + s.sy / 2 + 0.005, sx: s.sx * 0.3, sy: 0.004, sz: s.sz * 0.2, z: s.z - 0.25 }, { color: 0x5f5340 });
+        break;
+      case 'cart': {
+        // a shopping cart on its side
+        box('bars').add({ ...spec, y: s.y - 0.05, sy: s.sy - 0.1 }, { tile: 0.25, color: 0x8d949b });
+        box('flat').add({ ...spec, y: s.y - s.sy / 2 + 0.03, sy: 0.05 }, { color: 0x6d747b });
+        box('flat').add({ ...spec, y: s.y + s.sy / 2 - 0.02, sx: s.sx + 0.04, sy: 0.04, sz: 0.06, z: s.z }, { color: 0xb3261e });
+        break;
+      }
+      case 'burntcar': {
+        // a stripped, burnt-out car up on blocks
+        const q = spec.q;
+        const at = (lx: number, ly: number, lz: number) => {
+          const ry = s.ry ?? 0, sn = Math.sin(ry), c = Math.cos(ry);
+          return { x: s.x + lz * sn + lx * c, y: s.y - s.sy / 2 + ly, z: s.z + lz * c - lx * sn, q };
+        };
+        box('flat').add({ ...at(0, 0.55, 0), sx: s.sx, sy: 0.55, sz: s.sz }, { color: 0x1d1b1a });
+        box('flat').add({ ...at(0, 1.0, -0.2), sx: s.sx - 0.2, sy: 0.5, sz: s.sz * 0.5 }, { color: 0x151413 });
+        box('flat').add({ ...at(0, 0.84, s.sz * 0.3), sx: s.sx - 0.3, sy: 0.04, sz: s.sz * 0.3 }, { color: 0x4a2c1c });
+        box('flat').add({ ...at(0.3, 0.84, -s.sz * 0.36), sx: s.sx * 0.5, sy: 0.04, sz: s.sz * 0.2 }, { color: 0x5a3320 });
+        for (const [lx, lz] of [[-0.7, 1.3], [0.7, 1.3], [-0.7, -1.3], [0.7, -1.3]]) box('concrete').add({ ...at(lx, 0.14, lz), sx: 0.4, sy: 0.28, sz: 0.2 }, { color: 0x9a968c, tile: 1 });
+        break;
+      }
+      case 'laundry':
+        box('flat').add(spec, { color: s.color ?? 0xd9d4c6 });
+        break;
+      case 'billboard':
+        billboard(s);
+        break;
       case 'furn':
         furniture(s, solidIndex);
         break;
@@ -417,6 +533,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     }
   }
   inChunk = null;
+  trashBagGeo?.dispose();
 
   // window frames and sills, door casings (the doors and the glass themselves move: see BuildingVisual)
   for (const w of map.windows ?? []) windowFrame(w);
@@ -519,6 +636,28 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const g = batch.build();
     if (g) addMesh(g, key);
   }
+  // ---- the live scoreboards: every screen shows the same picture, redrawn as it changes ----
+  const live = { canvas: document.createElement('canvas'), games: null as ScoreGame[] | null, down: false, page: -1, drawn: '' };
+  live.canvas.width = 1024;
+  live.canvas.height = 512;
+  const liveTex = new THREE.CanvasTexture(live.canvas);
+  liveTex.colorSpace = THREE.SRGBColorSpace;
+  liveTex.anisotropy = 4;
+  disposables.push(liveTex);
+  if (liveQuads.length) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(liveQuads, 3));
+    const uvs: number[] = [];
+    for (let i = 0; i < liveQuads.length / 18; i++) uvs.push(0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1);
+    lg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    const lm = new THREE.MeshBasicMaterial({ map: liveTex, toneMapped: false });
+    const mesh = new THREE.Mesh(lg, lm);
+    mesh.matrixAutoUpdate = false;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    disposables.push(lg, lm);
+    drawScores(0);
+  }
   for (const e of extras) group.add(e);
   for (const mesh of signs.build(disposables)) group.add(mesh);
   for (const mesh of models.build()) {
@@ -594,8 +733,22 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     group,
     zones,
     lights,
+    scoreboards: liveQuads.length > 0,
+    setScores(msg: ScoresMsg | null) {
+      live.down = msg === null;
+      if (msg) live.games = msg.games;
+      live.page = -1; // redraw on the next frame
+    },
     update(_dt: number, time: number, camera?: THREE.Vector3) {
       if (camera) sky.position.copy(camera);
+      // the scoreboards turn a page every few seconds
+      if (liveQuads.length) {
+        const page = Math.floor(time / 6);
+        if (page !== live.page) {
+          live.page = page;
+          drawScores(page);
+        }
+      }
       // building interiors only near the camera
       if (camera) {
         const r = INTERIOR_RANGE + CHUNK * 0.71;
@@ -615,6 +768,129 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   // helpers (hoisted function declarations)
   // =====================================================================================
 
+  /**
+   * A billboard panel: a steel frame and a catwalk, with an ad (or a live scoreboard screen)
+   * on its front and its back.
+   */
+  function billboard(s: Solid): void {
+    const face = String(s.meta?.face ?? 's');
+    const ns = face === 'n' || face === 's';
+    const w = ns ? s.sx : s.sz, h = s.sy, T = ns ? s.sz : s.sx;
+    box('flat').add({ x: s.x, y: s.y, z: s.z, sx: s.sx, sy: s.sy, sz: s.sz }, { color: 0x23262b });
+    // the catwalk under the panel and a top rail
+    box('flat').add({ x: s.x, y: s.y - h / 2 - 0.08, z: s.z, sx: ns ? w + 0.4 : T + 1.2, sy: 0.1, sz: ns ? T + 1.2 : w + 0.4 }, { color: 0x3a3f46 });
+    box('flat').add({ x: s.x, y: s.y + h / 2 + 0.06, z: s.z, sx: ns ? w + 0.2 : T + 0.1, sy: 0.12, sz: ns ? T + 0.1 : w + 0.2 }, { color: 0x3a3f46 });
+    const sides: Array<[string, string]> = [[face, String(s.meta?.front ?? '')], [face === 'n' ? 's' : face === 's' ? 'n' : face === 'e' ? 'w' : 'e', String(s.meta?.back ?? '')]];
+    for (const [f, what] of sides) {
+      if (!what) continue;
+      const fx = f === 'e' ? 1 : f === 'w' ? -1 : 0, fz = f === 's' ? 1 : f === 'n' ? -1 : 0;
+      const cx = s.x + fx * (T / 2 + 0.03), cz = s.z + fz * (T / 2 + 0.03);
+      const pw = w - 0.5, ph = h - 0.5;
+      if (what === 'live') {
+        // corners as the viewer sees them: left to right is (fz, -fx)
+        const rx = fz, rz = -fx, hw = pw / 2, hh = ph / 2;
+        const bl = [cx - rx * hw, s.y - hh, cz - rz * hw], br = [cx + rx * hw, s.y - hh, cz + rz * hw];
+        const tr = [cx + rx * hw, s.y + hh, cz + rz * hw], tl = [cx - rx * hw, s.y + hh, cz - rz * hw];
+        liveQuads.push(...bl, ...br, ...tr, ...bl, ...tr, ...tl);
+        lights.push({ x: cx + fx * 2, y: s.y - h / 2 - 1, z: cz + fz * 2, kind: 'shop' });
+      } else {
+        // (map signs face -Z at yaw 0; the atlas turns them half round, as it does for map signs)
+        const yaw = f === 'n' ? 0 : f === 's' ? Math.PI : f === 'w' ? Math.PI / 2 : -Math.PI / 2;
+        signs.add(adCanvas(what), 'sign', cx, s.y, cz, yaw + Math.PI, pw, ph);
+      }
+    }
+  }
+
+  /** Paints the scoreboard screens: one league a page, live games first. */
+  function drawScores(page: number): void {
+    const c = live.canvas, g = c.getContext('2d')!;
+    const W = c.width, H = c.height;
+    const games = live.games ?? [];
+    // group into pages of four, a league at a time
+    const pages: Array<{ league: string; rows: ScoreGame[] }> = [];
+    for (const gm of games) {
+      const last = pages[pages.length - 1];
+      if (last && last.league === gm.league && last.rows.length < 4) last.rows.push(gm);
+      else pages.push({ league: gm.league, rows: [gm] });
+    }
+    const cur = pages.length ? pages[page % pages.length] : null;
+    const key = cur ? `${page % pages.length}|${JSON.stringify(cur)}` : live.down ? 'down' : live.games ? 'none' : 'wait';
+    if (key === live.drawn) return;
+    live.drawn = key;
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#0a0e14');
+    bg.addColorStop(1, '#101a26');
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
+    // header
+    g.fillStyle = '#f6b73c';
+    g.fillRect(0, 0, W, 84);
+    g.fillStyle = '#12100a';
+    g.textBaseline = 'middle';
+    g.textAlign = 'left';
+    g.font = '900 54px Impact, "Arial Narrow Bold", sans-serif';
+    g.fillText('LIVE SCORES', 28, 44);
+    g.textAlign = 'right';
+    g.fillText(cur ? cur.league : 'WHOOPA SPORTS', W - 28, 44);
+    if (!cur) {
+      g.textAlign = 'center';
+      g.fillStyle = '#dfe7f0';
+      g.font = '900 64px Impact, "Arial Narrow Bold", sans-serif';
+      g.fillText(live.down ? 'SCOREBOARD OFF AIR' : live.games ? 'NO GAMES RIGHT NOW' : 'WARMING UP…', W / 2, 250);
+      g.font = '600 30px "Helvetica Neue", Arial, sans-serif';
+      g.fillStyle = '#8fa3b8';
+      g.fillText(live.down ? 'Scores are back when the feed is' : 'Check back at game time', W / 2, 330);
+    } else {
+      const rowH = 92, y0 = 104;
+      cur.rows.forEach((gm, i) => {
+        const y = y0 + i * rowH;
+        g.fillStyle = i % 2 ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.09)';
+        g.fillRect(18, y, W - 36, rowH - 10);
+        const mid = y + (rowH - 10) / 2;
+        const lead = gm.state !== 'pre' && +gm.awayScore !== +gm.homeScore ? (+gm.awayScore > +gm.homeScore ? 'a' : 'h') : '';
+        g.font = '900 56px Impact, "Arial Narrow Bold", sans-serif';
+        g.textAlign = 'left';
+        g.fillStyle = lead === 'a' ? '#ffffff' : '#aab8c8';
+        g.fillText(gm.away, 40, mid);
+        g.textAlign = 'right';
+        g.fillText(gm.awayScore, 330, mid);
+        g.textAlign = 'center';
+        g.fillStyle = '#5f7286';
+        g.font = '700 30px "Helvetica Neue", Arial, sans-serif';
+        g.fillText(gm.state === 'pre' ? 'at' : '–', 372, mid);
+        g.font = '900 56px Impact, "Arial Narrow Bold", sans-serif';
+        g.textAlign = 'left';
+        g.fillStyle = lead === 'h' ? '#ffffff' : '#aab8c8';
+        g.fillText(gm.homeScore, 414, mid);
+        g.textAlign = 'left';
+        g.fillText(gm.home, gm.state === 'pre' ? 414 : 540, mid);
+        // status: live in green with a dot, finals grey, start times white
+        g.textAlign = 'right';
+        g.font = '800 32px "Helvetica Neue", Arial, sans-serif';
+        g.fillStyle = gm.state === 'in' ? '#4dff88' : gm.state === 'post' ? '#8fa3b8' : '#ffffff';
+        g.fillText(gm.status.toUpperCase(), W - 44, mid);
+        if (gm.state === 'in') {
+          g.beginPath();
+          g.arc(W - 60 - g.measureText(gm.status.toUpperCase()).width, mid, 8, 0, Math.PI * 2);
+          g.fill();
+        }
+      });
+      // page dots and the source
+      g.textAlign = 'left';
+      g.font = '600 22px "Helvetica Neue", Arial, sans-serif';
+      g.fillStyle = '#5f7286';
+      g.fillText('scores: ESPN', 28, H - 24);
+      const n = Math.min(pages.length, 14);
+      for (let i = 0; i < n; i++) {
+        g.fillStyle = i === page % pages.length ? '#f6b73c' : '#34465a';
+        g.beginPath();
+        g.arc(W - 30 - (n - 1 - i) * 22, H - 24, 6, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    liveTex.needsUpdate = true;
+  }
+
   /** A box in a solid's own frame (x across, y up from its base, z toward its front). */
   function fpart(s: Solid, key: string, lx: number, y0: number, lz: number, sx: number, sy: number, sz: number, color: number, opts: BoxOptions = {}): void {
     const ry = s.ry ?? 0, sn = Math.sin(ry), c = Math.cos(ry);
@@ -627,7 +903,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const t = String(s.meta?.t ?? '');
     const W = s.sx, D = s.sz, H = s.sy;
     const r = hash(seed);
-    const fabric = [0x5b6b7d, 0x7a5c4a, 0x4f6650, 0x8a7b6a, 0x3f4a5c, 0x7d4b4b, 0x6b6f75][Math.floor(r * 7)];
+    const fabric = s.meta?.old ? 0x6a5f4c : [0x5b6b7d, 0x7a5c4a, 0x4f6650, 0x8a7b6a, 0x3f4a5c, 0x7d4b4b, 0x6b6f75][Math.floor(r * 7)];
     const woodC = [0x8a6240, 0x6f4f33, 0xa47a52, 0x5a4232][Math.floor(r * 4)];
     const white = 0xf1efe9, dark = 0x2c2f33, metal = 0x8d959d;
     const legs = (h: number, inset = 0.06, c = dark, k = 'flat') => {
@@ -1257,7 +1533,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     };
     /** How far outside the playable area a point is (0 inside). */
     const outside = (x: number, z: number) => Math.hypot(Math.max(0, b.minX - x, x - b.maxX), Math.max(0, b.minZ - z, z - b.maxZ));
-    const desertAt = (x: number, z: number) => x < -205 + (z < b.minZ ? -40 : 0) || x < b.minX - 20;
+    // the desert lies beyond BABYLON (the north-west corner); forest everywhere else
+    const desertAt = (x: number, z: number) => (x < -205 && z < -40) || (z < b.minZ - 10 && x < -95);
 
     // ---- the ground sheet (stops at the shore; the ocean is drawn already) ----
     const W0 = -1800, W1 = 1800, Z0 = -1800, Z1 = b.maxZ - 0.6;
@@ -1321,6 +1598,15 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         tree(px, pz);
       }
     }
+    // west of the jungle and the docks
+    for (let x = b.minX - 14; x > b.minX - 300; x -= 8) {
+      for (let z = -30; z < b.maxZ - 2; z += 8) {
+        const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
+        k++;
+        if (desertAt(px, pz) || hash(k * 5) > 0.75 - (b.minX - px) / 900) continue;
+        tree(px, pz);
+      }
+    }
     for (let x = b.maxX + 75; x < b.maxX + 320; x += 8) {
       for (let z = b.minZ - 14; z < 61; z += 8) {
         const px = x + (hash(k * 3 + 1) - 0.5) * 6, pz = z + (hash(k * 3 + 2) - 0.5) * 6;
@@ -1334,7 +1620,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const rock = new THREE.IcosahedronGeometry(1, 0);
     const ROCKS = [0xb48a5a, 0xa47a4e, 0xc49a68];
     for (let i = 0; i < 220; i++) {
-      const x = b.minX - 25 - hash(i * 7 + 1) * 700, z = b.minZ - 200 + hash(i * 7 + 2) * (b.maxZ - b.minZ + 160);
+      const x = b.minX - 25 - hash(i * 7 + 1) * 700, z = b.minZ - 200 + hash(i * 7 + 2) * 150;
       const r = 1.2 + hash(i * 7 + 3) * 4.5;
       geo('faceted').add(rock, trs(x, groundY(x, z) - r * 0.3, z, hash(i) * 6, r * 1.3, r * 0.8, r), ROCKS[i % 3]);
     }
@@ -1351,10 +1637,97 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       const a = Math.PI * (0.55 + hash(i + 900) * 0.75); // spread around the west
       const dist = 520 + hash(i + 910) * 700;
       const x = b.minX + Math.cos(a) * dist, z = -20 + Math.sin(a) * dist * -1;
-      if (z > b.maxZ - 30) continue;
+      if (z > -80) continue;
       const r = 40 + hash(i + 920) * 90, h = 30 + hash(i + 930) * 60;
       geo('faceted').add(mesa, trs(x, -2, z, hash(i + 940) * 6, r, h, r * (0.6 + hash(i + 950) * 0.5)), MESAS[i % 3]);
       geo('faceted').add(mesa, trs(x, -2 + h * 0.62, z, hash(i + 940) * 6, r * 1.02, h * 0.06, r * (0.6 + hash(i + 950) * 0.5) * 1.02), 0x8f5f3a);
+    }
+    // ---- LAKE LINDA's far shore: green hills and woods across the water, and down both sides ----
+    {
+      const SHORE = b.maxZ, FAR = SHORE + 420, SIDE = 300;
+      const shore = (x0: number, x1: number, z0: number, z1: number, seg: number) => {
+        const sg = new THREE.PlaneGeometry(x1 - x0, z1 - z0, seg, Math.max(2, Math.round((seg * (z1 - z0)) / (x1 - x0))));
+        sg.rotateX(-Math.PI / 2);
+        sg.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
+        const sp = sg.attributes.position;
+        const sc = new Float32Array(sp.count * 3);
+        for (let i = 0; i < sp.count; i++) {
+          const x = sp.getX(i), z = sp.getZ(i);
+          // rises gently away from the water's edge
+          const edge = Math.min(Math.abs(z - z0), Math.abs(z - z1), Math.abs(x - x0), Math.abs(x - x1));
+          const n = noise(x / 70, z / 70);
+          sp.setY(i, -0.3 + Math.min(1, edge / 90) * (2 + n * 22));
+          c.copy(green).lerp(greenDark, n);
+          sc.set([c.r, c.g, c.b], i * 3);
+        }
+        sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
+        sg.computeVertexNormals();
+        const m = new THREE.Mesh(sg, groundMat);
+        m.matrixAutoUpdate = false;
+        group.add(m);
+        disposables.push(sg);
+      };
+      shore(-1800, 1800, FAR, 1800, 90);
+      shore(-1800, b.minX - SIDE, SHORE, FAR, 30);
+      shore(b.maxX + SIDE, 1800, SHORE, FAR, 30);
+      const shoreY = (x: number, z: number) => {
+        const n = noise(x / 70, z / 70);
+        const edge = z >= FAR ? z - FAR : x < 0 ? b.minX - SIDE - x : x - (b.maxX + SIDE);
+        return -0.3 + Math.min(1, Math.max(0, edge) / 90) * (2 + n * 22);
+      };
+      for (let x = -1100; x < 1100; x += 9) {
+        for (let z = FAR + 6; z < FAR + 260; z += 9) {
+          const px = x + (hash(k * 3 + 1) - 0.5) * 7, pz = z + (hash(k * 3 + 2) - 0.5) * 7;
+          k++;
+          if (hash(k * 5) > 0.72 - (pz - FAR) / 700) continue;
+          const sc = 1.3 + hash(k) * 0.8;
+          geo('faceted').add(hash(k + 11) < 0.5 ? pine : crown, trs(px, shoreY(px, pz), pz, hash(k + 7) * 6, sc, sc, sc), GREENS[k % GREENS.length]);
+        }
+      }
+      for (const side of [-1, 1]) {
+        for (let d = 6; d < 220; d += 9) {
+          for (let z = SHORE + 6; z < FAR; z += 9) {
+            const px = side < 0 ? b.minX - SIDE - d : b.maxX + SIDE + d, pz = z + (hash(k * 3 + 2) - 0.5) * 7;
+            k++;
+            if (hash(k * 5) > 0.7) continue;
+            const sc = 1.2 + hash(k) * 0.8;
+            geo('faceted').add(hash(k + 11) < 0.5 ? pine : crown, trs(px, shoreY(px, pz), pz, hash(k + 7) * 6, sc, sc, sc), GREENS[k % GREENS.length]);
+          }
+        }
+      }
+      // the far shore as you see it from the beach: wooded ridges across the water, drawn
+      // through the haze (the real trees over there are past the fog from ground level)
+      {
+        const rp: number[] = [], rc: number[] = [];
+        const ridge = (z: number, base: number, amp: number, hex: number, seed: number) => {
+          const col = new THREE.Color(hex);
+          const top = (x: number) => base + noise(x / 140 + seed, seed) * amp + noise(x / 37 + seed, 3) * amp * 0.25;
+          for (let x = -1700; x < 1700; x += 24) {
+            const y0 = top(x), y1 = top(x + 24);
+            rp.push(x, -2, z, x + 24, -2, z, x + 24, y1, z, x, -2, z, x + 24, y1, z, x, y0, z);
+            for (let k = 0; k < 6; k++) rc.push(col.r, col.g, col.b);
+          }
+        };
+        ridge(SHORE + 560, 26, 60, 0xa9c2bd, 7);
+        ridge(SHORE + 430, 14, 38, 0x86a898, 3);
+        ridge(SHORE + 330, 7, 20, 0x5f8a66, 1);
+        const rg = new THREE.BufferGeometry();
+        rg.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3));
+        rg.setAttribute('color', new THREE.Float32BufferAttribute(rc, 3));
+        const rm = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(rg, rm);
+        mesh.matrixAutoUpdate = false;
+        mesh.frustumCulled = false;
+        group.add(mesh);
+        disposables.push(rg, rm);
+      }
+      // a few cabins and a jetty on the far side
+      for (let i = 0; i < 9; i++) {
+        const x = -700 + i * 170 + (hash(i + 70) - 0.5) * 80, z = FAR + 30 + hash(i + 71) * 60;
+        const y = shoreY(x, z);
+        box('wood').add({ x, y: y + 2, z, sx: 9, sy: 4, sz: 7, q: yawQ(hash(i) * 0.4) }, { color: 0x8a6440, tile: 1.4 });
+        box('shingle').add({ x, y: y + 4.6, z, sx: 10, sy: 1.2, sz: 8, q: yawQ(hash(i) * 0.4) }, { color: 0x4d3a30, tile: 2.5 });
+      }
     }
     for (const gq of [trunk, crown, pine, rock, mesa]) gq.dispose();
   }

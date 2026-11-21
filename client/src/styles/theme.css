@@ -14,6 +14,11 @@
   src: url('/assets/fonts/rubik-spray-paint.woff2') format('woff2');
   font-display: swap;
 }
+@font-face {
+  font-family: 'Paytone One';
+  src: url('/assets/fonts/paytone-one.woff2') format('woff2');
+  font-display: swap;
+}
 
 :root {
   --accent: #4dff3a;
@@ -26,6 +31,11 @@
   --good: #4dff3a;
   --font-display: 'Permanent Marker', 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', sans-serif;
   --font-graffiti: 'Rubik Spray Paint', 'Permanent Marker', 'Impact', sans-serif;
+  /* poster lettering (the area names over the map) */
+  --font-poster: 'Paytone One', 'Arial Black', 'Impact', sans-serif;
+  --poster-cream: #f6ecd6;
+  --poster-pink: #eda6dc;
+  --poster-ink: #201816;
   --sticker: 5px 5px 0 rgba(0, 0, 0, 0.85);
 }
 
@@ -352,27 +362,212 @@
   will-change: transform, opacity;
   opacity: 0;
 }
-.air-label span {
-  font-family: var(--font-graffiti);
+.air-label .al-box {
+  position: relative;
+  isolation: isolate;
+  /* a dark edge round everything, so the names read over any part of the map */
+  filter: drop-shadow(0 0 1.5px var(--poster-ink)) drop-shadow(3px 4px 0 rgba(20, 14, 12, 0.85));
+}
+.air-label .al-t {
+  position: relative;
+  display: block;
+  font-family: var(--font-poster);
   font-size: 40px;
-  line-height: 1;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  color: var(--accent);
-  -webkit-text-stroke: 2px #000;
-  text-shadow: 4px 4px 0 #000, 0 0 18px rgba(77, 255, 58, 0.45);
-  transform: rotate(-3deg);
+  color: var(--poster-cream);
+}
+/* a copy of the name behind it (outlines, extrusions) and one on top (patterned fills) */
+.air-label .al-t::before,
+.air-label .al-t::after {
+  content: attr(data-t);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.air-label .al-t::before {
+  z-index: -1;
+  -webkit-text-stroke: 7px var(--poster-ink);
+  color: var(--poster-ink);
+}
+.air-label .al-t::after {
+  content: none;
 }
 .air-label i {
   width: 0;
   height: 0;
-  margin-top: 4px;
+  margin-top: 6px;
   border-left: 9px solid transparent;
   border-right: 9px solid transparent;
-  border-top: 13px solid var(--accent-2);
-  filter: drop-shadow(2px 2px 0 #000);
+  border-top: 13px solid var(--poster-pink);
+  filter: drop-shadow(0 0 1.5px var(--poster-ink)) drop-shadow(2px 2px 0 var(--poster-ink));
+}
+
+/* 1-800-BIG-MURR: big solid cream between two rows of pink dots */
+.air-label[data-look='marquee'] .al-t {
+  font-size: 44px;
+}
+.air-label .al-dots {
+  display: block;
+  height: 8px;
+  margin: 4px 2px;
+  background: radial-gradient(circle, var(--poster-pink) 2.6px, transparent 3.2px) 0 50% / 13px 8px repeat-x;
+}
+
+/* MURRAY: pink with a cream glint, standing on a striped extrusion */
+.air-label[data-look='extrude'] .al-t {
+  font-size: 48px;
+  color: var(--poster-pink);
+  text-shadow: -1.5px -1.5px 0 rgba(255, 245, 230, 0.55);
+}
+.air-label[data-look='extrude'] .al-t::before {
+  -webkit-text-stroke: 6px var(--poster-ink);
+  text-shadow:
+    2px 2px 0 var(--poster-ink), 4px 4px 0 var(--poster-cream), 6px 6px 0 var(--poster-ink), 8px 8px 0 var(--poster-cream),
+    10px 10px 0 var(--poster-ink), 12px 12px 0 var(--poster-cream), 14px 14px 0 var(--poster-ink);
+}
+
+/* SPACE STATION: slanted, cream outline, filled with pink and cream bands */
+.air-label[data-look='stripes'] .al-t {
+  font-size: 46px;
+  transform: skewX(-12deg);
+  color: transparent;
+  -webkit-text-stroke: 7px var(--poster-cream);
+}
+.air-label[data-look='stripes'] .al-t::before {
+  -webkit-text-stroke: 12px var(--poster-ink);
+}
+.air-label[data-look='stripes'] .al-t::after {
+  content: attr(data-t);
+  -webkit-text-stroke: 0;
+  color: transparent;
+  background: repeating-linear-gradient(180deg, var(--poster-pink) 0 5px, var(--poster-ink) 5px 7px, var(--poster-cream) 7px 9px, var(--poster-ink) 9px 11px);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* HEADLINES: cream outline with a diagonal hatch inside */
+.air-label[data-look='hatch'] .al-t {
+  font-size: 46px;
+  color: transparent;
+  -webkit-text-stroke: 6px var(--poster-cream);
+}
+.air-label[data-look='hatch'] .al-t::before {
+  -webkit-text-stroke: 11px var(--poster-ink);
+}
+.air-label[data-look='hatch'] .al-t::after {
+  content: attr(data-t);
+  -webkit-text-stroke: 0;
+  color: transparent;
+  background: repeating-linear-gradient(-55deg, var(--poster-cream) 0 2px, var(--poster-ink) 2px 6px);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* BOLD: outline only, with a pink drop behind it */
+.air-label[data-look='outline'] .al-t {
+  font-size: 46px;
+  color: var(--poster-ink);
+  -webkit-text-stroke: 3px var(--poster-cream);
+  text-shadow: 5px 5px 0 var(--poster-pink);
+}
+.air-label[data-look='outline'] .al-t::before {
+  content: none;
+}
+
+/* NO CAP < ALL CAPS: one solid line between two outlined pink echoes */
+.air-label[data-look='stack'] .al-t {
+  font-size: 40px;
+  line-height: 1;
+}
+.air-label[data-look='stack'] .al-echo {
+  color: var(--poster-ink);
+  -webkit-text-stroke: 2px var(--poster-pink);
+}
+.air-label[data-look='stack'] .al-echo::before {
+  content: none;
+}
+
+/* BIG'N: dark letters in a cream starburst */
+.air-label[data-look='burst'] .al-box {
+  padding: 30px 40px;
+}
+.air-label .al-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: var(--poster-ink);
+}
+.air-label[data-look='burst'] .al-bg2 {
+  inset: 5px;
+  z-index: -1;
+  background: var(--poster-cream);
+}
+.air-label[data-look='burst'] .al-t {
+  font-size: 40px;
+  color: var(--poster-ink);
+  text-shadow: 3px 3px 0 var(--poster-pink);
+}
+.air-label[data-look='burst'] .al-t::before {
+  content: none;
+}
+
+/* DISPLAY FONT: dark letters in a cream speech bubble */
+.air-label[data-look='bubble'] .al-box {
+  padding: 16px 30px 18px;
+}
+.air-label[data-look='bubble'] .al-bg {
+  z-index: -1;
+  background: var(--poster-cream);
+  border: 4px solid var(--poster-ink);
+  border-radius: 50%;
+}
+.air-label[data-look='bubble'] .al-bg::after {
+  content: '';
+  position: absolute;
+  right: 12%;
+  bottom: -20px;
+  border-left: 14px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 22px solid var(--poster-cream);
+}
+.air-label[data-look='bubble'] .al-t {
+  font-size: 38px;
+  color: var(--poster-ink);
+}
+.air-label[data-look='bubble'] .al-t::before {
+  content: none;
+}
+
+/* SPARKLE: a pink outline round a cream outline, with stars */
+.air-label[data-look='sparkle'] .al-t {
+  font-size: 46px;
+  color: var(--poster-ink);
+  -webkit-text-stroke: 2.5px var(--poster-cream);
+}
+.air-label[data-look='sparkle'] .al-t::before {
+  -webkit-text-stroke: 10px var(--poster-pink);
+  color: var(--poster-pink);
+}
+.air-label[data-look='sparkle'] em {
+  position: absolute;
+  font-style: normal;
+  font-size: 34px;
+  -webkit-text-stroke: 1.5px var(--poster-ink);
+  color: var(--poster-cream);
+  animation: al-twinkle 1.6s ease-in-out infinite alternate;
+}
+.air-label[data-look='sparkle'] em:nth-of-type(2n) {
+  color: var(--poster-pink);
+  animation-delay: -0.8s;
+}
+@keyframes al-twinkle {
+  from { opacity: 0.35; transform: scale(0.75) rotate(-10deg); }
+  to { opacity: 1; transform: scale(1.1) rotate(10deg); }
 }
 @media (max-width: 760px) {
-  .air-label span {
-    font-size: 26px;
+  .air-labels {
+    zoom: 0.62;
   }
 }

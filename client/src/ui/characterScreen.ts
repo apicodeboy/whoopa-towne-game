@@ -1,8 +1,8 @@
 import {
-  BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BROWS, BUILDS, CARRY, DEFAULT_APPEARANCE, EARRINGS, EARS, EXPRESSIONS, EYE_COLORS, HEAD_SIZES, MASKS, SHOULDERS, WAIST_CHAINS,
-  EYE_SHAPES, FACE_ACCESSORIES, FACE_SHAPES, FACIAL_HAIR, GLASSES, HAIRSTYLES, HAIR_COLORS, HATS, HEAD_SHAPES, HEIGHTS, LIPS,
-  MOUTH_ACCESSORIES, MOUTH_PROPS, NECKLACES, NOSES, SHOES, SHOE_COLORS, SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TEETH, TOPS,
-  TOP_COLORS, WRIST, LOOK_PRESETS, cloneAppearance, isPremiumOption, randomAppearance, sameAppearance, type Appearance, type LookField, type LookOption,
+  BELTS, BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BUILDS, CARRY, DEFAULT_APPEARANCE, EARRINGS, FACES, FACE_MARKS, FACE_SHAPES, GLASSES,
+  HAIRSTYLES, HAIR_COLORS, HATS, HEAD_SHAPES, HEAD_SIZES, HEIGHTS, LEG_PRINTS, MASKS, MOUTH_PROPS, NECKLACES, SHOES, SHOE_COLORS, SHOULDERS,
+  SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TOPS, TOP_COLORS, WAIST_CHAINS, WRIST, LOOK_PRESETS, cloneAppearance, isPremiumOption,
+  randomAppearance, sameAppearance, type Appearance, type LookField, type LookOption,
 } from '@shared/config/appearance';
 import type { Profile } from '../core/profile';
 import { CharacterPreview, PREVIEW_FRAMES, type PreviewFrame } from '../game/characters/characterPreview';
@@ -25,7 +25,7 @@ type Kind = 'cards' | 'swatches' | 'expression' | 'details' | 'locked' | 'preset
 interface Sub {
   id: string;
   name: string;
-  field?: LookField | 'shoulders' | 'headSize' | 'mask' | 'carry' | 'waistChain';
+  field?: LookField | 'shoulders' | 'headSize' | 'mask' | 'carry' | 'waistChain' | 'face' | 'faceMark' | 'belt' | 'legPrint';
   kind: Kind;
   options: readonly LookOption[];
   frame: PreviewFrame;
@@ -42,10 +42,8 @@ interface Category {
 const ic = (body: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 const ICONS = {
   body: ic('<circle cx="12" cy="4.5" r="2.5"/><path d="M8 9.5h8l-1 6h-1.6l-.6 6.5h-1.6l-.6-6.5H9z"/>'),
-  face: ic('<ellipse cx="12" cy="12" rx="7" ry="8.5" fill="none" stroke-width="1.8"/><circle cx="9.3" cy="11" r="1.1"/><circle cx="14.7" cy="11" r="1.1"/><path d="M10.2 15.5h3.6" stroke-width="1.6"/>'),
-  expr: ic('<circle cx="12" cy="12" r="8.5" fill="none" stroke-width="1.8"/><circle cx="9" cy="10" r="1.1"/><circle cx="15" cy="10" r="1.1"/><path d="M8.3 14c2 2.6 5.4 2.6 7.4 0" fill="none" stroke-width="1.7"/>'),
+  face: ic('<ellipse cx="12" cy="12" rx="6.6" ry="8.6" fill="none" stroke-width="1.8"/><path d="M10 15.6h4" stroke-width="1.4"/>'),
   hair: ic('<path d="M4.5 14c0-6 3.5-9.5 7.5-9.5S19.5 8 19.5 14c-1.3-2.4-3-3.6-4.4-4-1 1.6-3.4 2.4-6.2 2.4-1.6 0-3 .6-4.4 1.6z"/><path d="M6 15v4M18 15v4" stroke-width="1.6"/>'),
-  mouth: ic('<path d="M3 12c3-3.5 6-4 9-2 3-2 6-1.5 9 2-3 4-6 5.5-9 5.5S6 16 3 12z"/><path d="M5 12h14" stroke="#14161d" stroke-width="1.2"/>'),
   top: ic('<path d="M8 3.5l-5 3 2 4 2.2-1.2V20h9.6V9.3L19 10.5l2-4-5-3c-.6 1.6-2.1 2.6-4 2.6S8.6 5.1 8 3.5z"/>'),
   pants: ic('<path d="M6.5 3h11l1 18h-4.2L12 9.5 9.7 21H5.5z"/>'),
   shoes: ic('<path d="M3 14.5c0-1.6.6-3.5 1.4-5h4.3c.6 1.6 2.4 2.4 4.3 2.6 3.3.4 6.4 1.4 7.4 3.4v1.5H3z"/><path d="M3 18h18" stroke-width="2"/>'),
@@ -81,35 +79,18 @@ export const CATEGORIES: Category[] = [
     ],
   },
   {
+    // the character is faceless: the face is one blank color, with a mark on it if you like
     id: 'head', name: 'Head & Face', icon: ICONS.face, subs: [
+      sub('face', 'Face', 'face', 'swatches', FACES, 'face', 'The face is blank: pick its color.'),
+      sub('faceMark', 'Face Mark', 'faceMark', 'cards', FACE_MARKS, 'face'),
       sub('headShape', 'Head Shape', 'headShape', 'cards', HEAD_SHAPES, 'face'),
-      sub('faceShape', 'Face Shape', 'faceShape', 'cards', FACE_SHAPES, 'face'),
-      sub('eyes', 'Eyes', 'eyes', 'cards', EYE_SHAPES, 'face'),
-      sub('eyeColor', 'Eye Color', 'eyeColor', 'swatches', EYE_COLORS, 'face'),
-      sub('brows', 'Eyebrows', 'brows', 'cards', BROWS, 'face'),
-      sub('nose', 'Nose', 'nose', 'cards', NOSES, 'face'),
-      sub('ears', 'Ears', 'ears', 'cards', EARS, 'face'),
-    ],
-  },
-  {
-    id: 'expr', name: 'Expressions', icon: ICONS.expr, subs: [
-      sub('expression', 'Expression', undefined, 'expression', EXPRESSIONS, 'face', 'Preview only: your character goes back to a relaxed face.'),
+      sub('faceShape', 'Jaw', 'faceShape', 'cards', FACE_SHAPES, 'face'),
     ],
   },
   {
     id: 'hair', name: 'Hair', icon: ICONS.hair, subs: [
       sub('hair', 'Hairstyle', 'hair', 'cards', HAIRSTYLES, 'face'),
       sub('hairColor', 'Hair Color', 'hairColor', 'swatches', HAIR_COLORS, 'face'),
-      sub('facialHair', 'Facial Hair', 'facialHair', 'cards', FACIAL_HAIR, 'face'),
-      sub('facialHairColor', 'Facial Hair Color', 'facialHairColor', 'swatches', HAIR_COLORS, 'face', 'Eyebrows use this color too.'),
-    ],
-  },
-  {
-    id: 'mouth', name: 'Mouth & Teeth', icon: ICONS.mouth, subs: [
-      sub('lips', 'Mouth', 'lips', 'cards', LIPS, 'face'),
-      sub('mouthAcc', 'Mouth Accessory', 'mouthAcc', 'cards', MOUTH_ACCESSORIES, 'face'),
-      sub('mouthProp', 'In Mouth', 'mouthProp', 'cards', MOUTH_PROPS, 'face'),
-      sub('teeth', 'Teeth', 'teeth', 'cards', TEETH, 'face', 'Teeth show when you smile (try Expressions) or wear a grill.'),
     ],
   },
   {
@@ -122,6 +103,9 @@ export const CATEGORIES: Category[] = [
     id: 'bottom', name: 'Pants & Bottoms', icon: ICONS.pants, subs: [
       sub('bottom', 'Bottom Style', 'bottom', 'cards', BOTTOMS, 'full'),
       sub('bottomColor', 'Bottom Color', 'bottomColor', 'swatches', BOTTOM_COLORS, 'full'),
+      sub('belt', 'Belt', 'belt', 'cards', BELTS, 'full'),
+      sub('legPrint', 'Pants Graphic', 'legPrint', 'cards', LEG_PRINTS, 'full', 'On the left leg of long pants.'),
+      sub('waistChain', 'Pants Chain', 'waistChain', 'cards', WAIST_CHAINS, 'full'),
     ],
   },
   {
@@ -134,24 +118,22 @@ export const CATEGORIES: Category[] = [
     id: 'headacc', name: 'Head Accessories', icon: ICONS.hat, subs: [
       sub('hat', 'Hats & Headwear', 'hat', 'cards', HATS, 'face', 'Hats tuck your hair in so nothing pokes through.'),
       sub('glasses', 'Glasses', 'glasses', 'cards', GLASSES, 'face'),
+      sub('mask', 'Masks', 'mask', 'cards', MASKS, 'face'),
+      sub('mouthProp', 'In Mouth', 'mouthProp', 'cards', MOUTH_PROPS, 'face'),
     ],
   },
   {
     id: 'jewelry', name: 'Jewelry & Accessories', icon: ICONS.jewelry, subs: [
-      sub('earrings', 'Earrings', 'earrings', 'cards', EARRINGS, 'face'),
       sub('necklace', 'Necklaces', 'necklace', 'cards', NECKLACES, 'upper'),
-      sub('wrist', 'Wrist', 'wrist', 'cards', WRIST, 'upper'),
-      sub('faceAcc', 'Face Accessories', 'faceAcc', 'cards', FACE_ACCESSORIES, 'face'),
-      sub('mask', 'Masks', 'mask', 'cards', MASKS, 'face'),
-      sub('waistChain', 'Pants Chain', 'waistChain', 'cards', WAIST_CHAINS, 'full'),
+      sub('wrist', 'Wrists & Gloves', 'wrist', 'cards', WRIST, 'upper'),
+      sub('earrings', 'Earrings', 'earrings', 'cards', EARRINGS, 'face'),
       sub('carry', 'In Hand', 'carry', 'cards', CARRY, 'upper', 'Shows in menus and the creator (put away in matches).'),
     ],
   },
   {
-    id: 'tattoos', name: 'Tattoos & Details', icon: ICONS.ink, subs: [
+    id: 'tattoos', name: 'Tattoos', icon: ICONS.ink, subs: [
       sub('tattooSpot', 'Tattoo Location', undefined, 'locked', [{ id: 'none', name: 'None' }, ...TATTOO_SPOTS.map((o) => ({ ...o, available: false }))], 'upper', 'Tattoos are coming in a later update.'),
       sub('tattooDesign', 'Tattoo Design', undefined, 'locked', TATTOO_DESIGNS, 'upper', 'Tattoos are coming in a later update.'),
-      sub('details', 'Other Details', undefined, 'details', BODY_DETAILS, 'face', 'Pick any combination.'),
     ],
   },
 ];

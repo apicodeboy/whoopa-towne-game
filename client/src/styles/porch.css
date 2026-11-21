@@ -364,6 +364,12 @@
 .ph-bag .h-bandage::before { background: #f4f1e8; }
 .ph-bag .h-medkit::before { background: #e03a3a; }
 .ph-bag .h-drink::before { background: #ff7a3d; border-radius: 50%; }
+/* an orange pill bottle with a white cap */
+.ph-bag .h-ibuprofen::before { background: linear-gradient(#fff 0 30%, #f08a1c 30%); width: 7px; height: 10px; margin-top: -5px; }
+.ph-bag .glyph {
+  min-width: 0;
+  padding: 2px 7px;
+}
 .ph-bag .a-light::before { background: #d9b44a; }
 .ph-bag .a-medium::before { background: #6a8f3c; }
 .ph-bag .a-shells::before { background: #c0392b; }

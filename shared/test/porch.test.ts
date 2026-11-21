@@ -1,5 +1,5 @@
 import {
-  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, Q_PROJECTILE, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
+  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, DISTRICT_FENCE_H, HEAL_KINDS, Q_BULLET, Q_PROJECTILE, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
   copyPlayerState, makeInputCmd, makePlayerState, makeStepActions, stepPlayer, weaponInSlot, DEFAULT_LOADOUT,
   type InputCmd, type SimPlayer, type SquadMode,
 } from '../src/index';
@@ -183,17 +183,22 @@ test('porch: search a bookbag — the server hands out the loot once', async () 
   sim.dispose();
 });
 
-test('porch: fists reach 2 m, guns draw from the ammo pools, drops land as pickups', async () => {
+test("porch: fists reach arm's length (not across the street), guns draw from the ammo pools, drops land as pickups", async () => {
   const { sim, me, humans } = await porchSim({ humans: 2 });
   sim.tick();
   const [a, b] = humans;
   land(a, -18, 30, 0);
-  land(b, -18, 28.3, Math.PI);
+  land(b, -18, 28.9, Math.PI);
   step(sim, a);
-  const pitch = Math.atan2(1.1 - PLAYER.eyeHeight, 1.7);
+  const pitch = Math.atan2(1.1 - PLAYER.eyeHeight, 1.1);
   const evs = step(sim, a, { buttons: BTN.FIRE, pitch });
   const hit = of(evs, EV.HIT)[0];
   assert(hit && hit[2] === b.idx && hit[3] === WEAPON_FIST_DAMAGE, `punch: ${JSON.stringify(of(evs, EV.HIT))}`);
+  // two steps back is out of reach, wherever the camera is (the reach is from the body)
+  land(b, -18, 27.9, Math.PI);
+  wait(sim, 1, a);
+  const far = step(sim, a, { buttons: BTN.FIRE, pitch: Math.atan2(1.1 - PLAYER.eyeHeight, 2.1), oz: a.state.z + 2.5 });
+  assert(of(far, EV.HIT).length === 0, 'punched from 2 m away');
   land(b, -18, 26, Math.PI);
   wait(sim, 1, a);
   const miss = step(sim, a, { buttons: BTN.FIRE, pitch: Math.atan2(1.1 - PLAYER.eyeHeight, 4) });
@@ -237,13 +242,45 @@ test('porch: healing items take time (held all the way), heal up to their cap, a
   step(sim, me, { buttons: BTN.HEAL });
   const evs = wait(sim, PORCH.heals.bandage.time + 0.2, me, { buttons: BTN.HEAL });
   assert(of(evs, EV.HEALED).length === 1 && me.health === 55 && me.state.bandages === 2, `bandage: ${me.health} hp`);
-  // armor
-  sim.porch!.give(me, { kind: ITEM.ARMOR, code: 50, count: 1 });
+  // ibuprofen: picking bottles up only puts them in your pockets...
+  const pills = (): number => me.state.pills;
+  assert(sim.porch!.give(me, { kind: ITEM.IBUPROFEN, code: 0, count: 2 }) === null, 'two bottles taken');
+  assert(pills() === 2 && me.armor === 0, `carried, not taken (${me.state.pills} bottles, ${me.armor} armor)`);
+  // ...taking one (picked on the wheel) is 25 armor on top of health
+  const I = HEAL_KINDS.indexOf('ibuprofen');
+  wait(sim, 0.1, me);
+  step(sim, me, { buttons: BTN.HEAL, heal: I + 1 });
+  assert(me.state.healT > 0 && me.state.healKind === I, 'taking a bottle (health is not full, but ibuprofen was asked for)');
+  const took = wait(sim, PORCH.heals.ibuprofen.time + 0.1, me, { buttons: BTN.HEAL, heal: I + 1 });
+  assert(of(took, EV.HEALED).length === 1, 'done');
+  approx(me.armor, 25, 0.01, 'one bottle = 25 armor');
+  assert(pills() === 1 && me.state.armor === 25 && me.health === 55, `one bottle used (${pills()} left, ${me.state.armor} armor, ${me.health} hp)`);
+  // HEAL on its own still heals health first
+  wait(sim, 0.1, me);
+  step(sim, me, { buttons: BTN.HEAL });
+  assert(me.state.healKind === HEAL_KINDS.indexOf('bandage'), 'plain HEAL picks health first');
+  wait(sim, 0.2, me);
+  me.armor = 50;
+  wait(sim, 0.1, me);
   sim.damage(me, 30, 5, 1, false, 0, 0);
   approx(me.armor, 20, 0.01, 'armor took the hit');
   approx(me.health, 55, 0.01, 'health untouched');
   sim.damage(me, 30, 5, 1, false, 0, 0);
   approx(me.health, 45, 0.01, 'the rest goes through');
+  // four bottles is the most you carry: the rest stay on the ground
+  const left = sim.porch!.give(me, { kind: ITEM.IBUPROFEN, code: 0, count: 6 });
+  assert(pills() === PORCH.carry.ibuprofen, `carrying four (${pills()})`);
+  assert(left !== null && left.kind === ITEM.IBUPROFEN && left.count === 3, `three bottles left over (${left?.count})`);
+  assert(sim.porch!.give(me, { kind: ITEM.IBUPROFEN, code: 0, count: 1 })?.count === 1, 'full: a bottle is not picked up');
+  // armor tops out at 100: with full armor a bottle does nothing (so it is not used up)
+  me.armor = PORCH.maxArmor;
+  wait(sim, 0.1, me);
+  step(sim, me, { buttons: BTN.HEAL, heal: I + 1 });
+  assert(me.state.healT === 0 && pills() === PORCH.carry.ibuprofen, 'full armor: no bottle taken');
+  // and there are bottles lying around the map from the start
+  let loose = 0;
+  for (const it of sim.porch!.pickups.values()) if (it.kind === ITEM.IBUPROFEN) loose++;
+  assert(loose >= PORCH.ibuprofen.loose * 0.8, `loose bottles on the map (${loose})`);
   sim.dispose();
 });
 
@@ -310,6 +347,8 @@ test('porch: 20 bots play a whole match to a single winner', async () => {
   const { sim } = await porchSim({ humans: 0, bots: 20, seed: 7 });
   const t0 = performance.now();
   let jumped = 0, opened = 0, kills = 0, landed = 0, riot = 0;
+  const landedAt = new Map<number, number>();
+  let firstGun = Infinity;
   const limit = 20 * 60 * 60;
   for (let i = 0; i < limit && sim.phase !== PHASE.ENDED; i++) {
     sim.tick();
@@ -321,9 +360,15 @@ test('porch: 20 bots play a whole match to a single winner', async () => {
         landed++;
         // nobody brings anything down with them: weapons only come from bookbags and drops on the ground
         const ls = sim.players[e[1]]!.state;
-        assert(!ls.wA && !ls.wB && !ls.wH && !ls.thr && !(ls.ammoL + ls.ammoM + ls.ammoS + ls.ammoH) && !ls.bandages && !ls.medkits && !ls.drinks, `${sim.players[e[1]]!.name} landed carrying something`);
+        assert(!ls.wA && !ls.wB && !ls.wH && !ls.thr && !(ls.ammoL + ls.ammoM + ls.ammoS + ls.ammoH) && !ls.bandages && !ls.medkits && !ls.drinks && !ls.pills, `${sim.players[e[1]]!.name} landed carrying something`);
         // (health can be lower: whoever landed first and found a gun may shoot people still in the air)
         assert(sim.players[e[1]]!.armor === 0, 'landed with no armor');
+        landedAt.set(e[1], sim.time);
+      }
+      // ...and nobody comes down armed: a bot looks round and goes and searches first
+      if (e[0] === EV.LOOT && e[2] === ITEM.WEAPON) {
+        const t = landedAt.get(e[1]);
+        if (t !== undefined && sim.time - t < firstGun) firstGun = sim.time - t;
       }
       if (e[0] === EV.KILL && e[3] === 12) riot++;
     }
@@ -334,6 +379,8 @@ test('porch: 20 bots play a whole match to a single winner', async () => {
   assert(sim.phase === PHASE.ENDED, 'no winner after 20 minutes');
   assert(jumped === 20 && landed >= 17, `everyone jumped and (nearly everyone) landed: ${landed}`);
   assert(opened > 10, 'bots barely looted');
+  assert(firstGun >= 1500, `a bot had a gun ${firstGun} ms after touching down`);
+  console.log(`       quickest gun after landing: ${(firstGun / 1000).toFixed(1)} s`);
   assert(sim.winner >= 0, 'draw');
   assert(sim.players.filter((p) => p && p.alive).every((p) => p!.squad === sim.winner), 'winner is the last one standing');
   sim.dispose();
@@ -383,5 +430,29 @@ test('warm-up: a minute on foot in BABYLON, bots turning up one by one, then eve
   sim.tick();
   assert(sim.roster().length === 20, `everyone in the match (${sim.roster().length})`);
   for (const p of sim.players) if (p) assert(p.alive && p.state.air === AIR_RIDING, `${p.name} aboard`);
+  sim.dispose();
+});
+
+test('porch: the districts are fenced off: you walk into the railing, and jump it', async () => {
+  const { sim, me } = await porchSim();
+  sim.tick();
+  // West Line Rd between the jungle and Whoopa Towne, the railing down the middle (x = -86)
+  const top = sim.phys.raycast(-86, 3, -30, 0, -1, 0, 4, Q_PROJECTILE);
+  approx(3 - top, DISTRICT_FENCE_H, 0.02, 'a railing on the line');
+  assert(sim.phys.raycast(-86, 1.4, -30, 0, -1, 0, 0.3, Q_PROJECTILE) < 0, 'nothing above it');
+  // walking into it from the jungle side, facing east (+x): stopped
+  land(me, -88.5, -30, -Math.PI / 2);
+  wait(sim, 0.2, me);
+  wait(sim, 1.5, me, { mz: 1 });
+  assert(me.state.x < -86 - PLAYER.radius + 0.05, `walked through the fence (x = ${me.state.x.toFixed(2)})`);
+  // a run and a jump: over
+  land(me, -89, -30, -Math.PI / 2);
+  wait(sim, 0.2, me);
+  wait(sim, 0.35, me, { mz: 1 });
+  wait(sim, 1.2, me, { mz: 1, buttons: BTN.JUMP });
+  wait(sim, 0.5, me, { mz: 1 });
+  assert(me.state.x > -85 && me.state.grounded === 1, `cleared it (x = ${me.state.x.toFixed(2)})`);
+  // bullets go straight through it (it is a fence, not a wall)
+  assert(sim.phys.raycast(-88, 0.6, -30, 1, 0, 0, 4, Q_BULLET) < 0, 'not a wall to bullets');
   sim.dispose();
 });

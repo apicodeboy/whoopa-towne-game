@@ -71,34 +71,48 @@ export function buildWrist(kind: string, body: BodyQuery, out: ProcMesh, fine: P
     out.torus(c, axis, r + 0.0035, 0.0017, (u) => (Math.floor(u * 22) % 2 ? METAL.gold : fixed(0xc9982f, { metal: 0.65, rough: 0.3 })), 22, 5);
     return;
   }
-  if (kind === 'gloves' || kind === 'blackgloves') {
-    // AJ's shooter gloves: the hands are painted in the assembler; this is the cuff
+  if (kind === 'gloves' || kind === 'blackgloves' || kind === 'glovewatches') {
+    // gloves: the hands are painted in the assembler; this is the cuff
+    const where = kind === 'glovewatches' ? 0.985 : 0.95;
     for (const side of ['L', 'R'] as const) {
-      const { A, B, r } = at(side, 0.95);
-      cuff(out, A, B, 0.95, 0.024, r, 0.004, fixed(0x141417, { rough: 0.55, metal: 0.1 }));
+      const { A, B, r } = at(side, where);
+      cuff(out, A, B, where, kind === 'glovewatches' ? 0.014 : 0.024, r, 0.004, fixed(0x141417, { rough: 0.55, metal: 0.1 }));
     }
-    return;
+    if (kind !== 'glovewatches') return;
   }
-  // watch on the left wrist: strap plus a face on the back of the wrist
-  const iced = kind === 'icedwatch';
-  const gold = kind === 'goldwatch' || iced;
-  const silver = kind === 'silverwatch';
-  const { A, B, r } = at('L', 0.86);
-  cuff(out, A, B, 0.86, 0.016, r, 0.0026, gold ? METAL.gold : silver ? METAL.silver : fixed(0x1d1e22, { rough: 0.7 }));
-  const axis = v3().subVectors(B, A).normalize();
-  const c = A.clone().lerp(B, 0.86);
-  // the back of the wrist: out and up from the body, square to the forearm (works for any arm pose)
-  const ref = v3(1, 1, 0).normalize();
-  const outward = ref.sub(axis.clone().multiplyScalar(ref.dot(axis))).normalize();
-  const base = c.clone().addScaledVector(outward, r + 0.002);
-  const top = base.clone().addScaledVector(outward, 0.0045);
-  out.tube([base, top], 0.0095, 12, gold ? METAL.gold : silver ? METAL.silver : METAL.steel, { flat: true });
-  const dial = top.clone().addScaledVector(outward, 0.0003);
-  out.tube([top, dial], 0.0075, 12, iced ? fixed(0xbfe6ff, { metal: 0.3, rough: 0.06 }) : gold || silver ? fixed(0x1a1712, { rough: 0.3 }) : fixed(0xe8ecef, { rough: 0.3 }), { flat: true });
-  if (iced) {
-    // AJ's: a bezel of stones around the dial and an iced strap
-    fine.torus(top.clone().addScaledVector(outward, 0.0006), outward, 0.0098, 0.0019, (u) => (Math.floor(u * 20) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 20, 5);
-    cuff(fine, A, B, 0.86, 0.006, r + 0.0026, 0.0018, (u) => (Math.floor(u * 24) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 24);
+  // a watch: strap plus a face on the back of the wrist
+  const watch = (side: 'L' | 'R', big: boolean): void => {
+    const iced = kind === 'icedwatch';
+    const gold = kind === 'goldwatch' || iced;
+    const silver = kind === 'silverwatch' || kind === 'glovewatches';
+    // (the big ones sit right at the wrist, past the end of a sleeve and before the hand widens)
+    const s = big ? 0.935 : 0.86, k = big ? 1.45 : 1;
+    const a = ARM(side);
+    const A = body.joint(a.low), B = body.joint(a.wrist);
+    const r = body.limb(a.low, a.wrist, s, big ? 0.006 : 0.012);
+    cuff(out, A, B, s, 0.016 * k, r, 0.0028, gold ? METAL.gold : silver ? METAL.silver : fixed(0x1d1e22, { rough: 0.7 }));
+    const axis = v3().subVectors(B, A).normalize();
+    const c = A.clone().lerp(B, s);
+    // the back of the wrist: out and up from the body, square to the forearm (works for any arm pose)
+    const ref = v3(side === 'L' ? 1 : -1, 1, 0).normalize();
+    const outward = ref.sub(axis.clone().multiplyScalar(ref.dot(axis))).normalize();
+    const base = c.clone().addScaledVector(outward, r + 0.002);
+    const top = base.clone().addScaledVector(outward, 0.0048 * k);
+    out.tube([base, top], 0.0095 * k, 14, gold ? METAL.gold : silver ? METAL.silver : METAL.steel, { flat: true });
+    const dial = top.clone().addScaledVector(outward, 0.0004);
+    out.tube([top, dial], 0.0075 * k, 14, iced || big ? fixed(0xbfe6ff, { metal: 0.3, rough: 0.06 }) : gold || silver ? fixed(0x1a1712, { rough: 0.3 }) : fixed(0xe8ecef, { rough: 0.3 }), { flat: true });
+    if (iced) {
+      // AJ's: a bezel of stones around the dial and an iced strap
+      fine.torus(top.clone().addScaledVector(outward, 0.0006), outward, 0.0098, 0.0019, (u) => (Math.floor(u * 20) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 20, 5);
+      cuff(fine, A, B, 0.86, 0.006, r + 0.0026, 0.0018, (u) => (Math.floor(u * 24) % 2 ? METAL.diamond : fixed(0xcfe9ff, { metal: 0.3, rough: 0.05 })), 24);
+    }
+  };
+  if (kind === 'glovewatches') {
+    // a chunky silver watch on each wrist, over the cuffs
+    watch('L', true);
+    watch('R', true);
+  } else {
+    watch('L', false);
   }
 }
 
@@ -109,6 +123,33 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh, fine
     buildNecklace('silver', body, out, fine);
     buildChainAt(body, out, 0.1, 0.0019, METAL.silver);
     buildChainAt(body, out, 0.135, 0.0023, fixed(0xc9cfd6, { metal: 0.62, rough: 0.26 }));
+    return;
+  }
+  if (kind === 'icedpendant') {
+    // a long silver chain down to the chest with a big round pendant set with stones
+    const path = buildChainAt(body, out, 0.15, 0.003, METAL.silver, 0.026);
+    const tip = path[Math.round((path.length - 1) / 2)];
+    const R = 0.036;
+    const c = tip.clone().add(v3(0, -R - 0.004, 0.004));
+    for (const dy of [-R, 0, R]) for (const dx of [-R, 0, R]) c.z = Math.max(c.z, torsoZ(body, c.x - body.neckAxis.x + dx, c.y + dy, 1) + 0.004);
+    out.tube([tip.clone().add(v3(0, -0.002, 0)), c.clone().add(v3(0, R, 0.002))], 0.0022, 5, METAL.silver);
+    const disc: V3[] = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      disc.push(c.clone().add(v3(Math.cos(a) * R, Math.sin(a) * R, 0.006)));
+    }
+    out.slab(disc, v3(0, 0, 1), 0.006, METAL.silver);
+    out.torus(c.clone().add(v3(0, 0, 0.0062)), v3(0, 0, 1), R - 0.004, 0.003, fixed(0xe6ebf0, { metal: 0.7, rough: 0.2 }), 24, 5);
+    // the face of it paved with stones: rings of them round one in the middle
+    const stone = (x: number, y: number, r: number, i: number) =>
+      fine.ellipsoid(c.clone().add(v3(x, y, 0.0068)), v3(r, r, r * 0.55), i % 2 ? METAL.diamond : fixed(0xbfe2ff, { metal: 0.3, rough: 0.06 }), 5, 2);
+    stone(0, 0, 0.0052, 1);
+    for (const [n, rr, r] of [[7, 0.0115, 0.0042], [13, 0.0215, 0.004]] as const) {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + rr * 40;
+        stone(Math.cos(a) * rr, Math.sin(a) * rr, r, i);
+      }
+    }
     return;
   }
   if (kind === 'medallion') {
@@ -244,7 +285,7 @@ export function buildNecklace(kind: string, body: BodyQuery, out: ProcMesh, fine
 }
 
 /** A plain chain round the neck dropping `drop` meters onto the chest; returns its path. */
-function buildChainAt(body: BodyQuery, out: ProcMesh, drop: number, rad: number, look: Style): V3[] {
+function buildChainAt(body: BodyQuery, out: ProcMesh, drop: number, rad: number, look: Style, tuck = 0): V3[] {
   const neck = body.joint('Neck');
   const ax = body.neckAxis;
   const yBack = neck.y + 0.016;
@@ -254,7 +295,9 @@ function buildChainAt(body: BodyQuery, out: ProcMesh, drop: number, rad: number,
     const a = (k / N) * Math.PI * 2 - Math.PI;
     const front = Math.max(0, Math.cos(a)) ** 2.2;
     const y = yBack - drop * front;
-    const r = body.torso(a, y) + rad + 0.0024;
+    let r = body.torso(a, y) + rad + 0.0024;
+    // `tuck`: round the back the chain stays in against the neck (under a hood or a collar)
+    if (tuck > 0) r = Math.min(r, body.torso(a, neck.y + 0.06) + tuck + (r - body.torso(a, neck.y + 0.06) - tuck) * Math.max(0, Math.cos(a)) ** 0.6);
     path.push(v3(ax.x + Math.sin(a) * r, y, ax.z + Math.cos(a) * r));
   }
   out.tube(path, path.map((_p, i) => rad * (i % 2 ? 0.85 : 1.1)), 5, look, { flat: true, caps: false });

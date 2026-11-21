@@ -16,30 +16,52 @@ const HEIGHT = 1.8;
 const CROUCH_DROP = 0.52;
 const LOWER_BONES = /^(Root|Body|Hips|UpperLeg|LowerLeg|Foot|PT)/;
 
-/**
- * How each weapon model is held: real-world length (meters), where along its length the
- * hand grips it (0 = butt, 1 = muzzle), whether the model's muzzle already points down -Z
- * after normalization, and a vertical nudge.
- */
-/** Hand grip tuning (rig-specific): how far the wrists turn in, and how the fingers curl. */
+/** Hand grip tuning: how far the wrists turn in for things held loosely (a phone, a bandage), and how far a finger joint curls. */
 const WRIST_TWIST = 0.6;
-const FINGER_AXIS = new THREE.Vector3(1, 0, 0);
-const FINGER_CURL = 0.75;
+const FINGER_CURL = 0.82;
 
-/** Where the support hand holds each long gun (0 = butt, 1 = muzzle): handguard, pump, foregrip. */
-const FOREGRIP: Partial<Record<HeldItem, number>> = { ar: 0.7, smg: 0.66, shotgun: 0.68, sniper: 0.66 };
-
-const GUN_FIT: Record<string, { length: number; grip: number; muzzleNegZ: boolean; up: number }> = {
-  // sized for the characters' stylized (short-armed) proportions
+/**
+ * How each weapon model is held. Positions are measured on the model: along its length from
+ * the butt (0) to the muzzle (1), and down from its top, both as fractions of its length.
+ */
+interface GunFit {
+  /** Real-world length (meters). */
+  length: number;
+  /** Whether the model's muzzle already points down -Z after normalization. */
+  muzzleNegZ: boolean;
+  /** The middle of the pistol grip, where the firing hand closes. */
+  grip: [number, number];
+  /** How far the grip leans back from square to the barrel (radians). */
+  tilt: number;
+  /** The barrel's line, down from the top. */
+  bore: number;
+  /** The underside of the handguard / pump, where the support hand cups it (long guns). */
+  fore?: [number, number];
+  /** The nearest the support hand may come to the butt when the arm cannot reach the handguard. */
+  foreMin?: number;
+  /** The magazine (or loading port), where the support hand goes to reload. */
+  mag?: [number, number];
+}
+const GUN_FIT: Record<string, GunFit> = {
   // (a touch oversized, like most third-person shooters, so the gun reads past the body)
-  ar: { length: 0.9, grip: 0.42, muzzleNegZ: true, up: 0.03 },
-  smg: { length: 0.62, grip: 0.4, muzzleNegZ: false, up: 0.05 },
-  shotgun: { length: 0.95, grip: 0.36, muzzleNegZ: false, up: 0.02 },
-  pistol: { length: 0.27, grip: 0.2, muzzleNegZ: false, up: 0.04 },
+  ar: { length: 0.88, muzzleNegZ: true, grip: [0.307, 0.165], tilt: 0.3, bore: 0.046, fore: [0.72, 0.092], foreMin: 0.56, mag: [0.52, 0.21] },
+  smg: { length: 0.62, muzzleNegZ: false, grip: [0.165, 0.27], tilt: 0.25, bore: 0.064, fore: [0.7, 0.125], foreMin: 0.56, mag: [0.49, 0.33] },
+  shotgun: { length: 0.95, muzzleNegZ: false, grip: [0.125, 0.215], tilt: 0.8, bore: 0.028, fore: [0.6, 0.14], foreMin: 0.42, mag: [0.37, 0.15] },
+  pistol: { length: 0.27, muzzleNegZ: false, grip: [0.075, 0.25], tilt: 0.3, bore: 0.073 },
   // no sniper model yet: the rifle, longer (placeholder art)
-  sniper: { length: 1.1, grip: 0.38, muzzleNegZ: true, up: 0.035 },
-  grenade: { length: 0.11, grip: 0.5, muzzleNegZ: true, up: 0 },
+  sniper: { length: 1.1, muzzleNegZ: true, grip: [0.307, 0.165], tilt: 0.3, bore: 0.046, fore: [0.68, 0.092], foreMin: 0.52, mag: [0.52, 0.21] },
+  grenade: { length: 0.11, muzzleNegZ: true, grip: [0.5, 0.66], tilt: 0, bore: 0.66 },
 };
+
+/** How a hand lies in its wrist bone's own space, measured on the rig in its bind pose. */
+interface HandFrame {
+  /** Turns the hand's own frame (along the palm, across the knuckles, out of the back) to the bone's. */
+  toBone: THREE.Quaternion;
+  /** Wrist to the middle knuckle (meters). */
+  palm: number;
+  /** Each finger joint with the axis (in its own space) it curls around, toward the palm. */
+  curl: Array<{ bone: THREE.Object3D; axis: THREE.Vector3; thumb: boolean }>;
+}
 
 interface ClipSet {
   lower: Map<string, THREE.AnimationClip>;
@@ -289,6 +311,8 @@ export class SkinnedCharacter implements CharacterVisual {
   private arms: { L: Arm | null; R: Arm | null } = { L: null, R: null };
   /** Finger joints per hand (curled into a grip around a gun). */
   private fingers: { L: THREE.Object3D[]; R: THREE.Object3D[] } = { L: [], R: [] };
+  /** How each hand lies on its wrist bone (so it can be turned to wrap a grip). */
+  private hands: { L: HandFrame | null; R: HandFrame | null } = { L: null, R: null };
   /** Seconds spent hanging from balloons (drives the swing); -1 = not hanging. */
   private hangT = -1;
   /**
@@ -390,6 +414,42 @@ export class SkinnedCharacter implements CharacterVisual {
       }
     }
 
+    // how each hand lies on its wrist bone, measured now (the rig is still in its bind pose,
+    // arms out, palms down): the direction along the palm, across the knuckles and out of the palm
+    this.root.updateMatrixWorld(true);
+    for (const side of ['L', 'R'] as const) {
+      const arm = this.arms[side];
+      const mid = bone(`Middle2${side}`), index = bone(`Index2${side}`), pinky = bone(`Pinky2${side}`);
+      if (!arm || !mid || !index || !pinky) continue;
+      const wp = arm.wrist.getWorldPosition(new THREE.Vector3());
+      const axis = mid.getWorldPosition(new THREE.Vector3()).sub(wp);
+      const palm = axis.length();
+      axis.normalize();
+      const across = index.getWorldPosition(new THREE.Vector3()).sub(pinky.getWorldPosition(new THREE.Vector3()));
+      across.addScaledVector(axis, -across.dot(axis)).normalize();
+      const out = new THREE.Vector3().crossVectors(axis, across);
+      // the palm faces down in the bind pose
+      const palmDir = out.y < 0 ? out.clone() : out.clone().negate();
+      const wq = arm.wrist.getWorldQuaternion(new THREE.Quaternion());
+      const basis = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(axis, across, out));
+      // a hand frame turned by `toBone` is the bone's own frame
+      const toBone = basis.clone().invert().multiply(wq);
+      const curlAxis = new THREE.Vector3().crossVectors(axis, palmDir).normalize();
+      const curl: HandFrame['curl'] = [];
+      for (const f of this.fingers[side]) {
+        curl.push({ bone: f, axis: curlAxis.clone().applyQuaternion(f.getWorldQuaternion(new THREE.Quaternion()).invert()), thumb: false });
+      }
+      for (const j of [2, 3]) {
+        const t = bone(`Thumb${j}${side}`);
+        if (!t) continue;
+        // the thumb closes across the palm, toward the fingers
+        const dir = (bone(`Thumb3${side}`) ?? t).getWorldPosition(new THREE.Vector3()).sub((bone(`Thumb2${side}`) ?? t).getWorldPosition(new THREE.Vector3()));
+        const ax = dir.lengthSq() > 1e-8 ? new THREE.Vector3().crossVectors(dir.normalize(), palmDir).normalize() : curlAxis.clone();
+        curl.push({ bone: t, axis: ax.applyQuaternion(t.getWorldQuaternion(new THREE.Quaternion()).invert()), thumb: true });
+      }
+      this.hands[side] = { toBone, palm, curl };
+    }
+
     const adjusted = new Set<THREE.Object3D>();
     for (const b of [this.body, this.spine, this.chest, this.head]) if (b) adjusted.add(b);
     for (const leg of this.legs) {
@@ -403,6 +463,7 @@ export class SkinnedCharacter implements CharacterVisual {
       adjusted.add(arm.wrist);
     }
     for (const b of [...this.fingers.L, ...this.fingers.R]) adjusted.add(b);
+    for (const h of [this.hands.L, this.hands.R]) for (const c of h?.curl ?? []) adjusted.add(c.bone);
     for (const b of adjusted) this.touched.push({ bone: b, q: b.quaternion.clone(), p: b.position.clone() });
 
     // something held in the mouth rides on the head bone, placed at the lips
@@ -669,14 +730,16 @@ export class SkinnedCharacter implements CharacterVisual {
     if (key !== 'grenade') applyWeaponSkin(g, this.look.weaponSkin, template.size);
     const s = fit.length / template.size.z;
     g.scale.setScalar(s);
-    // template: long axis on +Z, origin at bottom center. We want the barrel on -Z and the grip at the origin.
+    // template: long axis on +Z, origin at bottom center. We want the barrel on -Z and the middle
+    // of the pistol grip at the origin (that is where the firing hand closes).
     g.rotation.y = fit.muzzleNegZ ? 0 : Math.PI;
-    // after the turn the muzzle is at z = -length/2 and the butt at +length/2, so the grip point
-    // (`grip` of the way up from the butt) is at z = length * (0.5 - grip): slide it to the origin
-    g.position.set(0, -template.size.y * s * 0.5 + fit.up, -fit.length * (0.5 - fit.grip));
+    // after the turn the muzzle is at z = -length/2 and the butt at +length/2, so the grip
+    // (`grip[0]` of the way up from the butt) is at z = length * (0.5 - grip[0]): slide it to the
+    // origin; and the model's top goes `grip[1]` lengths above it
+    g.position.set(0, fit.grip[1] * fit.length - template.size.y * s, -fit.length * (0.5 - fit.grip[0]));
     this.gun = g;
     this.gunMount.add(g);
-    this.muzzle.position.set(0, fit.up + 0.01, -(fit.length * (1 - fit.grip)));
+    this.muzzle.position.set(0, (fit.grip[1] - fit.bore) * fit.length, -(fit.length * (1 - fit.grip[0])));
   }
 
   update(dt: number, pose: CharacterPose, visible = true): void {
@@ -922,61 +985,81 @@ export class SkinnedCharacter implements CharacterVisual {
     pitch += this.recoil * 0.1;
     this.gunMount.rotation.set(pitch, yaw, roll, 'YXZ');
     if (armed && this.arms.R) {
-      // guns are held where the character aims, and the hands go to the gun: a long gun is
-      // tucked into the right shoulder with the left hand out on the handguard; a pistol is
-      // held out in the right hand alone
+      // Guns are held where the character aims, and the hands go to the gun. A long gun: butt
+      // in the right shoulder, the right hand closed round the pistol grip, the left cupping
+      // the handguard from below (from the hip the same, lower and off the shoulder). A
+      // pistol: out in the right hand, up at eye level when aiming.
+      const fit = GUN_FIT[held] ?? GUN_FIT.ar;
+      const L = fit.length;
       const q = this.gunMount.quaternion;
       const rq = this.root.quaternion;
       const sh = this.root.worldToLocal(this.arms.R.upper.getWorldPosition(new THREE.Vector3()));
-      // from the hip a long gun is held out on the right side (so it shows past the body from
-      // the over-the-shoulder camera); aiming brings it up into the shoulder at cheek height.
-      // A pistol is held out at arm's length, up at eye level when aiming.
       const a = this.aimT * this.aimT * (3 - 2 * this.aimT);
-      const want = new THREE.Vector3(
-        lerp(twoHand ? 0.07 : -0.02, twoHand ? -0.02 : -0.1, a),
-        lerp(twoHand ? -0.16 : -0.06, twoHand ? 0.01 : 0.03, a),
-        lerp(twoHand ? -0.3 : -0.38, twoHand ? -0.24 : -0.46, a),
-      ).applyQuaternion(q).add(sh);
+      // where the grip goes, from the right shoulder, in the gun's own directions (right, up, back)
+      let want: THREE.Vector3;
+      if (twoHand) {
+        // aimed: the barrel just above the shoulder, the butt back against it
+        const aimY = 0.06 - (fit.grip[1] - fit.bore) * L, aimZ = -Math.max(0.27, Math.min(0.31, fit.grip[0] * L + 0.02));
+        // from the hip: lower, and out to the right so it shows past the body from behind
+        want = new THREE.Vector3(lerp(0.075, -0.045, a), lerp(aimY - 0.14, aimY, a), lerp(aimZ + 0.03, aimZ, a));
+      } else {
+        want = new THREE.Vector3(lerp(-0.02, -0.1, a), lerp(-0.1, 0.03, a), lerp(-0.38, -0.46, a));
+      }
+      want.applyQuaternion(q).add(sh);
       want.addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(q), this.recoil * 0.05);
-      // right hand to the grip (the wrist sits just behind it)...
-      const back = new THREE.Vector3(0, -0.012, 0.055).applyQuaternion(q);
-      reach(this.arms.R, this.root.localToWorld(want.clone().add(back)), new THREE.Vector3(1, -1.3, 0.5).applyQuaternion(rq));
+      // the right hand round the grip: knuckles forward (square to the grip, which leans back),
+      // index finger up by the trigger, palm against the grip's right side
+      const hr = this.hands.R;
+      const ct = Math.cos(fit.tilt), st = Math.sin(fit.tilt);
+      const axisR = new THREE.Vector3(-0.16, -st, -ct).normalize().applyQuaternion(q);
+      const upR = new THREE.Vector3(0, ct, -st).applyQuaternion(q);
+      // (the wrist, from the middle of the grip: the hand's bones run along its right side)
+      const off = new THREE.Vector3(0.024, 0.004, 0.006).applyQuaternion(q).addScaledVector(axisR, -(hr?.palm ?? 0.1) * 0.56);
+      reach(this.arms.R, this.root.localToWorld(want.clone().add(off)), new THREE.Vector3(1, -1.3, 0.5).applyQuaternion(rq));
       // ...and the gun goes wherever the hand actually got to, so it never floats
-      const grip = this.root.worldToLocal(this.arms.R.wrist.getWorldPosition(new THREE.Vector3())).sub(back);
+      const grip = this.root.worldToLocal(this.arms.R.wrist.getWorldPosition(new THREE.Vector3())).sub(off);
       this.gunMount.position.copy(grip);
-      if (twoHand && this.arms.L) {
-        const fit = GUN_FIT[held];
+      this.turnHand('R', axisR.applyQuaternion(rq), upR.applyQuaternion(rq));
+      this.closeHand('R', 1);
+      if (twoHand && this.arms.L && fit.fore) {
+        const hl = this.hands.L;
         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
-        const down = new THREE.Vector3(0, -0.035, 0).applyQuaternion(q);
-        const wristBack = new THREE.Vector3(-0.025, -0.015, 0.05).applyQuaternion(q);
-        // the support hand goes as far out along the handguard as the arm reaches
+        // the left hand comes up under the handguard from the left: palm up and a little in
+        const palmUp = new THREE.Vector3(0.34, 0.94, 0).normalize().applyQuaternion(q);
+        const axisL = new THREE.Vector3(0.66, 0.2, -0.72).normalize().applyQuaternion(q);
+        axisL.addScaledVector(palmUp, -axisL.dot(palmUp)).normalize();
+        // (for a left hand: across the knuckles = out of the palm x along the palm)
+        const acrossL = new THREE.Vector3().crossVectors(palmUp, axisL);
+        const under = new THREE.Vector3(0, (fit.grip[1] - fit.fore[1]) * L, 0).applyQuaternion(q);
+        const wristOff = palmUp.clone().multiplyScalar(-0.02).addScaledVector(axisL, -(hl?.palm ?? 0.1) * 0.5);
+        // as far out along the handguard as the arm reaches
         const shL = this.arms.L.upper.getWorldPosition(new THREE.Vector3());
         const elL = this.arms.L.lower.getWorldPosition(new THREE.Vector3());
         const wrL = this.arms.L.wrist.getWorldPosition(new THREE.Vector3());
-        const armLen = (shL.distanceTo(elL) + elL.distanceTo(wrL)) * 0.97;
+        const armLen = (shL.distanceTo(elL) + elL.distanceTo(wrL)) * 0.985;
         const shLl = this.root.worldToLocal(shL.clone());
-        let along = (fit?.length ?? 0.8) * ((FOREGRIP[held] ?? 0.7) - (fit?.grip ?? 0.4));
+        let along = (fit.fore[0] - fit.grip[0]) * L;
+        const nearest = ((fit.foreMin ?? fit.fore[0]) - fit.grip[0]) * L;
         const hand = new THREE.Vector3();
-        for (let i = 0; i < 12; i++) {
-          hand.copy(grip).addScaledVector(dir, along).add(down).add(wristBack);
-          if (hand.distanceTo(shLl) <= armLen || along < 0.06) break;
-          along *= 0.88;
+        for (let i = 0; i < 14; i++) {
+          hand.copy(grip).addScaledVector(dir, along).add(under).add(wristOff);
+          if (hand.distanceTo(shLl) <= armLen || along <= nearest) break;
+          along = Math.max(nearest, along - 0.02);
         }
-        if (reload > 0) {
+        if (reload > 0 && fit.mag) {
           // left hand down to the magazine and back
-          const mag = new THREE.Vector3(0.02, -0.13, -0.08).applyQuaternion(q).add(grip);
+          const mag = new THREE.Vector3(0, (fit.grip[1] - fit.mag[1]) * L, -(fit.mag[0] - fit.grip[0]) * L).applyQuaternion(q).add(grip).add(wristOff);
           hand.lerp(mag, reload);
         }
         reach(this.arms.L, this.root.localToWorld(hand), new THREE.Vector3(-1, -1.4, 0.3).applyQuaternion(rq));
+        this.turnHand('L', axisL.applyQuaternion(rq), acrossL.applyQuaternion(rq));
+        this.closeHand('L', 0.8);
       } else if (this.arms.L) {
         // pistol: the free arm hangs relaxed at the side
         const shL = this.root.worldToLocal(this.arms.L.upper.getWorldPosition(new THREE.Vector3()));
         const rest = shL.add(new THREE.Vector3(-0.07, -0.4, 0.05 + Math.sin(this.phase * Math.PI * 2) * 0.07 * this.moveT));
         reach(this.arms.L, this.root.localToWorld(rest), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
       }
-      // close the hands around the gun: turn the palms in and curl the fingers
-      this.grip('R', twoHand ? WRIST_TWIST : WRIST_TWIST * 0.6, 1);
-      if (twoHand) this.grip('L', -WRIST_TWIST, 0.75);
     } else if (this.handR) {
       // throwables (and nothing) ride in the right hand wherever the clip puts it
       this.handR.getWorldPosition(_v1);
@@ -1093,11 +1176,18 @@ export class SkinnedCharacter implements CharacterVisual {
   private healProp: THREE.Group | null = null;
   private healPropKind = -1;
 
-  /** The item in hand: a first-aid kit, a bandage roll or a drink bottle. */
+  /** The item in hand: a first-aid kit, a bandage roll, a drink bottle or a bottle of ibuprofen. */
   private makeHealProp(kind: number): THREE.Group {
     const g = new THREE.Group();
     const mat = (c: number, rough = 0.6) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, flatShading: true });
-    if (kind === 2) {
+    if (kind === 3) {
+      // an orange pill bottle with a white cap and label
+      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.075, 10), mat(0xf08a1c, 0.35));
+      const label = new THREE.Mesh(new THREE.CylinderGeometry(0.0225, 0.0225, 0.032, 10), mat(0xffffff, 0.7));
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.02, 10), mat(0xffffff, 0.5));
+      cap.position.y = 0.046;
+      g.add(bottle, label, cap);
+    } else if (kind === 2) {
       const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 0.17, 10), mat(0x2f9be8, 0.3));
       const label = new THREE.Mesh(new THREE.CylinderGeometry(0.037, 0.037, 0.07, 10), mat(0xff7a1a));
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 8), mat(0xffffff));
@@ -1153,9 +1243,9 @@ export class SkinnedCharacter implements CharacterVisual {
     const right = _v5.set(Math.cos(this.root.rotation.y), 0, -Math.sin(this.root.rotation.y));
     const at = (v: THREE.Vector3) => this.root.localToWorld(v.clone());
     let headPitch = -0.35;
-    if (kind === 2) {
-      // drink: bottle up to the mouth, tipping back in sips
-      const sip = 0.5 + 0.5 * Math.sin(t * 3.2);
+    if (kind === 2 || kind === 3) {
+      // drink: bottle up to the mouth, tipping back in sips (pills: shaken out and tossed back)
+      const sip = kind === 3 ? Math.max(0, Math.sin(t * 4.5)) : 0.5 + 0.5 * Math.sin(t * 3.2);
       reach(R, at(shR.clone().add(new THREE.Vector3(-0.1, 0.14 + 0.03 * sip, -0.12))), new THREE.Vector3(1, -1.2, 0.3).applyQuaternion(rq));
       reach(L, at(shL.clone().add(new THREE.Vector3(0.0, -0.45, 0.05))), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
       headPitch = 0.25 + 0.12 * sip;
@@ -1176,7 +1266,7 @@ export class SkinnedCharacter implements CharacterVisual {
       rotateBoneWorld(this.head, _q1);
     }
     // the item rides in its hand (just past the wrist, on the palm side)
-    const arm = kind === 2 ? R : L;
+    const arm = kind === 2 || kind === 3 ? R : L;
     const wr = arm.wrist.getWorldPosition(new THREE.Vector3());
     const el = arm.lower.getWorldPosition(new THREE.Vector3());
     const hand = wr.clone().addScaledVector(wr.clone().sub(el).normalize(), 0.07);
@@ -1184,12 +1274,15 @@ export class SkinnedCharacter implements CharacterVisual {
     if (kind === 2) {
       // tipped toward the mouth
       this.healProp.rotation.set(-0.9 - 0.3 * Math.sin(t * 3.2), 0, 0);
+    } else if (kind === 3) {
+      // tipped right up to shake a pill out
+      this.healProp.rotation.set(-1.4 - 0.5 * Math.max(0, Math.sin(t * 4.5)), 0, 0);
     } else {
       this.healProp.rotation.set(-0.5, 0, 0);
     }
   }
 
-  /** Turns a hand's palm in (a twist about the forearm) and curls its fingers into a grip. */
+  /** Turns a hand's palm in (a twist about the forearm) and curls its fingers into a loose grip. */
   private grip(side: 'L' | 'R', twist: number, curl: number): void {
     const arm = this.arms[side];
     if (!arm) return;
@@ -1197,7 +1290,42 @@ export class SkinnedCharacter implements CharacterVisual {
     const axis = arm.wrist.getWorldPosition(new THREE.Vector3()).sub(el).normalize();
     _q1.setFromAxisAngle(axis, twist);
     rotateBoneWorld(arm.wrist, _q1);
-    for (const f of this.fingers[side]) f.rotateOnAxis(FINGER_AXIS, FINGER_CURL * curl);
+    this.closeHand(side, curl);
+  }
+
+  /**
+   * Points a hand: `along` is the way from the wrist to the knuckles, `across` the way from
+   * the little finger to the index (both in world space). The forearm takes part of the turn,
+   * so the wrist does not look wrung.
+   */
+  private turnHand(side: 'L' | 'R', along: THREE.Vector3, across: THREE.Vector3): void {
+    const arm = this.arms[side], h = this.hands[side];
+    if (!arm || !h) return;
+    const a = along.clone().normalize();
+    const c = across.clone().addScaledVector(a, -across.dot(a)).normalize();
+    const want = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(a, c, new THREE.Vector3().crossVectors(a, c))).multiply(h.toBone);
+    // the part of the turn that is a roll about the forearm goes half to the forearm itself
+    const el = arm.lower.getWorldPosition(new THREE.Vector3());
+    const fore = arm.wrist.getWorldPosition(new THREE.Vector3()).sub(el).normalize();
+    const now = arm.wrist.getWorldQuaternion(new THREE.Quaternion());
+    const delta = want.clone().multiply(now.invert());
+    const proj = fore.clone().multiplyScalar(delta.x * fore.x + delta.y * fore.y + delta.z * fore.z);
+    const twist = new THREE.Quaternion(proj.x, proj.y, proj.z, delta.w);
+    if (twist.lengthSq() > 1e-8) {
+      twist.normalize();
+      if (twist.w < 0) twist.set(-twist.x, -twist.y, -twist.z, -twist.w);
+      _q1.identity().slerp(twist, 0.5);
+      rotateBoneWorld(arm.lower, _q1);
+    }
+    arm.wrist.parent!.getWorldQuaternion(_q2);
+    arm.wrist.quaternion.copy(_q2.invert().multiply(want));
+  }
+
+  /** Curls a hand's fingers toward the palm (1 = a fist round a grip). */
+  private closeHand(side: 'L' | 'R', amount: number): void {
+    const h = this.hands[side];
+    if (!h) return;
+    for (const c of h.curl) c.bone.rotateOnAxis(c.axis, FINGER_CURL * amount * (c.thumb ? 0.45 : 1));
   }
 
   /** Runs the relaxed full-body clip as the base for a procedural pose (hanging, skydiving). */

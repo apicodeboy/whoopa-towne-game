@@ -281,9 +281,6 @@
 .announce.good {
   color: var(--accent);
 }
-.air-label span {
-  color: var(--accent);
-}
 .dmg-pop {
   font-family: var(--font-ui);
   font-weight: 900;

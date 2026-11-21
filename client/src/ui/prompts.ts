@@ -4,7 +4,7 @@ import type { DeviceKind } from '../input/types';
 /** Things the player can do that have a button. */
 export type Action =
   | 'move' | 'look' | 'fire' | 'aim' | 'reload' | 'jump' | 'crouch' | 'sprint'
-  | 'swap' | 'throw' | 'shoulder' | 'scores' | 'pause' | 'accept' | 'back'
+  | 'swap' | 'prev' | 'weapons' | 'wheel' | 'throw' | 'shoulder' | 'scores' | 'pause' | 'accept' | 'back'
   // JUMP OFF THE PORCH
   | 'slots' | 'use' | 'heal' | 'drop';
 
@@ -27,6 +27,9 @@ const KBM: GlyphSet = {
   crouch: { t: 'C' },
   sprint: { t: 'Shift' },
   swap: { t: '1 2 3' },
+  prev: { t: 'Wheel' },
+  weapons: { t: '1 2 3' },
+  wheel: { t: 'B' },
   throw: { t: 'G' },
   shoulder: { t: 'Q' },
   scores: { t: 'Tab' },
@@ -43,19 +46,22 @@ const XBOX: GlyphSet = {
   move: { t: 'L', c: 'stick' },
   look: { t: 'R', c: 'stick' },
   fire: { t: 'RT', c: 'trig' },
-  aim: { t: 'LT', c: 'trig' },
+  aim: { t: 'LB', c: 'bump' },
   reload: { t: 'X', c: 'face xb-x' },
   jump: { t: 'A', c: 'face xb-a' },
   crouch: { t: 'B', c: 'face xb-b' },
   sprint: { t: 'LS', c: 'stick' },
-  swap: { t: 'Y', c: 'face xb-y' },
-  throw: { t: 'LB', c: 'bump' },
-  shoulder: { t: 'RB', c: 'bump' },
+  swap: { t: 'RB', c: 'bump' },
+  prev: { t: 'LT', c: 'trig' },
+  weapons: { t: 'LT', c: 'trig' },
+  wheel: { t: 'LT', c: 'trig' },
+  throw: { t: 'Y', c: 'face xb-y' },
+  shoulder: { t: 'RS', c: 'stick' },
   scores: { t: 'View', c: 'sys' },
   pause: { t: 'Menu', c: 'sys' },
   accept: { t: 'A', c: 'face xb-a' },
   back: { t: 'B', c: 'face xb-b' },
-  slots: { t: 'Y', c: 'face xb-y' },
+  slots: { t: 'RB', c: 'bump' },
   use: { t: '▼', c: 'sys' },
   heal: { t: '' },
   drop: { t: '' },
@@ -65,19 +71,22 @@ const PLAYSTATION: GlyphSet = {
   move: { t: 'L', c: 'stick' },
   look: { t: 'R', c: 'stick' },
   fire: { t: 'R2', c: 'trig' },
-  aim: { t: 'L2', c: 'trig' },
+  aim: { t: 'L1', c: 'bump' },
   reload: { t: '□', c: 'face ps-square' },
   jump: { t: '✕', c: 'face ps-cross' },
   crouch: { t: '○', c: 'face ps-circle' },
   sprint: { t: 'L3', c: 'stick' },
-  swap: { t: '△', c: 'face ps-triangle' },
-  throw: { t: 'L1', c: 'bump' },
-  shoulder: { t: 'R1', c: 'bump' },
+  swap: { t: 'R1', c: 'bump' },
+  prev: { t: 'L2', c: 'trig' },
+  weapons: { t: 'L2', c: 'trig' },
+  wheel: { t: 'L2', c: 'trig' },
+  throw: { t: '△', c: 'face ps-triangle' },
+  shoulder: { t: 'R3', c: 'stick' },
   scores: { t: 'Create', c: 'sys' },
   pause: { t: 'Options', c: 'sys' },
   accept: { t: '✕', c: 'face ps-cross' },
   back: { t: '○', c: 'face ps-circle' },
-  slots: { t: '△', c: 'face ps-triangle' },
+  slots: { t: 'R1', c: 'bump' },
   use: { t: '▼', c: 'sys' },
   heal: { t: '' },
   drop: { t: '' },
@@ -89,7 +98,7 @@ const GENERIC: GlyphSet = {
   reload: { t: 'X', c: 'face' },
   jump: { t: 'A', c: 'face' },
   crouch: { t: 'B', c: 'face' },
-  swap: { t: 'Y', c: 'face' },
+  throw: { t: 'Y', c: 'face' },
   accept: { t: 'A', c: 'face' },
   back: { t: 'B', c: 'face' },
   scores: { t: 'Select', c: 'sys' },
@@ -113,14 +122,17 @@ export const ACTION_LABELS: Record<Action, string> = {
   jump: 'Jump',
   crouch: 'Crouch',
   sprint: 'Sprint',
-  swap: 'Weapons',
+  swap: 'Next weapon',
+  prev: 'Previous weapon',
+  weapons: 'Weapons',
+  wheel: 'Wheel (hold)',
   throw: 'Throw',
   shoulder: 'Swap shoulder',
   scores: 'Scores',
   pause: 'Menu',
   accept: 'Select',
   back: 'Back',
-  slots: 'Slots',
+  slots: 'Weapons',
   use: 'Search / pick up',
   heal: 'Heal',
   drop: 'Drop',
@@ -129,11 +141,11 @@ export const ACTION_LABELS: Record<Action, string> = {
 /** Which binding an on-screen action reads its key / button from (Settings → Controls). */
 const KEY_OF: Partial<Record<Action, KeyAction>> = {
   jump: 'jump', crouch: 'crouch', sprint: 'sprint', reload: 'reload', throw: 'throw', shoulder: 'shoulder',
-  use: 'use', heal: 'heal', drop: 'drop', scores: 'scores',
+  use: 'use', heal: 'heal', drop: 'drop', wheel: 'wheel', scores: 'scores',
 };
 const PAD_OF: Partial<Record<Action, PadAction>> = {
   fire: 'fire', aim: 'aim', jump: 'jump', crouch: 'crouch', sprint: 'sprint', reload: 'reload', swap: 'swap', slots: 'swap',
-  throw: 'throw', shoulder: 'shoulder', use: 'use', heal: 'heal', scores: 'scores',
+  prev: 'prev', wheel: 'prev', throw: 'throw', shoulder: 'shoulder', use: 'use', heal: 'heal', scores: 'scores',
 };
 
 /** The glyph for an action on a device, following the player's own bindings. */
@@ -151,6 +163,8 @@ function glyphOf(device: DeviceKind, action: Action): Glyph | null {
 
 /** HTML for the button glyph of an action on the given device ('' on touch). */
 export function glyphHtml(device: DeviceKind, action: Action): string {
+  // previous / next weapon: both buttons on a controller
+  if ((action === 'weapons' || action === 'slots') && device !== 'kbm' && device !== 'touch') return glyphHtml(device, 'prev') + glyphHtml(device, 'swap');
   const g = glyphOf(device, action);
   if (!g) return '';
   const kind = device === 'kbm' ? 'key' : 'pad';
@@ -169,9 +183,9 @@ export function legendHtml(device: DeviceKind, actions: readonly Action[]): stri
   return actions.filter((a) => glyphOf(device, a)?.t).map((a) => `<span class="lg">${glyphHtml(device, a)}<span>${ACTION_LABELS[a]}</span></span>`).join('');
 }
 
-export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'swap', 'throw', 'shoulder', 'scores', 'pause'];
+export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'weapons', 'wheel', 'throw', 'shoulder', 'scores', 'pause'];
 /** JUMP OFF THE PORCH: inventory slots, searching, healing and dropping instead of the classic swap. */
-export const PORCH_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'slots', 'use', 'heal', 'drop', 'throw', 'scores', 'pause'];
+export const PORCH_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'slots', 'wheel', 'use', 'heal', 'drop', 'throw', 'scores', 'pause'];
 export const FULL_LEGEND: readonly Action[] = ['move', 'look', ...GAMEPLAY_LEGEND];
 
 export function deviceName(device: DeviceKind): string {

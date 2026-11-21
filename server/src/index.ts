@@ -8,6 +8,7 @@ import { GAME_NAME, NET, ROOM_NAME } from '../../shared/src/config/game.ts';
 import { setupEconomy } from './economy/index.ts';
 import { initRapier } from './rapier.ts';
 import { MatchRoom } from './rooms/MatchRoom.ts';
+import { setupScores } from './scores.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT ?? NET.defaultPort);
@@ -86,6 +87,8 @@ export async function startServer(listenPort = port): Promise<Server> {
           ...(dev ? ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'http://127.0.0.1:5173'] : []),
         ],
       });
+      // live scores for the billboards (the server asks ESPN, at most once a minute)
+      setupScores(app);
       app.get('/healthz', async (_req, res) => {
         const rooms = await matchMaker.query({ name: ROOM_NAME });
         res.json({

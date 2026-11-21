@@ -194,8 +194,59 @@ function shortStrands(h: HeadRig, out: ProcMesh, count: number, seed: number): v
   });
 }
 
-/** Builds one of the procedural hairstyles. Returns false for an id it does not know. */
-export function buildHair(id: string, h: HeadRig, out: ProcMesh): boolean {
+/**
+ * Freeform locs standing out from the head in every direction: thick at the root and tapering
+ * (to a point for spikes, blunt for wicks), each bending a little its own way. The ones on top
+ * stand up, the ones round the sides and back stand out and hang, and the ones along the
+ * hairline lean away from the face.
+ */
+function standingLocs(
+  h: HeadRig, out: ProcMesh, o: { count: number; length: [number, number]; radius: [number, number]; tip: number; splay: number; droop: number; seed: number },
+  below = 0.014, covered?: (theta: number, y: number) => boolean,
+): void {
+  roots(h, o.count, below).forEach(([theta, phi], i) => {
+    // under a hat there are no standing locs: only the ones that come out below it
+    if (covered?.(theta, h.surface(theta, phi).y)) return;
+    const n = h.normal(theta, phi);
+    const r1 = hash01(i, o.seed), r2 = hash01(i, o.seed + 1), r3 = hash01(i, o.seed + 2), r4 = hash01(i, o.seed + 3);
+    const len = lerp(o.length[0], o.length[1], r1);
+    const rad = lerp(o.radius[0], o.radius[1], r4);
+    // out from the scalp, splayed at random round and up/down
+    const round = v3(n.z, 0, -n.x);
+    if (round.lengthSq() < 1e-6) round.set(1, 0, 0);
+    round.normalize();
+    const up = v3().crossVectors(round, n);
+    const dir = n.clone().addScaledVector(round, (r2 - 0.5) * o.splay).addScaledVector(up, (r3 - 0.5) * o.splay * 0.8);
+    // along the front hairline they lean up and back, so the face stays clear
+    const front = Math.max(0, Math.cos(theta)) * smoothstep(0.75, 0.2, phi);
+    dir.y += 0.55 * front;
+    dir.z -= 0.25 * front;
+    // low on the sides and the back they point down and out, over the ears and the collar
+    dir.y -= 1.7 * smoothstep(0.55, -0.1, phi) * (1 - front);
+    dir.normalize();
+    // the lower on the head a loc starts, the more its own weight bends it down
+    const hang = o.droop * (1 - Math.max(0, n.y)) * (1 - 0.6 * front);
+    const N = 4, seg = len / N;
+    const p = h.surface(theta, phi, -0.006);
+    const path: V3[] = [], radii: number[] = [];
+    for (let k = 0; k <= N; k++) {
+      const f = k / N;
+      path.push(p.clone());
+      radii.push(rad * lerp(1, o.tip, Math.pow(f, 1.25)) * (k === 0 ? 0.9 : 1));
+      dir.y -= hang * seg * 7;
+      dir.normalize();
+      p.addScaledVector(dir, seg);
+    }
+    // (smooth, shared vertices: there are a lot of these)
+    out.tube(path, radii, 6, style(SLOT.HAIR, { shade: 0.9 + 0.22 * hash01(i, o.seed + 7) }), { flat: false });
+  });
+}
+
+/**
+ * Builds one of the procedural hairstyles. Returns false for an id it does not know.
+ * `covered`: what a hat covers (locs that stand up are left out there).
+ */
+export function buildHair(id: string, h: HeadRig, out: ProcMesh, covered?: (theta: number, y: number) => boolean): boolean {
   const crownDir = v3(0, 1, -0.25).normalize();
   const crownAngle = (p: V3) => Math.acos(Math.min(1, v3().subVectors(p, h.center).normalize().dot(crownDir)));
   switch (id) {
@@ -326,6 +377,16 @@ export function buildHair(id: string, h: HeadRig, out: ProcMesh): boolean {
       // shoulder-length locs, thicker and fewer than dreads
       hairShell(h, out, { thick: () => 0.006, look: () => style(SLOT.HAIR, { shade: 0.78 }) });
       longStrands(h, out, { count: 46, length: [0.17, 0.24], radius: 0.0088, seed: 21 });
+      return true;
+    case 'spikylocs':
+      // big freeform locs spiking out all round: the head reads twice its size
+      hairShell(h, out, { thick: () => 0.012, taper: 0.4, look: () => style(SLOT.HAIR, { shade: 0.85 }) });
+      standingLocs(h, out, { count: 84, length: [0.13, 0.225], radius: [0.019, 0.026], tip: 0.2, splay: 0.75, droop: 0.9, seed: 31 }, 0.036, covered);
+      return true;
+    case 'wicks':
+      // a few fat wicks standing up and out
+      hairShell(h, out, { thick: () => 0.011, taper: 0.4, look: () => style(SLOT.HAIR, { shade: 0.85 }) });
+      standingLocs(h, out, { count: 26, length: [0.085, 0.135], radius: [0.027, 0.034], tip: 0.72, splay: 0.45, droop: 0.4, seed: 47 }, 0.02, covered);
       return true;
     case 'twists': {
       // two-strand twists standing up and out: short spiralled strands all over

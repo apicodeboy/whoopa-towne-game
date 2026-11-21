@@ -162,8 +162,8 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
   };
   const seam = (d: number, w = 0.0025, k = 0.18) => 1 - k * Math.exp(-((d / w) ** 2));
 
-  // tee
-  out.push(top({ material: 'Top_Tee', offset: 0.004, drape: [0.158, 0.112], hem: 0.93, sleeve: 0.42, sleeveR: [0.058, 0.052], neck: 0.066, neckY: 1.46, folds: 0.003, th: 0.0055, h: 0.0027, tris: 2200 }));
+  // tee: boxy and oversized (dropped shoulders, wide sleeves to the elbow, a long straight hem)
+  out.push(top({ material: 'Top_Tee', offset: 0.006, drape: [0.18, 0.126], hem: 0.875, sleeve: 0.5, sleeveR: [0.074, 0.07], neck: 0.064, neckY: 1.465, folds: 0.003, th: 0.006, h: 0.0029, tris: 2600 }));
   // tank: deep armholes, a scoop neck
   out.push(top({ material: 'Top_Tank', offset: 0.003, drape: [0.15, 0.106], hem: 0.93, sleeve: 0, sleeveR: [0, 0], neck: 0.078, neckY: 1.42, folds: 0.002, th: 0.0055, h: 0.0027, tris: 1500, cuts: [armhole(-0.025), (x, y) => (y > 1.355 ? Math.abs(Math.abs(x) - 0.068) - 0.019 : -1)] }));
   // crop: a short boxy tee
@@ -224,36 +224,79 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
     out.push({ part: 'Body', material: 'Top_ZipHoodie_Trim', sdf: teeth, min: [-0.035, 0.86, cz + 0.02], max: [0.035, 1.48, cz + 0.22], h: 0.0011, tris: 420, allow: noHead });
   }
 
-  // ---- puffer jacket: thick, quilted in horizontal baffles, stand-up collar
-  const baffle = (pitch: number, amp: number) => (x: number, y: number, z: number): number => {
-    if (Math.abs(x) > Math.abs(arms.L.sh[0]) + 0.01 && y > 1.3) {
-      const { u } = armCoords(x, y, z);
-      return amp * Math.sqrt(Math.abs(Math.sin((u * Math.PI) / (pitch * 1.1))));
-    }
-    return amp * Math.sqrt(Math.abs(Math.sin(((y - 0.86) * Math.PI) / pitch)));
+  // ---- puffers: big clean horizontal baffles, cropped at the waist. The jacket has its hood
+  // lying on the back and a short collar; the vest a tall stand collar and wide armholes, worn
+  // over a long sleeve. Both zip up the front (the zip is its own piece, so it can be silver).
+  const PUFF_HEM = 0.985, PUFF_PITCH = 0.086;
+  const baffleAt = (x: number, y: number, z: number): number => {
+    if (Math.abs(x) > Math.abs(arms.L.sh[0]) + 0.01 && y > 1.3) return armCoords(x, y, z).u / (PUFF_PITCH * 1.08);
+    return (y - PUFF_HEM) / PUFF_PITCH;
   };
+  /** How far a baffle stands out between two stitch lines (0 at the seam). */
+  const baffle = (amp: number) => (x: number, y: number, z: number): number => amp * Math.pow(Math.abs(Math.sin(baffleAt(x, y, z) * Math.PI)), 0.55);
   const collar = (r: number, y0: number, y1: number): SDF => vtube(0, cz + 0.008, y0, y1, r, r * 0.92, r * 0.96, r * 0.9);
-  const pufferSeams = (pitch: number) => (x: number, y: number, z: number) => {
-    let v: number;
-    if (Math.abs(x) > Math.abs(arms.L.sh[0]) + 0.01 && y > 1.3) v = armCoords(x, y, z).u / (pitch * 1.1);
-    else v = (y - 0.86) / pitch;
+  const pufferSeams = (x: number, y: number, z: number) => {
+    const v = baffleAt(x, y, z);
     const f = v - Math.round(v);
-    return 1 - 0.32 * Math.exp(-((f / 0.08) ** 2)) - (z > cz && Math.abs(x) < 0.006 ? 0.3 : 0);
+    return 1 - 0.5 * Math.exp(-((f / 0.06) ** 2));
+  };
+  const pufferHood: SDF = (x, y, z) => {
+    const lump = ellipsoid([0, 1.49, cz - 0.09], [0.14, 0.085, 0.078])(x, y, z);
+    const roll = Math.abs(Math.hypot(x, (z - cz) * 1.05) - 0.092) - 0.028 + Math.max(0, Math.abs(y - 1.49) - 0.03);
+    return smin(lump, z < cz + 0.05 ? roll : roll + (z - cz - 0.05) * 0.6, 0.04);
+  };
+  /** A zip down the front of a top: a narrow strip lying on its surface, with a pull at the top. */
+  const zipOf = (g: Garment, material: string, y0: number, y1: number): Garment => {
+    const pts: V3[] = [];
+    for (let y = y0; y <= y1 + 1e-6; y += 0.01) {
+      let z = 0.32;
+      for (let i = 0; i < 160; i++) {
+        const d = g.sdf(0, y, z);
+        if (d < 0.0004) break;
+        z -= Math.max(d * 0.8, 0.0005);
+      }
+      pts.push([0, y, z]);
+    }
+    // it bridges the stitch lines between baffles instead of dipping into each one
+    const zs = pts.map((p) => p[2]);
+    pts.forEach((p, i) => {
+      let m = -Infinity;
+      for (let k = Math.max(0, i - 4); k <= Math.min(pts.length - 1, i + 4); k++) m = Math.max(m, zs[k] - Math.abs(k - i) * 0.0012);
+      p[2] = m + 0.001;
+    });
+    const strip = chain(pts, pts.map(() => 0.0046), 0.002);
+    const top_ = pts[pts.length - 1];
+    const pull = roundBoxIn(frame([0, top_[1] - 0.022, top_[2] + 0.006], [0, 1, 0], [0, 0, 1]), [0.0045, 0.013, 0.0022], 0.002);
+    const f: SDF = (x, y, z) => Math.min(Math.max(strip(x, y, z), Math.abs(x) - 0.0042), pull(x, y, z));
+    return { part: 'Body', material, sdf: f, min: [-0.02, y0 - 0.01, cz + 0.03], max: [0.02, y1 + 0.02, cz + 0.26], h: 0.0012, tris: 420, allow: noHead };
   };
   const puffer = (material: string, sleeves: boolean): Garment => {
-    const bf = baffle(0.07, 0.012);
+    const bf = baffle(0.0125);
     const g = top({
-      material, offset: 0.03, drape: [0.19, 0.14], hem: 0.88, sleeve: sleeves ? 0.97 : 0, sleeveR: [0.085, 0.066], neck: 0.07, neckY: 1.5,
-      folds: 0, th: 0.009, band: 0.012, cuff: 0.016, tris: sleeves ? 4200 : 3000, h: 0.0036,
-      collar: collar(0.088, 1.42, 1.585), cuts: sleeves ? [] : [armhole(0.005)], detail: pufferSeams(0.07),
+      material, offset: 0.026, drape: [0.18, 0.134], hem: PUFF_HEM, sleeve: sleeves ? 0.94 : 0, sleeveR: [0.086, 0.068], neck: 0.072, neckY: 1.5,
+      folds: 0, th: 0.01, band: 0.014, cuff: 0.02, tris: sleeves ? 4600 : 3200, h: 0.0038,
+      collar: collar(0.087, 1.42, sleeves ? 1.56 : 1.6), extras: sleeves ? [pufferHood] : [], cuts: sleeves ? [] : [armhole(0.014)], detail: pufferSeams,
     });
     const base = g.sdf;
     // puff out between the stitch lines
-    g.sdf = (x, y, z) => base(x, y, z) - bf(x, y, z) * (base(x, y, z) < 0.02 ? 1 : 0);
+    g.sdf = (x, y, z) => {
+      const d = base(x, y, z);
+      return d < 0.03 ? d - bf(x, y, z) : d;
+    };
     return g;
   };
-  out.push(puffer('Top_Puffer', true));
-  out.push(puffer('Top_PufferVest', false));
+  {
+    const jacket = puffer('Top_Puffer', true);
+    out.push(jacket, zipOf(jacket, 'Top_Puffer_Zip', PUFF_HEM + 0.012, 1.53));
+    const vest = puffer('Top_PufferVest', false);
+    out.push(vest, zipOf(vest, 'Top_PufferVest_Zip', PUFF_HEM + 0.012, 1.57));
+    // the long sleeve under the vest: only its sleeves ever show
+    out.push(top({
+      material: 'Top_PufferVest_Under', offset: 0.006, drape: [0.15, 0.108], hem: 1.0, sleeve: 0.955, sleeveR: [0.062, 0.044], neck: 0.062, neckY: 1.47,
+      folds: 0.004, th: 0.0055, h: 0.0027, cuff: 0.005, tris: 2000,
+      cuts: [(x, y, z) => -0.035 - dot(sub([x, y, z], (x >= 0 ? arms.L : arms.R).sh), (x >= 0 ? arms.L : arms.R).ax)],
+    }));
+  }
 
   // ---------------------------------------------------------------- bottoms
   const legInfo = (s: Side) => {
@@ -261,12 +304,23 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
     return { hip, knee, ankle: [foot[0], 0.09, foot[2] - 0.005] as V3 };
   };
   const legs = { L: legInfo('L'), R: legInfo('R') };
-  const legFolds = (amp: number, stack: number, hemY: number, x: number, y: number, z: number): number => {
+  /** Stacked cloth above a hem: where the rolls are (center above the hem, spread, roll pitch). */
+  type Stack = { at: number; spread: number; pitch: number };
+  const STACK: Stack = { at: 0.08, spread: 0.08, pitch: 0.034 };
+  /** 0 in the crease between two rolls, 1 on a roll's crest (weighted by how stacked it is there). */
+  const stackRoll = (st: Stack, hemY: number, x: number, y: number, z: number): [number, number] => {
+    const L = x >= 0 ? legs.L : legs.R;
+    const ang = Math.atan2(x - L.knee[0], z - L.knee[2]);
+    const band = Math.exp(-(((y - hemY - st.at) / st.spread) ** 2));
+    return [band, 0.5 - 0.5 * Math.cos((y * Math.PI * 2) / st.pitch + Math.sin(ang * 2 + y * 9) * 1.6)];
+  };
+  const legFolds = (amp: number, stack: number, hemY: number, x: number, y: number, z: number, st: Stack = STACK): number => {
     const L = x >= 0 ? legs.L : legs.R;
     const ang = Math.atan2(x - L.knee[0], z - L.knee[2]);
     const knee = Math.exp(-(((y - L.knee[1] - 0.01) / 0.06) ** 2)) * (0.5 + 0.5 * Math.sin(ang * 4 + y * 60)) * (z > L.knee[2] - 0.01 ? 1 : 0.4);
     // stacked denim above the hem: rolls that twist round the leg (smooth, so they shade cleanly)
-    const ankle = Math.exp(-(((y - hemY - 0.08) / 0.08) ** 2)) * (0.5 - 0.5 * Math.cos((y * Math.PI * 2) / 0.034 + Math.sin(ang * 2 + y * 9) * 1.6));
+    const [band, roll] = stackRoll(st, hemY, x, y, z);
+    const ankle = band * roll;
     // long drape folds down the shin from the knee
     const drape = smoothstep(L.knee[1] + 0.05, L.knee[1] - 0.1, y) * smoothstep(hemY + 0.02, hemY + 0.2, y) * (0.5 + 0.5 * Math.sin(ang * 5 + noise(x * 14, y * 4, z * 14, 5) * 2));
     const crotch = Math.exp(-(((y - 0.84) / 0.05) ** 2)) * (0.5 + 0.5 * Math.sin(ang * 5));
@@ -275,8 +329,11 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
   const pants = (o: {
     material: string; offset: number; legR: [number, number]; hem: number; waist: number; folds: number; stack: number; th: number;
     extras?: SDF[]; h?: number; tris?: number; detail?: (x: number, y: number, z: number) => number;
+    /** Wide legs: how far out (and forward) of the ankle the hem hangs, and how the cloth stacks. */
+    flare?: [number, number]; stackAt?: Stack;
   }): Garment => {
-    const hulls = SIDES.map((s) => roundCone(add(legs[s].hip, [sx(s) * 0.01, 0.0, -0.005]), [legs[s].ankle[0], o.hem, legs[s].ankle[2]], o.legR[0], o.legR[1]));
+    const fl = o.flare ?? [0, 0];
+    const hulls = SIDES.map((s) => roundCone(add(legs[s].hip, [sx(s) * 0.01, 0.0, -0.005]), [legs[s].ankle[0] + sx(s) * fl[0], o.hem, legs[s].ankle[2] + fl[1]], o.legR[0], o.legR[1]));
     const seatHull = vtube(0, cz - 0.01, 0.82, o.waist, 0.172, 0.118, 0.165, 0.112);
     const outer: SDF = (x, y, z) => {
       let d = body(x, y, z) - o.offset;
@@ -285,7 +342,7 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
       for (const e of o.extras ?? []) d = smin(d, e(x, y, z), 0.012);
       // waistband pulls in; belt line
       d += 0.004 * smoothstep(o.waist - 0.045, o.waist - 0.03, y);
-      return d - legFolds(o.folds, o.stack, o.hem, x, y, z);
+      return d - legFolds(o.folds, o.stack, o.hem, x, y, z, o.stackAt);
     };
     const cutsP: SDF[] = [(x, y) => y - o.waist, (x, y) => o.hem - y];
     const sdf = cut(shell(outer, o.th), ...cutsP);
@@ -303,9 +360,84 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
     const front = smoothstep(L.knee[2] - 0.02, L.knee[2] + 0.06, z) * Math.exp(-(((y - 0.72) / 0.14) ** 2));
     return 1 + 0.18 * front + 0.04 * noise(x * 220, y * 60, z * 220, 9);
   };
-  out.push(pants({ material: 'Bottom_Jeans', offset: 0.008, legR: [0.088, 0.062], hem: 0.06, waist: 1.0, folds: 0.003, stack: 0.004, th: 0.0065, detail: denim }));
-  out.push(pants({ material: 'Bottom_BaggyJeans', offset: 0.014, legR: [0.112, 0.1], hem: 0.03, waist: 0.97, folds: 0.006, stack: 0.012, th: 0.0075, tris: 3400, detail: denim }));
-  out.push(pants({ material: 'Bottom_SlimJeans', offset: 0.006, legR: [0.082, 0.05], hem: 0.075, waist: 1.0, folds: 0.002, stack: 0.002, th: 0.0055, h: 0.0028, detail: denim }));
+  out.push(pants({ material: 'Bottom_Jeans', offset: 0.008, legR: [0.088, 0.062], hem: 0.06, waist: 0.95, folds: 0.003, stack: 0.004, th: 0.0065, detail: denim }));
+  // the baggy pants: worn low, very wide all the way down, the cloth piling up in rolls on the shoe
+  const BAGGY_STACK: Stack = { at: 0.15, spread: 0.15, pitch: 0.052 };
+  const baggy = pants({
+    material: 'Bottom_BaggyJeans', offset: 0.016, legR: [0.12, 0.118], hem: 0.012, waist: 0.95, folds: 0.005, stack: 0.017, th: 0.008, tris: 3800,
+    flare: [0.022, 0.012], stackAt: BAGGY_STACK,
+    // each crease between two rolls is a dark line
+    detail: (x, y, z) => {
+      const [band, roll] = stackRoll(BAGGY_STACK, 0.012, x, y, z);
+      return 1 - 0.5 * band * Math.exp(-((roll / 0.22) ** 2));
+    },
+  });
+  out.push(baggy);
+  // ---- on the baggy pants: a studded belt, and the waistband of the boxers showing above it
+  {
+    const y0 = 0.9, y1 = 0.94;
+    const surf: SDF = (x, y, z) => baggy.outer!(x, y, z) - 0.0045;
+    const band: SDF = (x, y, z) => Math.max(shell(surf, 0.008)(x, y, z), y - y1, y0 - y);
+    out.push({ part: 'Legs', material: 'Belt', sdf: band, min: [-0.25, y0 - 0.01, -0.15], max: [0.25, y1 + 0.01, 0.21], h: 0.0022, tris: 520, regionAt: () => 'hips', maxEdge: 0.04 });
+    // studs: two rows of little pyramids all the way round, and a square buckle in front
+    const N = 46, rows = [y0 + 0.0115, y1 - 0.0115];
+    const axisZ = cz - 0.01;
+    const studs: Array<{ c: V3; n: V3; t: V3 }[]> = rows.map((yy) => Array.from({ length: N }, (_v, i) => {
+      const a = ((i + 0.5) / N) * Math.PI * 2;
+      const dir: V3 = [Math.sin(a), 0, Math.cos(a)];
+      let r = 0.32;
+      for (let k = 0; k < 200; k++) {
+        const d = surf(dir[0] * r, yy, axisZ + dir[2] * r);
+        if (d < 0.0003) break;
+        r -= Math.max(d * 0.7, 0.0004);
+      }
+      const c: V3 = [dir[0] * r, yy, axisZ + dir[2] * r];
+      const e = 0.002;
+      const n = norm([surf(c[0] + e, c[1], c[2]) - surf(c[0] - e, c[1], c[2]), 0, surf(c[0], c[1], c[2] + e) - surf(c[0], c[1], c[2] - e)]);
+      return { c, n, t: [n[2], 0, -n[0]] as V3 };
+    }));
+    const S = 0.0052;
+    const buckle = (() => {
+      const c = studs[0].length ? ((): V3 => {
+        let z = 0.32;
+        for (let k = 0; k < 200; k++) {
+          const d = surf(0, (y0 + y1) / 2, z);
+          if (d < 0.0003) break;
+          z -= Math.max(d * 0.7, 0.0004);
+        }
+        return [0, (y0 + y1) / 2, z];
+      })() : ([0, 0.92, 0.15] as V3);
+      const f = frame(c, [0, 1, 0], [0, 0, 1]);
+      const outer = roundBoxIn(f, [0.03, 0.026, 0.0045], 0.004), inner = roundBoxIn(f, [0.02, 0.016, 0.02], 0.003);
+      const prong = capsule([c[0] - 0.02, c[1], c[2] + 0.004], [c[0] + 0.026, c[1], c[2] + 0.004], 0.0028);
+      return (x: number, y: number, z: number) => Math.min(Math.max(outer(x, y, z), -inner(x, y, z)), prong(x, y, z));
+    })();
+    const metal: SDF = (x, y, z) => {
+      let d = buckle(x, y, z);
+      // (no studs under the buckle)
+      if (Math.abs(x) < 0.04 && z > axisZ) return d;
+      const a = Math.atan2(x, z - axisZ);
+      const i0 = Math.floor((((a / (Math.PI * 2)) % 1) + 1) % 1 * N);
+      for (const row of studs) {
+        for (let di = -1; di <= 1; di++) {
+          const st = row[(i0 + di + N) % N];
+          const px = x - st.c[0], py = y - st.c[1], pz = z - st.c[2];
+          const w = px * st.n[0] + pz * st.n[2], u = px * st.t[0] + pz * st.t[2];
+          d = Math.min(d, Math.max(Math.max(Math.abs(u), Math.abs(py)) + w - S, -w - 0.002));
+        }
+      }
+      return d;
+    };
+    out.push({ part: 'Legs', material: 'Belt_Metal', sdf: metal, min: [-0.25, y0 - 0.008, -0.15], max: [0.25, y1 + 0.008, 0.22], h: 0.0011, tris: 1500, regionAt: () => 'hips', maxEdge: 0.02 });
+    // boxers: a wide elastic waistband hugging the body, coming up out of the pants
+    const wb0 = y1 - 0.012, wb1 = 1.006;
+    const elastic: SDF = (x, y, z) => Math.max(shell((px, py, pz) => body(px, py, pz) - 0.0075, 0.006)(x, y, z), y - wb1, wb0 - y);
+    out.push({
+      part: 'Legs', material: 'Waistband', sdf: elastic, min: [-0.22, wb0 - 0.01, -0.14], max: [0.22, wb1 + 0.01, 0.19], h: 0.0024, tris: 460, regionAt: () => 'hips', maxEdge: 0.04,
+      detail: (x, y) => 1 - 0.3 * Math.exp(-(((y - wb0 - 0.014) / 0.0025) ** 2)) - 0.3 * Math.exp(-(((y - wb1 + 0.006) / 0.0025) ** 2)),
+    });
+  }
+  out.push(pants({ material: 'Bottom_SlimJeans', offset: 0.006, legR: [0.082, 0.05], hem: 0.075, waist: 0.95, folds: 0.002, stack: 0.002, th: 0.0055, h: 0.0028, detail: denim }));
   {
     const pockets: SDF[] = SIDES.map((s) => {
       const L = legs[s];
@@ -313,13 +445,13 @@ export function makeGarments(A: Anatomy, sk: InkSkeleton): Garment[] {
       return roundBoxIn(frame(c, norm(sub(L.knee, L.hip)), [sx(s), 0, 0]), [0.022, 0.08, 0.065], 0.012);
     });
     out.push(pants({
-      material: 'Bottom_Cargo', offset: 0.012, legR: [0.1, 0.08], hem: 0.045, waist: 0.99, folds: 0.0045, stack: 0.0055, th: 0.007, extras: pockets, tris: 2600,
+      material: 'Bottom_Cargo', offset: 0.012, legR: [0.1, 0.08], hem: 0.045, waist: 0.95, folds: 0.0045, stack: 0.0055, th: 0.007, extras: pockets, tris: 2600,
       detail: (x, y) => 1 - 0.25 * Math.exp(-(((y - 0.72) / 0.004) ** 2)) * (Math.abs(x) > 0.15 ? 1 : 0),
     }));
   }
   out.push(pants({ material: 'Bottom_Leggings', offset: 0.0025, legR: [0.07, 0.03], hem: 0.1, waist: 1.02, folds: 0, stack: 0, th: 0.0045, h: 0.0024, tris: 2000 }));
   {
-    const g = pants({ material: 'Bottom_Shorts', offset: 0.012, legR: [0.105, 0.098], hem: 0.6, waist: 0.98, folds: 0.004, stack: 0, th: 0.007, tris: 1600 });
+    const g = pants({ material: 'Bottom_Shorts', offset: 0.012, legR: [0.105, 0.098], hem: 0.6, waist: 0.95, folds: 0.004, stack: 0, th: 0.007, tris: 1600 });
     out.push(g);
   }
 

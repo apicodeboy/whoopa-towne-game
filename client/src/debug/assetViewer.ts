@@ -27,6 +27,10 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
   const sun = new THREE.DirectionalLight(0xffe2c0, 2.2);
   sun.position.set(-4, 8, 6);
   sun.castShadow = true;
+  // (the game's own shadow settings, so characters look here as they do in a match)
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.035;
   scene.add(sun);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x55585e }));
   ground.rotation.x = -Math.PI / 2;
@@ -55,6 +59,11 @@ export async function runAssetViewer(container: HTMLElement): Promise<void> {
         case 'sprint': p.vz = -7.5; p.sprinting = true; break;
         case 'crouch': p.crouching = true; break;
         case 'crouchwalk': p.crouching = true; p.vz = -2.6; break;
+        case 'aim': p.aiming = true; break;
+        case 'aimsmg': p.aiming = true; p.held = 'smg'; break;
+        case 'aimshotgun': p.aiming = true; p.held = 'shotgun'; break;
+        case 'aimpistol': p.aiming = true; p.held = 'pistol'; break;
+        case 'aimrun': p.aiming = true; p.vz = -3; break;
         case 'aimup': p.pitch = 0.6; p.aiming = true; break;
         case 'aimdown': p.pitch = -0.6; p.aiming = true; break;
         case 'reload': p.reload = (t * 0.5) % 1; break;

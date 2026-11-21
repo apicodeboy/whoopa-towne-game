@@ -26,6 +26,10 @@ export const SLOT = {
   /** The player's crew color (the arm band that keeps teams readable). */
   CREW: 11,
   TEETH: 12,
+  /** The blank face plate. */
+  FACE: 13,
+  /** The belt's strap. */
+  BELT: 14,
 } as const;
 
 export interface Style {

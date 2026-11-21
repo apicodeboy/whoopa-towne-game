@@ -9,6 +9,7 @@ const MOUSE_RAD_PER_PX = 0.0023;
  *   WASD move · mouse aim · LMB fire · RMB aim · R reload · Shift sprint · C crouch (Ctrl = hold)
  *   Space jump · 1-3 weapons (1-4 in JUMP OFF THE PORCH) · wheel cycle · G throw · Q swap shoulder · Tab scoreboard · Esc pause
  *   E search / pick up · H heal · X drop weapon (JUMP OFF THE PORCH)
+ *   hold B: the weapon and gadget wheel (point with the mouse, let go to pick)
  */
 export class KeyboardMouseSource implements InputSource {
   readonly kind = 'kbm' as const;
@@ -20,6 +21,8 @@ export class KeyboardMouseSource implements InputSource {
   private dx = 0;
   private dy = 0;
   private wheel = 0;
+  /** The weapon wheel key was down last frame. */
+  private wheelKey = false;
   private active = false;
   private locked = false;
   private lockTarget: HTMLElement;
@@ -168,12 +171,22 @@ export class KeyboardMouseSource implements InputSource {
       }
 
       const s = ctx.settings;
-      const scale = MOUSE_RAD_PER_PX * s.mouseSens * (ctx.aiming ? s.aimSensMult * ctx.zoomScale : 1);
-      frame.lookYaw -= this.dx * scale;
-      frame.lookPitch -= this.dy * scale * (s.invertY ? -1 : 1);
+      // the weapon wheel (held): the mouse points at a slot instead of turning the camera
+      const wheelDown = k.has(bindings.keys.wheel);
+      if (wheelDown) {
+        frame.wheel = true;
+        frame.wheelMouseX += this.dx;
+        frame.wheelMouseY += this.dy;
+      } else {
+        const scale = MOUSE_RAD_PER_PX * s.mouseSens * (ctx.aiming ? s.aimSensMult * ctx.zoomScale : 1);
+        frame.lookYaw -= this.dx * scale;
+        frame.lookPitch -= this.dy * scale * (s.invertY ? -1 : 1);
+      }
+      if (this.wheelKey && !wheelDown) frame.wheelClose = true;
+      this.wheelKey = wheelDown;
 
       const btn = this.buttons | this.buttonsHit;
-      if (btn & 1) frame.fire = true;
+      if (btn & 1 && !wheelDown) frame.fire = true;
       if (btn & 4) frame.aim = true;
       // keys from Settings → Controls (the default layout also keeps a few alternates)
       const b = bindings.keys;
@@ -196,6 +209,8 @@ export class KeyboardMouseSource implements InputSource {
       if (p.has('Digit3')) frame.slotSelect = 2;
       if (p.has('Digit4')) frame.slotSelect = 3;
       if (this.wheel !== 0) frame.slotCycle = this.wheel > 0 ? 1 : -1;
+    } else {
+      this.wheelKey = false;
     }
 
     this.dx = 0;

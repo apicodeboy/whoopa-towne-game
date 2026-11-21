@@ -172,15 +172,21 @@ stage('hands', () => { for (const s of ['L', 'R'] as const) {
   add_('Body', 'Skin_Hand', m, shadeOf(m, A.skin, 1.1), weigh(m.pos, m.idx, { regionAt: () => 'hand' }));
 } });
 
-// ------------------------------------------------------------------ head
+// ------------------------------------------------------------------ head (faceless) and its blank face plate
 stage('head', () => {
-  const m = meshShape(A.head, [-0.11, 1.32, -0.09], [0.11, 1.83, 0.19], 0.0021 * Q, 3400);
+  // (only the neck: the face shell covers the rest of the head)
+  const m = meshShape(A.neckSkin, [-0.11, 1.32, -0.09], [0.11, 1.72, 0.19], 0.0022 * Q, 900);
   log(`head: ${m.idx.length / 3} tris`);
-  // one skin piece: lips (G) and darker skin (B) are soft masks, painted per vertex at runtime
-  add_('Head', 'Skin', m, shadeOf(m, A.skin, 1.4), weigh(m.pos, m.idx, { regionAt: (x, y, z) => (y < 1.5 ? 'neck' : A.region(x, y, z)) }), maskOf(m, A.lips, -0.0004, 0.0012), maskOf(m, A.dark, -0.001, 0.002));
+  add_('Head', 'Skin', m, shadeOf(m, A.skin, 1.2), weigh(m.pos, m.idx, { regionAt: (x, y, z) => (y < 1.5 ? 'neck' : A.region(x, y, z)) }));
+});
+stage('face', () => {
+  const c = A.headCenter;
+  const m = meshShape(A.face, [c[0] - 0.105, c[1] - 0.135, c[2] - 0.125], [c[0] + 0.105, c[1] + 0.14, c[2] + 0.12], 0.0019 * Q, 2000);
+  log(`face: ${m.idx.length / 3} tris`);
+  add_('Head', 'Face', m, new Float32Array(m.pos.length / 3).fill(1), weigh(m.pos, m.idx, { regionAt: () => 'head' }));
 });
 
-// ------------------------------------------------------------------ eyes: a white eyeball, an iris and a pupil as clean caps on it
+// ------------------------------------------------------------------ eye and brow markers (never drawn: the runtime measures the head on them)
 stage('eyes', () => { for (const s of ['L', 'R'] as const) {
   const c = A.eyes.center[s], r = A.eyes.radius;
   const look = norm([s === 'L' ? 0.05 : -0.05, -0.04, 1]);
@@ -371,4 +377,4 @@ W.json.animations = (src.json.animations as any[]).map((a) => ({
 const out = resolve(ROOT, 'client/public/assets/characters/ink.glb');
 const bytes = W.write(out);
 log(`wrote ${out}: ${(bytes / 1024).toFixed(0)} KB, ${pieces.length} pieces, ${totalVerts} vertices, ${totalTris} triangles`);
-void len; void scale; void add; void plane;
+void len; void scale; void add; void plane; void maskOf;

@@ -237,6 +237,9 @@ export class App {
     });
     this.input.gamepad.onConnection = (connected, kind) => {
       this.toasts.show(connected ? `${deviceName(kind)} connected.` : 'Controller disconnected.', connected ? 'good' : 'info', 2600);
+      // a controller just plugged in: every prompt shows its buttons straight away
+      if (connected) this.input.noteDevice(kind);
+      else if (this.input.usingPad) this.input.noteDevice('kbm');
     };
     this.onDeviceChange(this.input.device);
 
@@ -611,6 +614,7 @@ export class App {
     game.paused = paused;
     const view = this.lobby?.view();
     const canEnd = !!view && view.isPrivate && view.hostId === view.myId;
+    this.pause.setLoadoutAllowed(this.session?.mode !== 'porch');
     this.pause.show(paused, this.session?.kind === 'online', canEnd);
     this.input.setGameplay(!paused && !this.matchOver);
     if (paused) {

@@ -85,7 +85,8 @@ const doorAt = (sim: GameSim, x: number, z: number, y = 0): number => {
 // ------------------------------------------------------------------ structure (every type)
 const TYPES: Array<{ type: BuildingType; w: number; d: number; floors?: number }> = [
   { type: 'house2', w: 10, d: 8.8 }, { type: 'house2', w: 6.6, d: 8.8 }, { type: 'house1', w: 8.5, d: 8.8 }, { type: 'house1', w: 6.6, d: 8.8 },
-  { type: 'apartment', w: 12, d: 12, floors: 3 }, { type: 'apartment', w: 10, d: 10, floors: 6 }, { type: 'tenement', w: 11, d: 11, floors: 4 },
+  { type: 'apartment', w: 12, d: 12, floors: 3 }, { type: 'apartment', w: 10, d: 10, floors: 6 }, { type: 'apartment', w: 9.25, d: 11, floors: 4 },
+  { type: 'tenement', w: 11, d: 11, floors: 4 },
   { type: 'store', w: 14, d: 11 }, { type: 'barbershop', w: 9, d: 10 }, { type: 'laundromat', w: 12, d: 10 },
   { type: 'restaurant', w: 12, d: 12, floors: 2 }, { type: 'office', w: 16, d: 14, floors: 3 }, { type: 'warehouse', w: 18, d: 16 }, { type: 'garage', w: 10, d: 10 },
   { type: 'workshop', w: 14, d: 12 }, { type: 'storage', w: 17, d: 14 },
@@ -413,5 +414,11 @@ test('input: unknown button bits are dropped, roll survives the wire', () => {
   const raw = encodeInput(c, []);
   raw[5] = 1 << 20 | BTN.JUMP;
   assert(decodeInputs(raw)[0].buttons === BTN.JUMP, 'junk bits dropped');
+  // the healing item picked on the wheel travels too, and nothing out of range gets through
+  c.heal = 4;
+  assert(decodeInputs(encodeInput(c, []))[0].heal === 4, 'heal choice arrives');
+  const bad = encodeInput(c, []);
+  bad[11] = 99;
+  assert(decodeInputs(bad)[0].heal <= 4, 'heal choice clamped');
   void PLAYER;
 });

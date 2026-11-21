@@ -94,6 +94,8 @@ export const HAIRSTYLES = [
   opt('mohawk', 'Mohawk'),
   opt('twists', 'Twists'),
   opt('locs', 'Locs'),
+  opt('spikylocs', 'Spiky Locs'),
+  opt('wicks', 'Wicks'),
 ];
 export const HAIR_COLORS = [
   opt('black', 'Black', { color: '#1b1714' }),
@@ -245,11 +247,13 @@ export const NECKLACES = [
   opt('choker', 'Choker'),
   aj('cuban', 'Cuban Link Chain'), aj('wtpendant', 'Iced WT Pendant'),
   opt('silverstack', 'Stacked Silver Chains'), opt('medallion', 'Silver Medallion'),
+  opt('icedpendant', 'Chain + Round Pendant'),
 ];
 export const WRIST = [
   opt('none', 'None'), opt('watch', 'Watch'), opt('goldwatch', 'Gold Watch'), opt('bracelet', 'Bracelet'), opt('wristbands', 'Wristbands'),
   aj('icedwatch', 'Iced-Out Watch'), aj('gloves', 'Shooter Gloves'),
   opt('blackgloves', 'Black Gloves'), opt('silverwatch', 'Silver Watch'),
+  opt('glovewatches', 'Black Gloves + Two Watches'),
 ];
 export const FACE_ACCESSORIES = [opt('none', 'None'), opt('nosestud', 'Nose Stud'), opt('nosering', 'Nose Ring'), opt('browpiercing', 'Eyebrow Piercing')];
 
@@ -300,12 +304,17 @@ export interface Appearance {
   /** AJ's: weapon wrap (cosmetic only) and backpack. */
   weaponSkin: string;
   backpack: string;
-  /** Urban Ink: shoulder width, head size, a face covering, something in hand in menus, a pants chain. */
+  /** Shoulder width, head size, a face covering, something in hand in menus, a pants chain. */
   shoulders: string;
   headSize: string;
   mask: string;
   carry: string;
   waistChain: string;
+  /** The blank face (its color and a mark on it), a studded belt, a graphic on the pants. */
+  face: string;
+  faceMark: string;
+  belt: string;
+  legPrint: string;
   /** One design per body spot (spot id -> design id). */
   tattoos: Record<string, string>;
   /** Freckles / scar / beauty mark (any combination). */
@@ -358,13 +367,29 @@ export const HEAD_SIZES = [opt('average', 'Average'), opt('small', 'Small'), opt
 export const MASKS = [opt('none', 'None'), opt('facemask', 'Black Face Mask'), opt('bandanamask', 'Bandana Mask')];
 export const CARRY = [opt('none', 'Nothing'), opt('phone', 'Smartphone')];
 export const WAIST_CHAINS = [opt('none', 'None'), opt('silver', 'Silver Pants Chain')];
+/** The blank face: its color (`skin` = the character's own skin tone). */
+export const FACES = [
+  opt('gray', 'Gray', { color: '#b4b6bb' }), opt('white', 'Bone White', { color: '#ecebe6' }), opt('black', 'Black', { color: '#202024' }),
+  opt('skin', 'Skin Tone', { color: '#8a5a3c' }), opt('red', 'Red', { color: '#b7262b' }), opt('blue', 'Blue', { color: '#2c5fd0' }),
+];
+/** A small mark on the forehead or cheek of the blank face. */
+export const FACE_MARKS = [opt('none', 'None'), opt('star', 'Star'), opt('cross', 'Cross'), opt('tears', 'Teardrops'), opt('bolt', 'Lightning Bolt')];
+/** A studded belt on the pants (with the boxers' waistband showing above it). */
+export const BELTS = [
+  opt('none', 'None'), opt('redstuds', 'Red Studded Belt'), opt('blackstuds', 'Black Studded Belt'), opt('whitestuds', 'White Studded Belt'),
+];
+/** A graphic on the left thigh of long pants. */
+export const LEG_PRINTS = [opt('none', 'None'), opt('gocrazy', 'Go Crazy + Scorpion'), opt('flames', 'Flames'), opt('stars', 'Stars')];
 
 /**
  * Fields added after the original creator. They are written after the original code (so looks
  * saved before them still read back exactly); append new fields at the end, never reorder.
  * weaponSkin and backpack are AJ's items (equipped in TRAP); the rest are creator rows.
  */
-export const EXTRA_FIELDS = { weaponSkin: WEAPON_SKINS, backpack: BACKPACKS, shoulders: SHOULDERS, headSize: HEAD_SIZES, mask: MASKS, carry: CARRY, waistChain: WAIST_CHAINS } as const;
+export const EXTRA_FIELDS = {
+  weaponSkin: WEAPON_SKINS, backpack: BACKPACKS, shoulders: SHOULDERS, headSize: HEAD_SIZES, mask: MASKS, carry: CARRY, waistChain: WAIST_CHAINS,
+  face: FACES, faceMark: FACE_MARKS, belt: BELTS, legPrint: LEG_PRINTS,
+} as const;
 export type ExtraField = keyof typeof EXTRA_FIELDS;
 export const EXTRA_FIELD_KEYS = Object.keys(EXTRA_FIELDS) as ExtraField[];
 
@@ -395,11 +420,16 @@ export function stripUnowned(look: Readonly<Appearance>, owned: ReadonlySet<stri
   return out;
 }
 
+/**
+ * The look everyone starts with: the blank gray face, big spiky locs, a black hooded puffer,
+ * very wide stacked black pants with the blue graphic, a red studded belt, a chain with a
+ * round pendant, black gloves with a watch on each wrist, and clean white low-tops.
+ */
 export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   bodyType: 'masc',
   build: 'average',
   height: 'average',
-  skin: 's05',
+  skin: 's10',
   headShape: 'oval',
   faceShape: 'defined',
   eyes: 'average',
@@ -407,7 +437,7 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   brows: 'natural',
   nose: 'average',
   ears: 'average',
-  hair: 'shortdreads',
+  hair: 'spikylocs',
   hairColor: 'black',
   facialHair: 'none',
   facialHairColor: 'darkbrown',
@@ -418,14 +448,14 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   top: 'puffer',
   topColor: 'black',
   bottom: 'baggyjeans',
-  bottomColor: 'gray',
-  shoes: 'chunky',
+  bottomColor: 'black',
+  shoes: 'lowtops',
   shoeColor: 'white',
-  hat: 'beanie',
+  hat: 'none',
   glasses: 'none',
-  earrings: 'diamondstuds',
-  necklace: 'diamond',
-  wrist: 'none',
+  earrings: 'none',
+  necklace: 'icedpendant',
+  wrist: 'glovewatches',
   faceAcc: 'none',
   weaponSkin: 'none',
   backpack: 'none',
@@ -434,12 +464,54 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   mask: 'none',
   carry: 'none',
   waistChain: 'none',
+  face: 'gray',
+  faceMark: 'none',
+  belt: 'redstuds',
+  legPrint: 'gocrazy',
   tattoos: Object.freeze({}) as Record<string, string>,
   details: Object.freeze([]) as unknown as string[],
 });
 
 /**
- * Starter looks (Urban Ink): complete outfits to begin from. Picking one copies it into the
+ * The starter looks from before the faceless character (the old default, and what its two
+ * presets set). A saved look that is still one of these was never really customized: it moves
+ * to the new default look instead of keeping the old outfit. Customized looks are left alone.
+ */
+const OLD_STARTERS: ReadonlyArray<Record<string, string>> = [
+  {
+    bodyType: 'masc', build: 'average', height: 'average', skin: 's05', headShape: 'oval', faceShape: 'defined', eyes: 'average', eyeColor: 'brown',
+    brows: 'natural', nose: 'average', ears: 'average', hair: 'shortdreads', hairColor: 'black', facialHair: 'none', lips: 'average', mouthAcc: 'none',
+    top: 'puffer', topColor: 'black', bottom: 'baggyjeans', bottomColor: 'gray', shoes: 'chunky', shoeColor: 'white', hat: 'beanie', glasses: 'none',
+    earrings: 'diamondstuds', necklace: 'diamond', wrist: 'none', faceAcc: 'none', shoulders: 'average', headSize: 'average', mask: 'none', waistChain: 'none',
+  },
+  {
+    bodyType: 'masc', build: 'athletic', skin: 's08', hair: 'shortdreads', hairColor: 'black', facialHair: 'none',
+    hat: 'blackbucket', mask: 'facemask', top: 'puffervest', topColor: 'black', necklace: 'medallion', wrist: 'blackgloves',
+    bottom: 'cargo', bottomColor: 'black', shoes: 'chunky', shoeColor: 'black', earrings: 'none', glasses: 'none', waistChain: 'none',
+  },
+  {
+    bodyType: 'masc', build: 'average', skin: 's09', hair: 'braids', hairColor: 'black', facialHair: 'goatee', facialHairColor: 'black',
+    hat: 'graffitibeanie', mask: 'none', top: 'ziphoodie', topColor: 'black', necklace: 'silverstack', wrist: 'silverwatch', earrings: 'diamondstuds',
+    bottom: 'baggyjeans', bottomColor: 'black', shoes: 'lowtops', shoeColor: 'red', glasses: 'none', waistChain: 'silver',
+  },
+];
+function isOldStarter(look: Readonly<Appearance>): boolean {
+  const rec = look as unknown as Record<string, string>;
+  return OLD_STARTERS.some((st) => Object.entries(st).every(([k, v]) => rec[k] === v));
+}
+/** A look saved before the faceless character: an untouched old starter becomes the new default (AJ's items stay on). */
+function upgradeOldLook(look: Appearance): Appearance {
+  if (!isOldStarter(look)) return look;
+  const out = cloneAppearance(DEFAULT_APPEARANCE);
+  out.weaponSkin = look.weaponSkin;
+  out.backpack = look.backpack;
+  out.mouthProp = look.mouthProp;
+  out.height = look.height;
+  return out;
+}
+
+/**
+ * Starter looks (the three reference fits): complete outfits to begin from. Picking one copies it into the
  * draft; everything stays customizable, nothing is locked and nothing premium is in them.
  */
 export interface LookPreset {
@@ -450,19 +522,27 @@ export interface LookPreset {
 }
 export const LOOK_PRESETS: readonly LookPreset[] = [
   {
-    id: 'puffer', name: 'Black Puffer', blurb: 'Bucket hat, face mask, puffer vest, silver medallion, black gloves.',
+    id: 'puffer', name: 'Hooded Puffer', blurb: 'Black hooded puffer, stacked black pants with the blue graphic, red studded belt, chain, gloves and watches.',
     look: {
-      bodyType: 'masc', build: 'athletic', skin: 's08', hair: 'shortdreads', hairColor: 'black', facialHair: 'none',
-      hat: 'blackbucket', mask: 'facemask', top: 'puffervest', topColor: 'black', necklace: 'medallion', wrist: 'blackgloves',
-      bottom: 'cargo', bottomColor: 'black', shoes: 'chunky', shoeColor: 'black', earrings: 'none', glasses: 'none', carry: 'none', waistChain: 'none',
+      bodyType: 'masc', build: 'average', skin: 's10', hair: 'spikylocs', hairColor: 'black', hat: 'none', mask: 'none', glasses: 'none', earrings: 'none',
+      face: 'gray', faceMark: 'none', top: 'puffer', topColor: 'black', necklace: 'icedpendant', wrist: 'glovewatches',
+      bottom: 'baggyjeans', bottomColor: 'black', belt: 'redstuds', legPrint: 'gocrazy', shoes: 'lowtops', shoeColor: 'white', carry: 'none', waistChain: 'none',
     },
   },
   {
-    id: 'hoodie', name: 'Black Hoodie', blurb: 'Graffiti beanie, braids, zip hoodie, stacked chains, red kicks, phone in hand.',
+    id: 'vest', name: 'Puffer Vest', blurb: 'Black puffer vest over a long sleeve, a star on the forehead, the same drip.',
     look: {
-      bodyType: 'masc', build: 'average', skin: 's09', hair: 'braids', hairColor: 'black', facialHair: 'goatee', facialHairColor: 'black',
-      hat: 'graffitibeanie', mask: 'none', top: 'ziphoodie', topColor: 'black', necklace: 'silverstack', wrist: 'silverwatch', earrings: 'diamondstuds',
-      bottom: 'baggyjeans', bottomColor: 'black', shoes: 'lowtops', shoeColor: 'red', glasses: 'none', carry: 'phone', waistChain: 'silver',
+      bodyType: 'masc', build: 'average', skin: 's10', hair: 'spikylocs', hairColor: 'black', hat: 'none', mask: 'none', glasses: 'none', earrings: 'none',
+      face: 'gray', faceMark: 'star', top: 'puffervest', topColor: 'black', necklace: 'icedpendant', wrist: 'glovewatches',
+      bottom: 'baggyjeans', bottomColor: 'black', belt: 'redstuds', legPrint: 'gocrazy', shoes: 'lowtops', shoeColor: 'white', carry: 'none', waistChain: 'none',
+    },
+  },
+  {
+    id: 'tee', name: 'White Tee', blurb: 'Plain white tee, brown stacked pants, white kicks. Nothing else.',
+    look: {
+      bodyType: 'masc', build: 'average', skin: 's10', hair: 'spikylocs', hairColor: 'black', hat: 'none', mask: 'none', glasses: 'none', earrings: 'none',
+      face: 'gray', faceMark: 'none', top: 'tee', topColor: 'white', necklace: 'none', wrist: 'none',
+      bottom: 'baggyjeans', bottomColor: 'brown', belt: 'none', legPrint: 'none', shoes: 'lowtops', shoeColor: 'white', carry: 'none', waistChain: 'none',
     },
   },
 ];
@@ -509,7 +589,8 @@ export function sanitizeAppearance(raw: unknown, fallback: Readonly<Appearance> 
   if (Array.isArray(r.details)) {
     out.details = BODY_DETAILS.map((d) => d.id).filter((id) => (r.details as unknown[]).includes(id));
   }
-  return out;
+  // saved before the faceless character (no `face` yet)
+  return r.face === undefined && r.top !== undefined ? upgradeOldLook(out) : out;
 }
 
 export function sameAppearance(a: Readonly<Appearance>, b: Readonly<Appearance>): boolean {
@@ -556,11 +637,13 @@ export function decodeAppearance(code: unknown, fallback: Readonly<Appearance> =
   }
   const mask = at(i++);
   out.details = mask > 0 ? BODY_DETAILS.filter((_d, k) => mask & (1 << k)).map((d) => d.id) : [];
+  const faceAt = i + EXTRA_FIELD_KEYS.indexOf('face');
   for (const key of EXTRA_FIELD_KEYS) {
     const o = EXTRA_FIELDS[key][at(i++)];
     if (o && o.available !== false) out[key] = o.id;
   }
-  return out;
+  // a code written before the faceless character ends before its `face` digit
+  return digits.length >= LOOK_FIELD_KEYS.length && digits.length <= faceAt ? upgradeOldLook(out) : out;
 }
 
 // ------------------------------------------------------------------ random looks
@@ -604,7 +687,10 @@ export function randomAppearance(rand: () => number = Math.random): Appearance {
   a.brows = pickFrom(BROWS, rand, { natural: 3 });
   a.nose = pickFrom(NOSES, rand, { average: 3 });
   a.ears = pickFrom(EARS, rand, { average: 3 });
-  a.hair = pickFrom(HAIRSTYLES, rand, fem ? { buzz: 0.4, lowfade: 0.4, highfade: 0.4, waves: 0.4, bald: 0.2 } : { bob: 0.3, bun: 0.4, ponytail: 0.6 });
+  a.hair = pickFrom(HAIRSTYLES, rand, {
+    spikylocs: 7, wicks: 4, locs: 2.5, longdreads: 2, shortdreads: 2, twists: 2, braids: 1.5, largeafro: 1, shortafro: 1,
+    ...(fem ? { buzz: 0.3, lowfade: 0.3, highfade: 0.3, waves: 0.3, bald: 0.1 } : { bob: 0.2, bun: 0.3, ponytail: 0.4, bald: 0.3 }),
+  });
   a.hairColor = pickFrom(HAIR_COLORS, rand, { black: 5, darkbrown: 5, lightbrown: 3, blonde: 2, red: 1, ginger: 1, gray: 0.6, white: 0.4, platinum: 0.6, blue: 0.5, pink: 0.5, purple: 0.5 });
   a.facialHair = fem ? 'none' : pickFrom(FACIAL_HAIR, rand, { none: 5 });
   a.facialHairColor = rand() < 0.8 && !['blue', 'pink', 'purple', 'platinum'].includes(a.hairColor) ? a.hairColor : pickFrom(HAIR_COLORS, rand, { black: 4, darkbrown: 4 });
@@ -612,20 +698,25 @@ export function randomAppearance(rand: () => number = Math.random): Appearance {
   a.mouthAcc = pickFrom(MOUTH_ACCESSORIES, rand, { none: 14 });
   a.mouthProp = pickFrom(MOUTH_PROPS, rand, { none: 6 });
   a.teeth = pickFrom(TEETH, rand);
-  // street sketchbook: puffers and hoodies, baggy denim and cargos, chunky sneakers, masks and hoods
-  a.top = pickFrom(TOPS, rand, { puffer: 4, hoodie: 3.5, tee: 2, tank: 0.8, crop: fem ? 1 : 0.2 });
-  a.topColor = pickFrom(TOP_COLORS, rand, { black: 5, white: 2, gray: 2.5, red: 1.5, pink: 1.2, green: 1, brown: 1, beige: 1 });
-  a.bottom = pickFrom(BOTTOMS, rand, { baggyjeans: 5, cargo: 3.5, jeans: 1, slimjeans: 0.8, shorts: 0.5, leggings: fem ? 0.6 : 0.1 });
-  a.bottomColor = pickFrom(BOTTOM_COLORS, rand, { black: 4, gray: 3, blue: 2.5, darkblue: 2.5, beige: 1.2, green: 0.8, pink: 0.4, white: 0.6 });
-  a.shoes = pickFrom(SHOES, rand, { chunky: 5, boots: 2, lowtops: 1, running: 1 });
-  a.shoeColor = pickFrom(SHOE_COLORS, rand, { white: 4, black: 4, gray: 1.5, red: 1 });
-  a.hat = pickFrom(HATS, rand, { none: 5, beanie: 3, skimask: 1.4, hoodup: 1.8, spikyhood: 0.8, capfwd: 1, capback: 1, durag: 1, bucket: 0.8, cowboy: 0.1, headband: 0.3 });
-  a.glasses = pickFrom(GLASSES, rand, { none: 7, sunglasses: 2.5, tinted: 1 });
-  a.earrings = pickFrom(EARRINGS, rand, { none: fem ? 3 : 5, diamondstuds: 3 });
-  a.necklace = pickFrom(NECKLACES, rand, { none: 4, diamond: 2.5, silver: 2, thickgold: 1.2 });
-  a.wrist = pickFrom(WRIST, rand, { none: 6 });
-  a.faceAcc = pickFrom(FACE_ACCESSORIES, rand, { none: 14 });
-  a.details = BODY_DETAILS.filter(() => rand() < 0.12).map((d) => d.id);
+  // the street look: puffers and vests, tees and hoodies, very wide stacked pants, clean kicks
+  a.top = pickFrom(TOPS, rand, { puffer: 5, puffervest: 3.5, tee: 3.5, hoodie: 2.5, ziphoodie: 1.5, tank: 0.5, crop: fem ? 0.8 : 0.1 });
+  a.topColor = pickFrom(TOP_COLORS, rand, { black: 6, white: 3, gray: 2, red: 1.3, blue: 1, pink: 0.8, green: 0.8, brown: 1, beige: 1, yellow: 0.5, orange: 0.5, purple: 0.6 });
+  a.bottom = pickFrom(BOTTOMS, rand, { baggyjeans: 9, cargo: 2, jeans: 0.8, slimjeans: 0.3, shorts: 0.4, leggings: fem ? 0.4 : 0.05 });
+  a.bottomColor = pickFrom(BOTTOM_COLORS, rand, { black: 6, brown: 2.5, gray: 2, blue: 2, darkblue: 2, beige: 1.2, green: 0.6, pink: 0.3, white: 0.6, red: 0.4 });
+  a.shoes = pickFrom(SHOES, rand, { lowtops: 6, chunky: 2, boots: 1, running: 1 });
+  a.shoeColor = pickFrom(SHOE_COLORS, rand, { white: 7, black: 2.5, gray: 1, red: 0.8, blue: 0.5, brown: 0.3, green: 0.3, pink: 0.3 });
+  a.hat = pickFrom(HATS, rand, { none: 14, beanie: 1.2, skimask: 0.8, hoodup: 0.8, spikyhood: 0.3, capfwd: 0.6, capback: 0.6, durag: 0.6, bucket: 0.5, blackbucket: 0.4, graffitibeanie: 0.4, bandana: 0.3, cowboy: 0.05, headband: 0.3 });
+  a.glasses = pickFrom(GLASSES, rand, { none: 9, sunglasses: 1.5, tinted: 0.6, clear: 0.2, aviators: 0.4, round: 0.2 });
+  a.earrings = pickFrom(EARRINGS, rand, { none: 8, diamondstuds: 1.5, studs: 0.6, hoops: fem ? 1 : 0.2, dangling: fem ? 0.5 : 0.05 });
+  a.necklace = pickFrom(NECKLACES, rand, { none: 4, icedpendant: 4, diamond: 2, silver: 1.5, silverstack: 1.2, medallion: 1, thickgold: 1, thingold: 0.6, pendant: 0.6, choker: 0.2 });
+  a.wrist = pickFrom(WRIST, rand, { none: 4, glovewatches: 3, blackgloves: 1.5, silverwatch: 1.5, watch: 0.8, goldwatch: 0.6, bracelet: 0.5, wristbands: 0.5 });
+  a.faceAcc = 'none';
+  a.details = [];
+  a.face = pickFrom(FACES, rand, { gray: 10, white: 1.5, black: 1.5, skin: 1, red: 0.3, blue: 0.3 });
+  a.faceMark = pickFrom(FACE_MARKS, rand, { none: 7, star: 2, cross: 0.8, tears: 0.8, bolt: 0.6 });
+  const long = a.bottom !== 'shorts' && a.bottom !== 'leggings';
+  a.belt = long ? pickFrom(BELTS, rand, { none: 3, redstuds: 3, blackstuds: 2, whitestuds: 1.5 }) : 'none';
+  a.legPrint = long ? pickFrom(LEG_PRINTS, rand, { none: 5, gocrazy: 3, flames: 1, stars: 1 }) : 'none';
   return a;
 }
 

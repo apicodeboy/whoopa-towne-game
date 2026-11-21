@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { BOTTOM_COLORS, DEFAULT_APPEARANCE, LOOK_FIELD_KEYS, SHOE_COLORS, TOP_COLORS, type Appearance, type LookOption } from '@shared/config/appearance';
 import type { CharacterTemplate } from '../../assets';
 import { LIGHTING } from '../../lighting';
-import { buildDetails, buildEarrings, buildFacePiercing, buildFacialHair, buildGlasses, buildLipPiercing, buildMouth } from './face';
+import { buildDetails, buildEarrings, buildFaceMarks, buildFacePiercing, buildFacialHair, buildGlasses, buildLipPiercing, buildMouth } from './face';
 import { buildHair, transferHair, tuckHair } from './hair';
 import { HeadRig, shapeHead, type HeadSurface } from './headRig';
 import { buildHat } from './headwear';
 import { buildBackpack, buildCrewBands, buildNecklace, buildWaistChain, buildWrist, type BodyQuery } from './jewelry';
 import { PartLibrary, centroid, components, type Piece, type Rig } from './library';
+import { buildLegPrint, printAtlas } from './legPrint';
 import { ProcMesh, SLOT, smoothstep, style, v3, type V3 } from './meshKit';
 import { EXPRESSION_PRESETS, PAINT_STRIDE, pack, type Expression } from './palette';
 
@@ -37,10 +38,13 @@ export interface Assembled {
 
 // ------------------------------------------------------------------ material
 /**
- * Urban Ink cel shading: the direct light (sun, street lamps, interior lights) falls on a
- * three-tone ramp with soft edges instead of a smooth gradient, so characters read like inked
- * illustrations in daylight, at night and indoors alike. Ambient light stays soft (the ambient
- * shadows), specular highlights stay (metal and nylon still shine).
+ * Flat cel shading, like a clean vector drawing: every surface is its own flat color in two
+ * tones (lit side, shadow side) with a crisp edge between them; folds, seams and deep creases
+ * are baked per vertex (`ao`) and drawn as hard shadow shapes and ink lines, never as soft
+ * gradients; glossy things (nylon, leather, metal) get hard-edged highlights; and edges facing
+ * away from the camera catch a cool light, which is what gives black clothes their shape.
+ * Lights still count (sun, street lamps, rooms), but mostly as brightness: their color only
+ * tints, so black stays black and white stays white.
  */
 const TOON_DIRECT = (() => {
   const chunk = THREE.ShaderChunk.lights_physical_pars_fragment;
@@ -49,40 +53,77 @@ const TOON_DIRECT = (() => {
   const at = chunk.indexOf(line, fn);
   if (fn < 0 || at < 0) return null;
   const ramp = `float dotNLraw = dot( geometryNormal, directLight.direction );
-	// shadow side, a mid tone, the lit side (each edge a little soft so it never aliases)
-	// (wide enough transitions that a round face still reads round: painted, not faceted)
-	float dotNL = 0.12 + 0.43 * smoothstep( -0.12, 0.16, dotNLraw ) + 0.45 * smoothstep( 0.34, 0.62, dotNLraw );
-	dotNL *= saturate( dotNLraw * 3.0 + 0.75 );`;
-  return chunk.slice(0, at) + ramp + chunk.slice(at + line.length);
+	// two tones with a crisp edge (a couple of degrees soft, so it never aliases)
+	float dotNL = smoothstep( -0.04, 0.05, dotNLraw - inkShadow );
+	inkDirect += directLight.color * dotNL;
+	dotNL = 0.5 * dotNL;`;
+  return chunk.slice(0, fn) + 'vec3 inkDirect = vec3( 0.0 );\nfloat inkShadow = 0.0;\n' + chunk.slice(fn, at) + ramp + chunk.slice(at + line.length);
 })();
 
-/** Vertex-colored, with per-vertex metalness / roughness (jewelry shines, cloth stays matte). */
+/** Vertex-colored, with per-vertex metalness / roughness (jewelry shines, cloth stays matte) and baked creases. */
 export const LOOK_MATERIAL = new THREE.MeshStandardMaterial({ name: 'look', vertexColors: true, roughness: 1, metalness: 0 });
-LOOK_MATERIAL.customProgramCacheKey = () => 'urban-ink-toon';
+LOOK_MATERIAL.customProgramCacheKey = () => 'flat-cel-4';
 LOOK_MATERIAL.onBeforeCompile = (shader) => {
-  if (TOON_DIRECT) shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', TOON_DIRECT);
-  // a cool rim of light on the edge facing away from the camera's light (comic-book pop)
-  shader.fragmentShader = shader.fragmentShader.replace(
-    '#include <lights_fragment_end>',
-    `#include <lights_fragment_end>
-	{
-		float rim = pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), 3.0 );
-		reflectedLight.directDiffuse += diffuseColor.rgb * rim * 0.35 * vec3( 0.75, 0.85, 1.0 );
-	}`,
-  );
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute vec2 pbr;\nvarying vec2 vPbr;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvPbr = pbr;');
-  shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying vec2 vPbr;')
-    .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vPbr.y;')
-    .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.x;')
+    .replace('#include <common>', '#include <common>\nattribute vec2 pbr;\nattribute float ao;\nattribute vec2 printUv;\nvarying vec2 vPbr;\nvarying float vAo;\nvarying vec2 vPrintUv;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvPbr = pbr;\n\tvAo = ao;\n\tvPrintUv = printUv;');
+  // prints (the graphic on a pant leg) are laid over the cloth's own color from one shared atlas
+  shader.uniforms.printMap = { value: printAtlas() };
+  let f = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec2 vPbr;\nvarying float vAo;\nvarying vec2 vPrintUv;\nuniform sampler2D printMap;')
     .replace(
-      '#include <emissivemap_fragment>',
-      // a touch of self-light keeps players readable in the dark; metals get a little extra
-      // so they read as shiny without an environment map
-      `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * (${LIGHTING.characterGlow.toFixed(3)} + vPbr.x * 0.22);`,
-    );
+      '#include <color_fragment>',
+      `#include <color_fragment>
+	if ( vPrintUv.x >= 0.0 ) {
+		vec4 pr = texture2D( printMap, vPrintUv );
+		diffuseColor.rgb = diffuseColor.rgb * ( 1.0 - pr.a ) + pr.rgb;
+	}`,
+    )
+    .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vPbr.y;')
+    .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.x;');
+  if (TOON_DIRECT) {
+    f = f
+      .replace('#include <lights_physical_pars_fragment>', TOON_DIRECT)
+      // creased cloth is in shadow whichever way it faces
+      .replace('#include <lights_fragment_begin>', 'inkShadow = 1.0 - smoothstep( 0.74, 0.8, vAo );\n#include <lights_fragment_begin>')
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+	{
+		vec3 lum = vec3( 0.299, 0.587, 0.114 );
+		// direct light: mostly its brightness, a little of its color
+		vec3 key = mix( vec3( dot( inkDirect, lum ) ), inkDirect, 0.3 );
+		// ambient light: flat (the same from every side), so the shadow side is one even tone
+		vec3 amb = vec3( 0.0 );
+		#if defined( RE_IndirectDiffuse )
+			amb = mix( vec3( dot( irradiance, lum ) ), irradiance, 0.25 );
+		#endif
+		vec3 base = diffuseColor.rgb;
+		// the darkest darks are lifted a touch, so black cloth is charcoal (never the ink line's black)
+		vec3 lit = base + vec3( 0.022, 0.023, 0.027 );
+		reflectedLight.directDiffuse = lit * key * 0.2;
+		reflectedLight.indirectDiffuse = lit * amb * 0.34;
+		// seams and deep creases: an ink line
+		float line = smoothstep( 0.58, 0.66, vAo );
+		reflectedLight.directDiffuse *= mix( 0.25, 1.0, line );
+		reflectedLight.indirectDiffuse *= mix( 0.3, 1.0, line );
+		// highlights: hard-edged shapes instead of soft glows
+		float sp = dot( reflectedLight.directSpecular, lum );
+		reflectedLight.directSpecular *= smoothstep( 0.1, 0.16, sp ) * min( 1.0, 0.5 / max( sp, 1e-4 ) ) * smoothstep( 0.3, 0.46, 1.0 - vPbr.y );
+		// a cool light along edges turned away from the camera, strongest on top
+		float nv = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );
+		float rim = smoothstep( 0.62, 0.7, nv ) * ( 0.35 + 0.65 * saturate( normal.y * 0.6 + 0.5 ) ) * line;
+		float bright = dot( key, lum ) * 0.2 + dot( amb, lum ) * 0.5;
+		reflectedLight.directDiffuse += vec3( 0.62, 0.7, 0.85 ) * rim * bright * ( 0.26 + 0.5 * ( 1.0 - vPbr.y ) );
+	}`,
+      );
+  }
+  shader.fragmentShader = f.replace(
+    '#include <emissivemap_fragment>',
+    // a touch of self-light keeps players readable in the dark; metals get a little extra
+    // so they read as shiny without an environment map
+    `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * (${LIGHTING.characterGlow.toFixed(3)} + vPbr.x * 0.22);`,
+  );
 };
 
 // ------------------------------------------------------------------ working pieces
@@ -95,6 +136,10 @@ interface Work {
   index: Uint32Array;
   paint: Float32Array;
   pbr: Float32Array;
+  /** Baked creases and occlusion per vertex (1 = open cloth; low = a fold, a seam): drawn as shadow shapes and ink lines. */
+  ao: Float32Array;
+  /** Where each vertex is in the print atlas (only a printed patch has it). */
+  uv?: Float32Array;
 }
 
 interface PaintSpec {
@@ -119,8 +164,11 @@ function fromPiece(p: Piece, rig: Rig, tag: string, spec: PaintSpec | ((i: numbe
   const w: Work = {
     tag,
     pos: new Float32Array(n * 3), nrm: new Float32Array(n * 3), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4),
-    index: Uint32Array.from(src, (i) => map.get(i)!), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2),
+    index: Uint32Array.from(src, (i) => map.get(i)!), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2), ao: new Float32Array(n).fill(1),
   };
+  // the generated pieces bake their folds and seams as shading: kept apart from the color, so
+  // it can be drawn as flat shadow shapes (the older models' shading is a tint of the color itself)
+  const baked = p.rig.id === 'ink';
   // the piece was modelled on its own skeleton: move each vertex by how much its bones moved
   const delta: V3[] = p.rig.joints.map((k) => (rig.at.get(k) ?? v3()).clone().sub(p.rig.at.get(k)!));
   const same = p.rig === rig;
@@ -142,8 +190,9 @@ function fromPiece(p: Piece, rig: Rig, tag: string, spec: PaintSpec | ((i: numbe
     w.nrm.set([p.nrm[s * 3], p.nrm[s * 3 + 1], p.nrm[s * 3 + 2]], d * 3);
     const ps = sp(s);
     const c = ps.color ?? [1, 1, 1];
-    w.paint.set([ps.slot, ps.slotB ?? ps.slot, ps.mix ?? 0, (ps.shade ?? 1) * p.shade[s], pack(c[0], c[1], c[2])], d * PAINT_STRIDE);
+    w.paint.set([ps.slot, ps.slotB ?? ps.slot, ps.mix ?? 0, (ps.shade ?? 1) * (baked ? 1 : p.shade[s]), pack(c[0], c[1], c[2])], d * PAINT_STRIDE);
     w.pbr.set([0.04, 0.82], d * 2);
+    if (baked) w.ao[d] = p.shade[s];
   });
   return w;
 }
@@ -155,7 +204,7 @@ function fromProc(m: ProcMesh, rig: Rig, tag: string, nearestIn: Work[]): Work |
   const w: Work = {
     tag,
     pos: Float32Array.from(m.pos), nrm: Float32Array.from(m.nrm), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4),
-    index: Uint32Array.from(m.idx), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2),
+    index: Uint32Array.from(m.idx), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2), ao: new Float32Array(n).fill(1),
   };
   for (let i = 0; i < n; i++) {
     const a = m.attr.slice(i * 9, i * 9 + 9);
@@ -468,7 +517,9 @@ function finishes(look: Readonly<Appearance>): number[] {
 
 export function geometryKey(look: Readonly<Appearance>, expression = 'neutral'): string {
   return LOOK_FIELD_KEYS.filter((k) => !COLOR_FIELDS.has(k)).map((k) => look[k]).join('|') + `|${look.details.join(',')}|${expression}`
-    + `|${look.backpack ?? 'none'}|${finishes(look).filter((x) => x !== undefined).join(',')}`;
+    + `|${look.backpack ?? 'none'}|${finishes(look).filter((x) => x !== undefined).join(',')}`
+    // (the belt's color is paint: only whether there is one changes the mesh)
+    + `|${look.shoulders}|${look.headSize}|${look.mask}|${look.waistChain}|${look.faceMark}${look.face === 'black' ? 'd' : ''}|${look.belt === 'none' ? 0 : 1}|${look.legPrint}`;
 }
 
 export class LookBuilder {
@@ -499,6 +550,8 @@ export class LookBuilder {
   build(look: Readonly<Appearance>, expression = 'neutral'): Assembled | null {
     const lib = this.library();
     if (!lib?.ready) return null;
+    // the faceless head has no expressions
+    if (lib.rigFor(look.bodyType)?.id === 'ink') expression = 'neutral';
     const key = geometryKey(look, expression);
     const hit = this.cache.get(key);
     if (hit) {
@@ -554,25 +607,21 @@ export class LookBuilder {
     const mats = HEAD_MATS[src];
     const srcHead = this.sourceHead(lib, src);
     const skinP = lib.piece(src, 'Head', 'Skin')!;
-    // Urban Ink heads carry soft masks: lips (and darker skin in the nostrils and ears)
+    // (the older CC0 heads carry soft masks: lips, and darker skin in the nostrils and ears)
     const skinMask = skinP.mask;
     const skin = fromPiece(skinP, rig, 'head', skinMask
       ? (i) => (skinMask[i * 2 + 1] > skinMask[i * 2] ? { slot: SLOT.SKIN, slotB: SLOT.SKIN_DARK, mix: skinMask[i * 2 + 1] } : { slot: SLOT.SKIN, slotB: SLOT.LIPS, mix: skinMask[i * 2] })
       : { slot: SLOT.SKIN });
     const headParts: Work[] = [skin];
+    // the faceless head: a blank plate over the front of it, in its own color
+    const plateP = ink ? lib.piece('ink', 'Head', 'Face') : null;
+    if (plateP) headParts.push(fromPiece(plateP, rig, 'faceplate', { slot: SLOT.FACE }));
     const darkP = mats.dark ? lib.piece(src, 'Head', mats.dark) : null;
     if (darkP) headParts.push(fromPiece(darkP, rig, 'head-dark', { slot: SLOT.SKIN_DARK }));
-    let eyes = fromPiece(lib.piece(src, 'Head', mats.eyes)!, rig, 'eyes', { slot: SLOT.IRIS });
+    const eyes = fromPiece(lib.piece(src, 'Head', mats.eyes)!, rig, 'eyes', { slot: SLOT.IRIS });
     const irisCount = eyes.pos.length / 3;
-    if (ink) {
-      // whole eyeballs: the iris first (the head is measured on it), then the white and the pupil
-      const sclera = lib.piece('ink', 'Head', 'Sclera'), pupil = lib.piece('ink', 'Head', 'Pupil');
-      const parts = [eyes];
-      if (sclera) parts.push(fromPiece(sclera, rig, 'eyes', { slot: SLOT.FIXED, color: lin(0xf2eee6) }));
-      if (pupil) parts.push(fromPiece(pupil, rig, 'eyes', { slot: SLOT.FIXED, color: lin(0x070707) }));
-      eyes = concatWorks('eyes', parts);
-      setPbr(eyes, 0.05, 0.25);
-    }
+    // (on the faceless head the eye and brow pieces are never drawn: they only mark where the
+    // eye line is, so hair, hats and glasses can be fitted)
     const brows = fromPiece(lib.piece(src, 'Head', mats.brows)!, rig, 'brows', { slot: SLOT.BROW });
 
     if (srcHead) {
@@ -586,7 +635,7 @@ export class LookBuilder {
         }
       }
       const moved = (q: V3) => shapeHead(q.clone(), 1, f, look.headShape, look.faceShape);
-      tweakFeatures(look, srcHead, moved, headParts, eyes, brows);
+      if (!ink) tweakFeatures(look, srcHead, moved, headParts, eyes, brows);
       const hs = HEAD_SCALE[look.headSize];
       if (hs) {
         // about the base of the skull, so the neck stays put and the head grows up and out
@@ -604,10 +653,13 @@ export class LookBuilder {
     mark('head pieces + shape');
     // measured on the neutral face, so every expression builds exactly the same pieces
     const h = new HeadRig(surfaceOf(headParts, rig), eyes.pos.subarray(0, irisCount * 3), brows.pos);
-    if (ink) inkChin(h, headParts);
+    if (ink) blankLandmarks(h);
     mark('head measure');
-    applyExpression(expr, h, eyes, brows);
-    works.push(...headParts, eyes, brows);
+    if (ink) works.push(...headParts);
+    else {
+      applyExpression(expr, h, eyes, brows);
+      works.push(...headParts, eyes, brows);
+    }
 
     // an open skull (the punk model's hair covered it): close it with skin
     const cap = new ProcMesh({ bone: 'Head' });
@@ -627,11 +679,10 @@ export class LookBuilder {
         transferHair(w.pos, from, h);
         hairWorks.push(w);
       }
-    } else {
-      buildHair(look.hair, h, procHair);
     }
     const hat = new ProcMesh({ bone: 'Head' });
     const fit = buildHat(look.hat, h, hat);
+    if (!asset) buildHair(look.hair, h, procHair, fit?.covered);
     if (fit) {
       for (const w of hairWorks) tuckHair(w.pos, h, fit.covered, fit.room);
       tuckHair(procHair.pos, h, fit.covered, fit.room);
@@ -642,18 +693,24 @@ export class LookBuilder {
 
     mark('hair + hat');
     // ---------------- face pieces
-    const grill = look.mouthAcc.endsWith('grill') ? look.mouthAcc.replace('grill', '') : 'none';
-    const mouth = new ProcMesh({ bone: 'Head' });
-    // Urban Ink heads have sculpted lips: the procedural mouth is only for grills
-    if (rig.id !== 'ink' || grill !== 'none') buildMouth(h, mouth, look.lips, expr, grill);
-    pushProc(works, mouth, rig, 'mouth', []);
-    const beard = new ProcMesh({ nearest: true, fallback: 'Head' });
-    buildFacialHair(look.facialHair, h, beard, look.lips);
-    pushProc(works, beard, rig, 'beard', headParts);
     const bits = new ProcMesh({ bone: 'Head' });
-    buildLipPiercing(look.mouthAcc, h, bits, look.lips);
-    buildFacePiercing(look.faceAcc, h, bits);
-    buildDetails(look.details, h, bits);
+    if (ink) {
+      // a blank face: nothing on it but a faint line for the mouth and, if picked, a mark
+      const marks = new ProcMesh({ bone: 'Head' });
+      buildFaceMarks(look.faceMark, h, marks, look.face === 'black');
+      pushProc(works, marks, rig, 'facemark', []);
+    } else {
+      const grill = look.mouthAcc.endsWith('grill') ? look.mouthAcc.replace('grill', '') : 'none';
+      const mouth = new ProcMesh({ bone: 'Head' });
+      buildMouth(h, mouth, look.lips, expr, grill);
+      pushProc(works, mouth, rig, 'mouth', []);
+      const beard = new ProcMesh({ nearest: true, fallback: 'Head' });
+      buildFacialHair(look.facialHair, h, beard, look.lips);
+      pushProc(works, beard, rig, 'beard', headParts);
+      buildLipPiercing(look.mouthAcc, h, bits, look.lips);
+      buildFacePiercing(look.faceAcc, h, bits);
+      buildDetails(look.details, h, bits);
+    }
     buildEarrings(look.earrings, h, bits);
     buildGlasses(look.glasses, h, bits);
     pushProc(works, bits, rig, 'face', []);
@@ -682,10 +739,37 @@ export class LookBuilder {
       // everything built so far moves with the body (a thicker neck carries the beard and mask
       // with it; pieces riding rigidly on the head bone are not changed)
       shapeBody([...body, ...works], rig, girth);
-      if (look.wrist === 'gloves' || look.wrist === 'blackgloves') paintGloves(body, rig, look.wrist === 'gloves');
+      if (look.wrist === 'gloves' || look.wrist === 'blackgloves' || look.wrist === 'glovewatches') paintGloves(body, rig, look.wrist === 'gloves');
       if (look.bodyType === 'fem') shapeBust(body, 1);
       else if (look.bodyType === 'neutral') shapeBust(body, 0.35);
       works.push(...body);
+      // the graphic on the left thigh: a patch of the pants' own cloth that carries the print
+      const patch = LONG_PANTS.has(look.bottom) ? buildLegPrint(look.legPrint, legs, rig) : null;
+      if (patch && legs.length) {
+        const n = patch.pos.length / 3;
+        const w: Work = {
+          tag: 'print', pos: patch.pos, nrm: patch.nrm, si: new Uint16Array(n * 4), sw: new Float32Array(n * 4), index: patch.index,
+          paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2), ao: new Float32Array(n).fill(1), uv: patch.uv,
+        };
+        const grid = nearestGrid(legs);
+        const p = v3();
+        for (let i = 0; i < n; i++) {
+          const near = grid(p.fromArray(w.pos, i * 3));
+          if (near) {
+            // it moves, is colored and shines exactly like the cloth under it
+            w.si.set(near.work.si.subarray(near.i * 4, near.i * 4 + 4), i * 4);
+            w.sw.set(near.work.sw.subarray(near.i * 4, near.i * 4 + 4), i * 4);
+            w.paint.set(near.work.paint.subarray(near.i * PAINT_STRIDE, (near.i + 1) * PAINT_STRIDE), i * PAINT_STRIDE);
+            w.pbr.set(near.work.pbr.subarray(near.i * 2, near.i * 2 + 2), i * 2);
+          } else {
+            w.si[i * 4] = rig.jointIndex.get('UpperLegL') ?? 0;
+            w.sw[i * 4] = 1;
+            w.paint.set([SLOT.BOTTOM, SLOT.BOTTOM, 0, 1, 0], i * PAINT_STRIDE);
+            w.pbr.set(FABRIC.denim, i * 2);
+          }
+        }
+        works.push(w);
+      }
     } else {
     switch (look.top) {
       case 'tee':
@@ -774,7 +858,7 @@ export class LookBuilder {
     const fine = new ProcMesh({ nearest: true, fallback: 'Chest' });
     buildNecklace(look.necklace, bq, jew, fine);
     buildWrist(look.wrist, bq, jew, fine);
-    buildCrewBands(bq, jew);
+    if (!ink) buildCrewBands(bq, jew);
     pushProc(works, jew, rig, 'jewelry', [...body, skin]);
     pushProc(works, fine, rig, 'fine', [...body, skin]);
     if (look.waistChain && look.waistChain !== 'none') {
@@ -805,7 +889,8 @@ export class LookBuilder {
       ni += w.index.length;
     }
     const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
-    const paint = new Float32Array(nv * PAINT_STRIDE), pbr = new Float32Array(nv * 2), rigPos = new Float32Array(nv * 3);
+    const paint = new Float32Array(nv * PAINT_STRIDE), pbr = new Float32Array(nv * 2), rigPos = new Float32Array(nv * 3), ao = new Float32Array(nv);
+    const printUv = new Float32Array(nv * 2).fill(-1);
     const shine = finishes(look);
     // ink line width per vertex (stones and engraving would drown in the full outline)
     const ink = new Float32Array(nv).fill(1);
@@ -829,6 +914,8 @@ export class LookBuilder {
       sw.set(w.sw, ov * 4);
       paint.set(w.paint, ov * PAINT_STRIDE);
       pbr.set(w.pbr, ov * 2);
+      ao.set(w.ao, ov);
+      if (w.uv) printUv.set(w.uv, ov * 2);
       // AJ's metallic cloth (gold foil tops, 24K kicks...)
       for (let i = 0; i < n; i++) {
         const m = shine[w.paint[i * PAINT_STRIDE]];
@@ -844,6 +931,8 @@ export class LookBuilder {
     g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     g.setAttribute('pbr', new THREE.BufferAttribute(pbr, 2));
+    g.setAttribute('ao', new THREE.BufferAttribute(ao, 1));
+    g.setAttribute('printUv', new THREE.BufferAttribute(printUv, 2));
     g.setAttribute('ink', new THREE.BufferAttribute(ink, 1));
     g.setIndex(new THREE.BufferAttribute(index, 1));
     g.computeBoundingBox();
@@ -867,9 +956,11 @@ function paintGloves(body: Work[], rig: Rig, fingerless = false): void {
   const hand = jointSet(rig, (k) => /^(Wrist|Index|Middle|Ring|Pinky|Thumb)/.test(k) && !(fingerless && /^(Index|Middle|Ring|Pinky)[34]|^Thumb3/.test(k)));
   const leather = pack(...lin(0x17171b));
   for (const w of body) {
+    // full gloves run up the wrist to the sleeve (the hand piece carries a stub of forearm)
+    const whole = !fingerless && w.tag === 'hand-skin';
     for (let i = 0; i < w.pos.length / 3; i++) {
       const a = i * PAINT_STRIDE;
-      if (w.paint[a] !== SLOT.SKIN || weightOnSet(w, i, hand) < 0.5) continue;
+      if (w.paint[a] !== SLOT.SKIN || (!whole && weightOnSet(w, i, hand) < 0.5)) continue;
       w.paint[a] = SLOT.FIXED;
       w.paint[a + 1] = SLOT.FIXED;
       w.paint[a + 4] = leather;
@@ -880,8 +971,8 @@ function paintGloves(body: Work[], rig: Rig, fingerless = false): void {
 
 /** Ink line width per working piece (1 = the full outline). */
 const INK_WIDTH: Record<string, number> = {
-  fine: 0.12, head: 0.2, eyes: 0, brows: 0, mouth: 0.15, face: 0.15, beard: 0.3, skullcap: 0.2,
-  hair: 0.55, 'hand-skin': 0.35, 'top-trim': 0.3, laces: 0.25, jewelry: 0.3, mask: 0.4,
+  fine: 0.12, head: 0.75, faceplate: 0.55, facemark: 0, eyes: 0, brows: 0, mouth: 0.15, face: 0.15, beard: 0.3, skullcap: 0.2,
+  hair: 0.7, 'hand-skin': 0.45, 'top-trim': 0.25, laces: 0.25, jewelry: 0.3, mask: 0.4, print: 0, belt: 0.45, studs: 0.12, waistband: 0.4,
 };
 
 // ------------------------------------------------------------------ Urban Ink outfits
@@ -912,6 +1003,7 @@ function buildInkOutfit(look: Readonly<Appearance>, add: AddPiece, body: Work[],
     return p;
   };
   const TOP = { slot: SLOT.TOP }, BOTTOM = { slot: SLOT.BOTTOM }, SHOE = { slot: SLOT.SHOE }, SKIN = { slot: SLOT.SKIN };
+  const ZIP = { slot: SLOT.FIXED, color: lin(0xc9ced5) };
   const skins = new Set<string>(['Skin_Hand']);
   switch (look.top) {
     case 'tee':
@@ -933,11 +1025,15 @@ function buildInkOutfit(look: Readonly<Appearance>, add: AddPiece, body: Work[],
       put('Top_ZipHoodie_Trim', { slot: SLOT.FIXED, color: lin(0xb8bcc2) }, 'top-trim', 'metal');
       break;
     case 'puffer':
+      // hooded puffer jacket, silver zip
       put('Top_Puffer', TOP, 'top', 'nylon');
+      put('Top_Puffer_Zip', ZIP, 'top-trim', 'metal');
       break;
     case 'puffervest':
+      // puffer vest over a black long sleeve
       put('Top_PufferVest', TOP, 'top', 'nylon');
-      skins.add('Skin_UpperArm').add('Skin_Forearm');
+      put('Top_PufferVest_Zip', ZIP, 'top-trim', 'metal');
+      put('Top_PufferVest_Under', { slot: SLOT.FIXED, color: lin(0x1b1b1f) }, 'top-under', 'cotton');
       break;
     default:
       put('Top_Hoodie', TOP, 'top', 'fleece');
@@ -950,31 +1046,56 @@ function buildInkOutfit(look: Readonly<Appearance>, add: AddPiece, body: Work[],
   const [bottom, fabric] = BOTTOMS[look.bottom] ?? BOTTOMS.baggyjeans;
   put(bottom, BOTTOM, 'bottom', fabric, 'Legs');
   if (look.bottom === 'shorts') skins.add('Skin_Thigh').add('Skin_Shin');
+  if (look.bottom !== 'leggings') {
+    // pants are worn low: the boxers' waistband shows above them, and a studded belt if picked
+    put('Waistband', { slot: SLOT.FIXED, color: lin(0xf1efea) }, 'waistband', 'cotton', 'Legs');
+    if (look.belt !== 'none') {
+      put('Belt', { slot: SLOT.BELT }, 'belt', 'leather', 'Legs');
+      put('Belt_Metal', { slot: SLOT.FIXED, color: lin(0xd9dde2) }, 'studs', 'metal', 'Legs');
+    }
+  }
   const SHOES: Record<string, [string, number, keyof typeof FABRIC]> = {
     lowtops: ['Lowtop', 0xf2f1ec, 'leather'], running: ['Running', 0xf0efe9, 'mesh'], chunky: ['Chunky', 0xf4f3ee, 'leather'], boots: ['Boot', 0x2a2b2f, 'leather'],
   };
-  const [shoe, sole, upper] = SHOES[look.shoes] ?? SHOES.chunky;
+  const [shoe, sole, upper] = SHOES[look.shoes] ?? SHOES.lowtops;
   put(`Shoe_${shoe}`, SHOE, 'shoes', upper, 'Feet');
   put(`Shoe_${shoe}_Sole`, { slot: SLOT.FIXED, color: lin(sole) }, 'soles', 'rubber', 'Feet');
   put(`Shoe_${shoe}_Lace`, { slot: SLOT.FIXED, color: lin(look.shoes === 'boots' ? 0x5a4632 : 0xf4f3ef) }, 'laces', 'cord', 'Feet');
   for (const m of skins) put(m, SKIN, m === 'Skin_Hand' ? 'hand-skin' : 'top-skin', 'cotton', m === 'Skin_Thigh' || m === 'Skin_Shin' ? 'Legs' : 'Body');
-}
-
-/**
- * The chin on a smooth Urban Ink head: HeadRig finds it by a sudden step in the face profile,
- * which a sculpted (blended) chin does not have. Here: the lowest point down the middle of the
- * face that still stands out in front, near the lips' depth.
- */
-function inkChin(h: HeadRig, skins: Work[]): void {
-  const cx = h.mouth.x, zMin = h.mouth.z - 0.032;
-  let low = h.chinY;
-  for (const w of skins) {
-    for (let i = 0; i < w.pos.length / 3; i++) {
-      const x = w.pos[i * 3], y = w.pos[i * 3 + 1], z = w.pos[i * 3 + 2];
-      if (Math.abs(x - cx) < 0.014 && z > zMin && y < h.mouth.y && y < low) low = y;
+  // a long top hangs over the top of the pants: what is under it is left out, so wide pants
+  // (and the belt) never poke through the shirt
+  const hem = TOP_HEM[look.top] ?? 0.86;
+  if (hem < 0.95) {
+    for (const w of body) {
+      if (!/^(bottom|belt|studs|waistband)$/.test(w.tag)) continue;
+      const keep: number[] = [];
+      for (let t = 0; t < w.index.length; t += 3) {
+        const a = w.index[t], b = w.index[t + 1], c = w.index[t + 2];
+        if (Math.min(w.pos[a * 3 + 1], w.pos[b * 3 + 1], w.pos[c * 3 + 1]) < hem + 0.004) keep.push(a, b, c);
+      }
+      w.index = Uint32Array.from(keep);
     }
   }
-  h.chinY = Math.min(h.chinY, low + 0.004);
+}
+
+/** Where each top's hem is (bind pose, meters up): tops not listed end at the hips. */
+const TOP_HEM: Record<string, number> = { tee: 0.875, oversized: 0.875, tank: 0.93, crop: 1.13, puffer: 0.985, puffervest: 0.985 };
+
+/** Pants long enough to carry the thigh graphic. */
+const LONG_PANTS = new Set(['baggyjeans', 'jeans', 'slimjeans', 'cargo']);
+
+/**
+ * Landmarks on the faceless head. It has no nose, lips or chin crease to find, so they are
+ * placed by proportion from the eye line (scaled with the head, whatever its shape and size).
+ */
+function blankLandmarks(h: HeadRig): void {
+  const eyeY = h.eyeY, cx = h.center.x;
+  const k = Math.max(0.6, (h.crownY - eyeY) / 0.116);
+  const front = (y: number): V3 => h.project(v3(cx, y, h.center.z + 0.2));
+  h.chinY = eyeY - 0.12 * k;
+  h.noseBaseY = eyeY - 0.046 * k;
+  h.noseTip = front(eyeY - 0.03 * k);
+  h.mouth = front(eyeY - 0.074 * k);
 }
 
 /**
@@ -1011,7 +1132,7 @@ function maskFromSkin(skins: Work[], h: HeadRig, kind: string): Work | null {
     const n = map.size;
     const out: Work = {
       tag: 'mask', pos: new Float32Array(n * 3), nrm: new Float32Array(n * 3), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4),
-      index: Uint32Array.from(keep, (v) => map.get(v)!), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2),
+      index: Uint32Array.from(keep, (v) => map.get(v)!), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2), ao: new Float32Array(n).fill(1),
     };
     for (const [v, i] of map) {
       const nx = w.nrm[v * 3], ny = w.nrm[v * 3 + 1], nz = w.nrm[v * 3 + 2];
@@ -1095,7 +1216,7 @@ function concatWorks(tag: string, parts: Work[]): Work {
   }
   const out: Work = {
     tag, pos: new Float32Array(n * 3), nrm: new Float32Array(n * 3), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4),
-    index: new Uint32Array(ni), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2),
+    index: new Uint32Array(ni), paint: new Float32Array(n * PAINT_STRIDE), pbr: new Float32Array(n * 2), ao: new Float32Array(n),
   };
   let ov = 0, oi = 0;
   for (const w of parts) {
@@ -1106,6 +1227,7 @@ function concatWorks(tag: string, parts: Work[]): Work {
     out.sw.set(w.sw, ov * 4);
     out.paint.set(w.paint, ov * PAINT_STRIDE);
     out.pbr.set(w.pbr, ov * 2);
+    out.ao.set(w.ao, ov);
     for (let k = 0; k < w.index.length; k++) out.index[oi + k] = w.index[k] + ov;
     ov += c;
     oi += w.index.length;

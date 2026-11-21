@@ -1,7 +1,7 @@
 import type { Appearance } from './config/appearance';
 import type { TeamId } from './config/crews';
 import type { ModeId } from './config/game';
-import type { SquadMode } from './config/porch';
+import { HEAL_KINDS, type SquadMode } from './config/porch';
 import type { Loadout } from './config/weapons';
 import { BTN, PSTATE_KEYS, makeInputCmd, type InputCmd } from './sim/player';
 
@@ -252,7 +252,7 @@ export function decodeSnapshot(w: WireSnapshot): Snapshot {
 const ANGLE_Q = 10000;
 const POS_Q = 100;
 const AXIS_Q = 127;
-export const INPUT_STRIDE = 11;
+export const INPUT_STRIDE = 12;
 
 /**
  * Snaps a command to the wire precision in place. The client must do this BEFORE predicting,
@@ -284,6 +284,7 @@ export function encodeInput(c: InputCmd, out: number[]): number[] {
     Math.round(c.oy * POS_Q),
     Math.round(c.oz * POS_Q),
     c.rt,
+    c.heal,
   );
   return out;
 }
@@ -311,6 +312,7 @@ export function decodeInputs(raw: unknown, max = 8): InputCmd[] {
     c.oy = int(raw[i + 8], -100000, 100000) / POS_Q;
     c.oz = int(raw[i + 9], -100000, 100000) / POS_Q;
     c.rt = int(raw[i + 10], 0, 0x7fffffff);
+    c.heal = int(raw[i + 11], 0, HEAL_KINDS.length);
     out.push(c);
   }
   return out;
@@ -406,4 +408,28 @@ export interface JoinOptions {
   squads?: SquadMode;
   /** Account session (GRAMS / AJ's / TRAP): signed-in players get their name and owned cosmetics. */
   token?: string;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Live scores (billboards)
+// ---------------------------------------------------------------------------------------------
+/** One game on the scoreboard billboards (served by the game server at /api/scores). */
+export interface ScoreGame {
+  /** 'NBA', 'NFL', ... */
+  league: string;
+  away: string;
+  home: string;
+  /** Scores as shown ('' before the game starts). */
+  awayScore: string;
+  homeScore: string;
+  /** 'Final', 'Q3 5:12', '7:30 PM ET' ... */
+  status: string;
+  /** Not started, being played, over. */
+  state: 'pre' | 'in' | 'post';
+}
+
+export interface ScoresMsg {
+  games: ScoreGame[];
+  /** When the feed was last read (ms since epoch), 0 if it never has been. */
+  at: number;
 }

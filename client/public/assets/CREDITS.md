@@ -15,6 +15,7 @@ sound effects) is generated in code and original to this project.
 | `fonts/permanent-marker.woff2` | Permanent Marker (UI marker lettering) | Font Diner | Apache License 2.0 | https://fonts.google.com/specimen/Permanent+Marker |
 | `fonts/inter.woff2` | Inter (title screen) | Rasmus Andersson | SIL Open Font License 1.1 | https://fonts.google.com/specimen/Inter |
 | `fonts/rubik-spray-paint.woff2` | Rubik Spray Paint (UI graffiti titles) | NaN, Hubert & Fischer | SIL Open Font License 1.1 | https://fonts.google.com/specimen/Rubik+Spray+Paint |
+| `fonts/paytone-one.woff2` | Paytone One (area names over the map) | Vernon Adams | SIL Open Font License 1.1 | https://fonts.google.com/specimen/Paytone+One |
 
 To swap a model, drop a new `.glb` over the old file. If a file is missing or fails to load the
 game falls back to its built-in procedural stand-in, so nothing breaks.

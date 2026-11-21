@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  BOTTOM_COLORS, EYE_COLORS, HAIR_COLORS, SHOE_COLORS, SKIN_TONES, TOP_COLORS, type Appearance, type LookOption,
+  BOTTOM_COLORS, EYE_COLORS, FACES, HAIR_COLORS, SHOE_COLORS, SKIN_TONES, TOP_COLORS, type Appearance, type LookOption,
 } from '@shared/config/appearance';
 import { crewColorHex, type TeamId } from '@shared/config/crews';
 import { noise3 } from './hair';
@@ -44,8 +44,13 @@ export function paletteFor(look: Readonly<Appearance>, team: TeamId): RGB[] {
   out[SLOT.SHOE] = pick(SHOE_COLORS, look.shoeColor);
   out[SLOT.CREW] = lin(crewColorHex(team));
   out[SLOT.TEETH] = look.teeth === 'white' ? lin(0xfbfcff) : lin(0xe9dcc0);
+  out[SLOT.FACE] = look.face === 'skin' ? skin : pick(FACES, look.face);
+  out[SLOT.BELT] = lin(BELT_COLORS[look.belt] ?? 0xb3202a);
   return out;
 }
+
+/** Belt strap colors by option. */
+const BELT_COLORS: Record<string, number> = { redstuds: 0xb3202a, blackstuds: 0x17171b, whitestuds: 0xeceae4 };
 
 /** Floats per vertex in an assembled character's paint data: slot, slot B, mix, shade, packed fixed color. */
 export const PAINT_STRIDE = 5;

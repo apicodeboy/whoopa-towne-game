@@ -1,5 +1,7 @@
 import { button, el } from './dom';
 import { gIcon } from './economyArt';
+import { glyphHtml } from './prompts';
+import type { DeviceKind } from '../input/types';
 
 export interface AjTalkActions {
   shop: () => void;
@@ -57,7 +59,7 @@ export class AjTalk {
     // controllers: d-pad down (the same button that searches bags in JUMP OFF THE PORCH)
     this.promptEl.innerHTML = device === 'touch'
       ? 'Tap to <b>Talk to AJ</b>'
-      : `Press <span class="aj-key">${device === 'kbm' ? 'E' : '▼'}</span> to <b>Talk to AJ</b>`;
+      : `Press ${glyphHtml(device as DeviceKind, 'use')} to <b>Talk to AJ</b>`;
   }
 
   open(): void {

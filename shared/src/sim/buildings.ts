@@ -108,7 +108,7 @@ export class Buildings {
     });
     for (let i = 0; i < this.windows.length; i++) {
       this.win[i] = WIN_CLOSED;
-      this.setWindow(i, WIN_CLOSED);
+      this.setWindow(i, this.windows[i].broken ? WIN_BROKEN : WIN_CLOSED);
     }
   }
 

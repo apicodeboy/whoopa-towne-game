@@ -17,14 +17,15 @@ import {
 import { playersFrozen, stepProjectile, type Projectile } from '@shared/sim/game';
 import type { PhysicsWorld } from '@shared/sim/physics';
 import {
-  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, currentSpread, eyeHeight, magOf, makeInputCmd, makePlayerState, pickHeal, playerStateFromArray, reserveOf, weaponInSlot,
+  AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, canHeal, currentSpread, eyeHeight, healCount, magOf, makeInputCmd, makePlayerState, pickHeal, playerStateFromArray, reserveOf, weaponInSlot,
   type InputCmd, type PlayerState, type StepActions,
 } from '@shared/sim/player';
 import type { Assets } from './assets';
 import type { SettingsStore } from '../core/settings';
 import type { InputManager } from '../input/inputManager';
 import type { Session } from '../net/session';
-import { Hud, makeHudState, type HudPlayerRow, type HudState } from '../ui/hud';
+import { Hud, escapeHtml, makeHudState, type HudPlayerRow, type HudState } from '../ui/hud';
+import { WeaponWheel, WHEEL_SEGMENTS, segmentAt, type WheelItem } from '../ui/weaponWheel';
 import { PorchHud, type PorchHudState } from '../ui/porchHud';
 import { CameraRig } from './camera';
 import { makePose, type CharacterPose, type CharacterVisual } from './characters/characterTypes';
@@ -37,6 +38,8 @@ import { AjNpc } from './ajs/ajNpc';
 import { DamageNumbers } from '../ui/damageNumbers';
 import { GunIcons } from './gunIcons';
 import { glyphHtml } from '../ui/prompts';
+import { defaultServerUrl } from '../net/online';
+import { ScoreFeed } from '../net/scores';
 import { Predictor } from './predictor';
 import { RemotePlayer } from './remotePlayer';
 import type { GameRenderer } from './renderer';
@@ -117,6 +120,7 @@ function itemName(kind: number, code: number, count: number): string {
   if (kind === ITEM.AMMO) return `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`.toUpperCase();
   if (kind === ITEM.HEAL) return `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`.toUpperCase();
   if (kind === ITEM.ARMOR) return `ARMOR (${code})`;
+  if (kind === ITEM.IBUPROFEN) return `${count}× IBUPROFEN`;
   if (kind === ITEM.THROWABLE) return `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`.toUpperCase();
   return 'ITEM';
 }
@@ -148,6 +152,12 @@ export class Game {
   snap: Snapshot | null = null;
   /** Called every rendered frame after the simulation. */
   onFrame: ((dt: number) => void) | null = null;
+  /** The weapon and gadget wheel (hold L2 / B). */
+  private wheel: WeaponWheel;
+  /** A healing item picked on the wheel is used by itself: which one (HEAL_KINDS index, -1 = none), for how long, and whether it got going. */
+  private healLatch = -1;
+  private healLatchT = 0;
+  private healLatchGoing = false;
   /** Fired when the pause button (Esc / Start) is pressed. */
   onPause: (() => void) | null = null;
   /** Fired once when the match reaches its final whistle. */
@@ -184,6 +194,7 @@ export class Game {
   /** The door or window in reach (same rule as the server), its prompt, a tap on that prompt. */
   private bldTarget: UseTarget | null = null;
   private usePrompt: HTMLButtonElement;
+  private scoreFeed: ScoreFeed | null = null;
   /** JUMP OFF THE PORCH on a map with a warm-up area: the pregame is played on foot there. */
   private readonly arena: boolean;
   private usePromptHtml = '';
@@ -280,6 +291,11 @@ export class Game {
     this.session.handlers.onSnapshot = (s) => this.handleSnapshot(s);
     this.session.handlers.onRoster = (r) => this.setRoster(r);
     this.arena = this.session.mode === 'porch' && !!this.map.warmup;
+    // live scores for the scoreboard billboards (asked of our own game server)
+    if (this.stage.world.scoreboards && typeof fetch === 'function') {
+      this.scoreFeed = new ScoreFeed(defaultServerUrl(), (msg) => this.stage.world.setScores(msg));
+      this.scoreFeed.start();
+    }
     // doors and windows as they are in this match right now
     this.stage.buildings.decode(this.session.bld);
     this.stage.bldVisual.snap();
@@ -287,6 +303,7 @@ export class Game {
     this.usePrompt.className = 'aj-prompt use-prompt hidden';
     this.usePrompt.addEventListener('click', () => (this.tapUse = 2));
     this.hud.root.append(this.usePrompt);
+    this.wheel = new WeaponWheel(this.hud.root);
 
     if (this.session.mode === 'porch' && this.session.porch) {
       this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
@@ -492,6 +509,12 @@ export class Game {
         }
         const n = e[6];
         const color = this.teamOf(shooter) === 0 ? 0xbfd9ff : 0xffd0b0;
+        // a punch: no tracer, flash or light, just the thump (and a puff if it lands)
+        if (WEAPONS[WEAPON_IDS[e[2]]]?.kind === 'melee') {
+          if (e[10] === HIT_PLAYER) this.effects.hitPuff(_v2.set(e[7] / 100, e[8] / 100, e[9] / 100));
+          audio?.gunshot(e[2], origin, false);
+          break;
+        }
         for (let k = 0; k < n; k++) {
           const o = 7 + k * 4;
           _v2.set(e[o] / 100, e[o + 1] / 100, e[o + 2] / 100);
@@ -735,6 +758,7 @@ export class Game {
       if (f.swapShoulder) this.rig.swapShoulder();
     }
     this.recoilP *= Math.exp(-dt * 7);
+    this.updateWheel();
     if (!this.paused) this.latched |= this.buttonBits();
 
     // ---- fixed-rate simulation ----
@@ -801,6 +825,8 @@ export class Game {
     const weapon = weaponInSlot(st, st.slot);
     this.rig.baseFov = settings.values.fov;
     this.rig.aimFovMult = weapon ? weapon.aimFov : 1;
+    // a stronger zoom (AR, SMG) keeps you and the gun framed as at the usual zoom
+    this.rig.aimFrame = weapon && weapon.aimFov < 0.75 && weapon.aimFov >= 0.45 ? 0.75 / weapon.aimFov : 1;
     this.rig.update(
       dt, this.renderPos.x, this.visY, this.renderPos.z, aimYaw, aimPitch,
       (this.alive || spectating) && st.aiming === 1 && !spectating, this.alive && st.crouching === 1 && !spectating, this.alive && st.sprinting === 1, this.phys,
@@ -897,7 +923,9 @@ export class Game {
       this.porchWorld.zone = snap.porch.zone;
       this.porchWorld.next = snap.porch.next;
     }
-    this.porchWorld?.update(dt, this.session.serverTime(), snap?.porch ? snap.porch.takeoff : -1);
+    // (during the warm-up the blimp cruises in, timed to arrive as everyone boards)
+    const boardIn = snap?.phase === PHASE.WARMUP && snap.porch ? Math.max(0, snap.porch.stageLeft - (this.session.serverTime() - snap.t) / 1000) : 0;
+    this.porchWorld?.update(dt, this.session.serverTime(), snap?.porch ? snap.porch.takeoff : -1, boardIn);
     if (this.crowd && snap?.porch) {
       // the crowd gathers through the first warning, then it is out in force
       const pz = snap.porch;
@@ -969,6 +997,7 @@ export class Game {
     cmd.buttons = active ? this.buttonBits() | this.latched : 0;
     this.latched = 0;
     cmd.slot = input.slot;
+    cmd.heal = this.healLatch >= 0 ? this.healLatch + 1 : 0;
     this.rig.positionFor(st.x, st.y, st.z, cmd.yaw, cmd.pitch, this.camOrigin);
     cmd.ox = this.camOrigin.x; cmd.oy = this.camOrigin.y; cmd.oz = this.camOrigin.z;
     cmd.rt = Math.max(0, this.session.serverTime() - INTERP_DELAY_MS);
@@ -978,6 +1007,12 @@ export class Game {
       const act = this.predictor.step(cmd, this.phys, this.loadout, frozen);
       this.act = act;
       if (st.slot !== input.slot) input.syncSlot(st.slot);
+      if (this.healLatch >= 0) {
+        // a wheel pick carries on by itself until it is done (or interrupted: firing, swapping)
+        this.healLatchT += TICK_DT;
+        if (act.healStart || st.healT > 0) this.healLatchGoing = true;
+        if (act.healed >= 0 || act.healCanceled || (this.healLatchGoing && st.healT <= 0) || (!this.healLatchGoing && this.healLatchT > 0.3)) this.healLatch = -1;
+      }
       if (act.shot) this.predictShot(cmd, act);
       if (act.threw) {
         this.localChar.throwItem();
@@ -1065,13 +1100,92 @@ export class Game {
       const healing = this.predictor.state.healT > 0;
       const target = this.promptTarget || this.bldTarget;
       if (f.use || tapped || (f.useOrHeal && target && !healing)) b |= BTN.USE;
-      if (f.heal || (f.useOrHeal && (!target || healing))) b |= BTN.HEAL;
+      if (f.heal || (f.useOrHeal && (!target || healing)) || this.healLatch >= 0) b |= BTN.HEAL;
       if (f.drop) b |= BTN.DROP;
     } else if (this.stage.buildings.doorCount + this.stage.buildings.windowCount > 0) {
       // doors and windows in every mode
       if (f.use || f.useOrHeal || tapped) b |= BTN.USE;
     }
     return b;
+  }
+
+  // ------------------------------------------------------------------ the weapon wheel
+  /** What is on each segment of the wheel right now (clockwise from the top). */
+  private wheelItems(): Array<WheelItem | null> {
+    const st = this.predictor.state;
+    const items: Array<WheelItem | null> = new Array(WHEEL_SEGMENTS).fill(null);
+    const gun = (slot: number): WheelItem => {
+      const w = weaponInSlot(st, slot);
+      const empty = !w || w.id === 'fists';
+      if (empty) return { label: 'Empty', count: '', detail: this.porchWorld ? 'Search bookbags for a gun' : '', icon: 'fists', ok: false, active: false };
+      return {
+        label: w.name, count: w.magSize > 0 ? `${magOf(st, slot)} / ${reserveOf(st, slot)}` : '', detail: st.slot === slot ? 'In your hands' : 'Equip',
+        img: this.gunIcons.get(w.id, this.mySkin), ok: true, active: st.slot === slot,
+      };
+    };
+    const throwable = (): WheelItem => {
+      const id = st.thr > 0 ? THROWABLE_IDS[st.thr - 1] : null;
+      if (!id || st.throwables <= 0) return { label: 'No throwable', count: '', detail: '', ok: false, active: false };
+      return { label: THROWABLES[id].name, count: `×${st.throwables}`, detail: st.slot === 2 ? 'In your hands' : 'Equip', img: this.gunIcons.get(id), ok: true, active: st.slot === 2 };
+    };
+    if (this.porchWorld) {
+      items[7] = gun(0);
+      items[0] = gun(SLOT_PRIMARY_B);
+      items[1] = gun(1);
+      items[2] = throwable();
+      const heal = (kind: string, icon: WheelItem['icon']): WheelItem => {
+        const i = HEAL_KINDS.indexOf(kind as never);
+        const h = PORCH.heals[HEAL_KINDS[i]];
+        const n = healCount(st, i);
+        const ok = canHeal(st, i);
+        const what = h.armor ? 'armor' : 'health';
+        return {
+          label: h.name, count: `×${n}`, icon, ok, active: st.healT > 0 && st.healKind === i,
+          detail: n <= 0 ? 'None on you' : ok ? `+${h.amount} ${what} (up to ${h.cap})` : `Your ${what} is already topped up`,
+        };
+      };
+      items[3] = heal('ibuprofen', 'ibuprofen');
+      items[4] = heal('medkit', 'medkit');
+      items[5] = heal('drink', 'drink');
+      items[6] = heal('bandage', 'bandage');
+    } else {
+      items[7] = gun(0);
+      items[0] = gun(1);
+      items[2] = throwable();
+    }
+    return items;
+  }
+
+  /** Shows the wheel while it is held, and does what was picked when it is let go. */
+  private updateWheel(): void {
+    const input = this.deps.input;
+    const st = this.predictor.state;
+    const usable = this.alive && !this.paused && st.air === AIR_GROUND;
+    const open = usable && input.wheelOpen;
+    const items = open || input.wheelOpen ? this.wheelItems() : [];
+    const device = input.device;
+    const hint = device === 'touch' ? '' : `LET GO OF ${glyphHtml(device, 'wheel')} TO PICK`;
+    this.wheel.update(open, items, input.wheelAim, hint);
+    const pick = input.takeWheelPick();
+    if (!pick || !usable) return;
+    const seg = segmentAt(pick.x, pick.y);
+    const all = this.wheelItems();
+    const it = seg >= 0 ? all[seg] : null;
+    if (!it || !it.ok) return;
+    const porch = !!this.porchWorld;
+    const slotOf: Record<number, number> = porch ? { 7: 0, 0: SLOT_PRIMARY_B, 1: 1, 2: 2 } : { 7: 0, 0: 1, 2: 2 };
+    if (slotOf[seg] !== undefined) {
+      input.selectSlot(slotOf[seg]);
+      return;
+    }
+    // a healing item: take it now (it carries on by itself)
+    const kinds: Record<number, string> = { 3: 'ibuprofen', 4: 'medkit', 5: 'drink', 6: 'bandage' };
+    const kind = HEAL_KINDS.indexOf(kinds[seg] as never);
+    if (kind >= 0 && st.healT <= 0) {
+      this.healLatch = kind;
+      this.healLatchT = 0;
+      this.healLatchGoing = false;
+    }
   }
 
   /** Enemy hitboxes as currently rendered on this screen. */
@@ -1101,6 +1215,16 @@ export class Game {
     this.localChar.getMuzzle(_v);
     if (_v.distanceToSquared(_v2.set(eyeX, eyeY, eyeZ)) > 4) _v.copy(_v2);
     const res = this.shot;
+    if (w.kind === 'melee') {
+      // a punch (traced from the body, like the server): no tracer, no flash, no light
+      spreadDirection(this.shotRng, cmd.yaw, cmd.pitch, act.shotSpread, this.dir);
+      traceShot(this.phys, eyeX, eyeY, eyeZ, eyeX, eyeY, eyeZ, this.dir.x, this.dir.y, this.dir.z, w.range, targets, res);
+      if (res.kind === HIT_PLAYER) this.effects.hitPuff(_v2.set(res.ex, res.ey, res.ez));
+      this.localChar.shot();
+      this.deps.input.rumble(0.2, 0.35, 40);
+      this.deps.audio?.gunshot(WEAPON_IDS.indexOf(w.id), null, true);
+      return;
+    }
     for (let k = 0; k < w.pellets; k++) {
       spreadDirection(this.shotRng, cmd.yaw, cmd.pitch, act.shotSpread, this.dir);
       traceShot(this.phys, eyeX, eyeY, eyeZ, cmd.ox, cmd.oy, cmd.oz, this.dir.x, this.dir.y, this.dir.z, w.range, targets, res);
@@ -1169,6 +1293,8 @@ export class Game {
       }
     }
     h.health = this.me ? this.me.hp : 0;
+    // armor (ibuprofen) on top of health: four blue segments over the bar (battle royale only)
+    h.armor = this.porchWorld ? (this.alive ? this.predictor.state.armor : 0) : -1;
     h.spawnProtected = !!this.me && (this.me.flags & PF.PROTECTED) !== 0;
     h.slot = st.slot;
     h.mag = magOf(st, st.slot);
@@ -1303,7 +1429,7 @@ export class Game {
       }
     }
     const device = this.deps.input.device;
-    const key = device === 'kbm' ? 'E' : device === 'touch' ? 'TAP' : '▼';
+    const key = device === 'touch' ? '[TAP]' : glyphHtml(device, 'use');
     const slot = (n: number) => {
       const w = weaponInSlot(st, n);
       const empty = !w || w.id === 'fists';
@@ -1326,9 +1452,10 @@ export class Game {
       kills: this.me?.kills ?? 0,
       slots: [slot(0), slot(SLOT_PRIMARY_B), slot(1), { name: st.thr > 0 ? THROWABLES[THROWABLE_IDS[st.thr - 1]].name : '', mag: st.throwables, reserve: 0, empty: st.thr === 0 || st.throwables === 0, active: st.slot === 2 }],
       ammo: [st.ammoL, st.ammoM, st.ammoS, st.ammoH],
-      heals: [st.bandages, st.medkits, st.drinks],
+      heals: [st.bandages, st.medkits, st.drinks, st.pills],
       healing: st.healT > 0 ? 1 - st.healT / PORCH.heals[HEAL_KINDS[st.healKind]].time : -1,
       healName: PORCH.heals[HEAL_KINDS[st.healKind]]?.name ?? '',
+      healAuto: this.healLatch >= 0,
       // under 20 health: which button heals (or that there is nothing to heal with)
       lowHealth: this.alive && st.air === AIR_GROUND && st.hp < 20 && st.healT <= 0
         ? pickHeal(st) >= 0
@@ -1336,7 +1463,7 @@ export class Game {
           : 'LOW HEALTH — FIND A MED KIT'
         : '',
       // a pickup gets a card floating over it instead of the plain prompt
-      prompt: !this.alive && snap?.phase === PHASE.WARMUP && this.arena ? 'BACK IN A MOMENT…' : prompt && !card ? `[${key}] ${prompt}` : '',
+      prompt: !this.alive && snap?.phase === PHASE.WARMUP && this.arena ? 'BACK IN A MOMENT…' : prompt && !card ? `${key} ${escapeHtml(prompt)}` : '',
       card: card ? this.pickupCard(card, device) : null,
       doorsIn: Math.max(0, (doorsAt - this.session.serverTime()) / 1000),
       spectating: spectating ? this.remotes.get(this.spectateIdx)?.name ?? '' : '',
@@ -1425,6 +1552,10 @@ export class Game {
       name = 'ARMOR';
       rarity = it.code >= 100 ? 'epic' : 'rare';
       rows = [['ARMOR', `+${it.code}`]];
+    } else if (it.kind === ITEM.IBUPROFEN) {
+      name = 'IBUPROFEN';
+      rarity = it.count > 1 ? 'rare' : 'uncommon';
+      rows = [['ARMOR', `+${PORCH.ibuprofen.armor * it.count}`], ['MAX', String(PORCH.maxArmor)], ['QTY', String(it.count)]];
     } else if (it.kind === ITEM.THROWABLE) {
       const t = THROWABLES[THROWABLE_IDS[it.code]];
       name = (t?.name ?? 'Throwable').toUpperCase();
@@ -1469,10 +1600,12 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
   }
 
   dispose(): void {
+    this.scoreFeed?.stop();
     this.stop();
     this.aj?.dispose();
     this.dmgNums.dispose();
     this.gunIcons.dispose();
+    this.wheel.dispose();
     window.removeEventListener('resize', this.onResize);
     this.unsubSettings();
     this.unsubDevice();

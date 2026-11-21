@@ -14,6 +14,7 @@ export interface PauseActions {
 /** In-match menu (Esc / Start). Online matches keep running while it is open. */
 export class PauseMenu {
   readonly root: HTMLElement;
+  private loadoutBtn: HTMLButtonElement;
   private leaveBtn: HTMLButtonElement;
   private endBtn: HTMLButtonElement;
   private confirm = false;
@@ -40,12 +41,13 @@ export class PauseMenu {
     });
     this.noteEl = el('div', 'pause-note', '');
     this.legendEl = el('div', 'pause-legend', '');
+    this.loadoutBtn = button('LOADOUT', 'btn', () => actions.openLoadout());
     const resume = button('RESUME', 'btn primary big', () => actions.resume());
     resume.dataset.back = '1';
     const panel = el('div', 'overlay-panel pause', [
       el('div', 'panel-title', 'PAUSED'),
       resume,
-      button('LOADOUT', 'btn', () => actions.openLoadout()),
+      this.loadoutBtn,
       button('SETTINGS', 'btn', () => actions.openSettings()),
       ...(actions.openTrap ? [button('TRAP', 'btn', () => actions.openTrap!())] : []),
       this.endBtn,
@@ -60,6 +62,11 @@ export class PauseMenu {
   /** Controls reference for the device in use (HTML from legendHtml). */
   setLegend(title: string, html: string): void {
     this.legendEl.innerHTML = html ? `<div class="lbl">${title}</div><div class="lg-grid">${html}</div>` : '';
+  }
+
+  /** JUMP OFF THE PORCH: no loadout to change (you find your guns). */
+  setLoadoutAllowed(on: boolean): void {
+    this.loadoutBtn.classList.toggle('hidden', !on);
   }
 
   show(v: boolean, online = false, canEndMatch = false): void {

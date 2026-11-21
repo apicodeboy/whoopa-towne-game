@@ -30,6 +30,8 @@ export const Q_CAMERA = groups(0xffff, GROUP_SOLID | GROUP_GLASS);
 export const Q_PROJECTILE = groups(0xffff, GROUP_SOLID | GROUP_FENCE | GROUP_GLASS);
 /** Just the world's solid parts (ledges: glass is not something to grab). */
 export const Q_SOLID = groups(0xffff, GROUP_SOLID);
+/** Fences only (bots looking for one low enough to jump). */
+export const Q_FENCE = groups(0xffff, GROUP_FENCE);
 
 export interface MoveResult {
   x: number;

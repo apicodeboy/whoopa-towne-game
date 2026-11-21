@@ -313,3 +313,83 @@ export function buildEarrings(kind: string, h: HeadRig, out: ProcMesh): void {
     }
   }
 }
+
+// ------------------------------------------------------------------ the blank face
+/**
+ * A flat decal lying on the face: a polygon (star-shaped about its middle) given as offsets
+ * from (x, y) in the plane of the face, counter-clockwise seen from the front.
+ */
+function decal(h: HeadRig, out: ProcMesh, x: number, y: number, pts: Array<[number, number]>, s: Style): void {
+  const at = (dx: number, dy: number) => h.project(v3(x + dx, y + dy, h.noseTip.z), 0.0008);
+  // whichever way round it was given, it faces out of the face
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  if (area < 0) pts = [...pts].reverse();
+  let mx = 0, my = 0;
+  for (const [dx, dy] of pts) {
+    mx += dx / pts.length;
+    my += dy / pts.length;
+  }
+  const c = at(mx, my);
+  const ring = pts.map(([dx, dy]) => at(dx, dy));
+  for (let i = 0; i < ring.length; i++) out.tri(c, ring[i], ring[(i + 1) % ring.length], s);
+}
+
+/**
+ * What little there is on the faceless head: a faint line where the mouth would be and, if
+ * picked, one small mark (a star on the forehead, a cross, teardrops, a lightning bolt).
+ * `dark`: the face itself is dark, so the marks are drawn light.
+ */
+export function buildFaceMarks(kind: string, h: HeadRig, out: ProcMesh, dark = false): void {
+  const cx = h.center.x;
+  const k = Math.max(0.6, (h.crownY - h.eyeY) / 0.116);
+  // the mouth: a thin sliver, a shade off the face's own color
+  const line: Array<[number, number]> = [];
+  const hw = 0.0125 * k, th = 0.00075 * k;
+  for (let i = 0; i <= 8; i++) line.push([-hw + (2 * hw * i) / 8, -th * Math.sin((Math.PI * i) / 8) - 0.0004 * Math.sin((Math.PI * i) / 8)]);
+  for (let i = 8; i >= 0; i--) line.push([-hw + (2 * hw * i) / 8, th * Math.sin((Math.PI * i) / 8) - 0.0004 * Math.sin((Math.PI * i) / 8)]);
+  decal(h, out, cx, h.mouth.y, line, style(SLOT.FACE, { shade: dark ? 1.7 : 0.7, rough: 0.9 }));
+  if (kind === 'none') return;
+  const ink = fixed(dark ? 0xe9e8e3 : 0x24252a, { rough: 0.9 });
+  const foreheadY = h.eyeY + 0.041 * k;
+  switch (kind) {
+    case 'star': {
+      const pts: Array<[number, number]> = [];
+      for (let i = 0; i < 10; i++) {
+        const a = Math.PI / 2 + (i / 10) * Math.PI * 2;
+        const r = (i % 2 ? 0.0034 : 0.0082) * k;
+        pts.push([Math.cos(a) * r, Math.sin(a) * r]);
+      }
+      decal(h, out, cx, foreheadY, pts, ink);
+      break;
+    }
+    case 'cross': {
+      const a = 0.0017 * k, v = 0.011 * k, w = 0.0065 * k, up = 0.003 * k;
+      decal(h, out, cx, foreheadY, [[-a, -v], [a, -v], [a, v], [-a, v]], ink);
+      decal(h, out, cx, foreheadY + up, [[-w, -a], [w, -a], [w, a], [-w, a]], ink);
+      break;
+    }
+    case 'tears': {
+      // two teardrops under the right eye
+      for (const [dy, r] of [[-0.021, 0.0032], [-0.034, 0.0026]] as const) {
+        const pts: Array<[number, number]> = [[0, r * 2.1 * k]];
+        for (let i = 0; i <= 8; i++) {
+          const a = Math.PI * 0.86 + (i / 8) * Math.PI * 1.28;
+          pts.push([Math.cos(a) * r * k, Math.sin(a) * r * k]);
+        }
+        decal(h, out, h.eyeR.x - 0.004 * k, h.eyeY + dy * k, pts, ink);
+      }
+      break;
+    }
+    case 'bolt': {
+      // a lightning bolt down the left cheek (two slanted bars meeting at a step)
+      const x = h.eyeL.x + 0.003 * k, y = h.eyeY - 0.03 * k;
+      decal(h, out, x, y, [[0.0005, 0.0125], [0.0052, 0.0125], [0.0012, 0.001], [-0.0042, 0.001]].map(([a, b]) => [a * k, b * k] as [number, number]), ink);
+      decal(h, out, x, y, [[0.0042, 0.003], [-0.0012, 0.003], [-0.0052, -0.012], [0.0005, -0.0015]].map(([a, b]) => [a * k, b * k] as [number, number]), ink);
+      break;
+    }
+  }
+}

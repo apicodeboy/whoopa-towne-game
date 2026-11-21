@@ -31,15 +31,17 @@ player.
       +---------------+---- Porch St ----+----------------+  z = -56
       |   JUNGLE      |   WHOOPA TOWNE   |   DOWNTOWN     |
       +---------------+-- Ocean Drive ---+----------------+  z = 61..71
-      |  THE DOCKS    |   WHOOPA BEACH   | THE BOARDWALK  |
-      +---------------+------------------+----------------+  z = 118, the ocean
+      |  THE DOCKS    |    LAKE LINDA    | THE BOARDWALK  |
+      +---------------+------------------+----------------+  z = 118, the lake
 ```
 
 - **Whoopa Towne** (the classic map) sits in the middle, unchanged.
-- **The Hill** keeps every lot where it was. Each house is now explorable: the old walk-in
-  houses are one-floor homes, the others two-floor houses (the brick ones as flat-roofed
-  townhouses). The projects are two walk-up apartment blocks (the outside stairs still run to
-  the roof), with a fire escape; Suds Laundry and the Food Mart are full shops.
+- **The Hill** is the projects: Section 8 brick walk-ups (three and four floors, a unit on
+  every floor, stairs to the roof, fire escapes), some windows already broken, tags on the
+  walls, dirt yards with overflowing dumpsters, trash bags, litter in every gutter, burnt-out
+  cars, dumped mattresses and couches, shopping carts, standing water. The old projects keep
+  their outside stairs to the roof; Suds Laundry, the Food Mart, the school, the church, Porch
+  Park and AJ'S are where they were.
 - **Babylon** (northwest): the walled desert city, the ziggurat, the hanging gardens, the
   bazaar, the oasis. JUMP OFF THE PORCH warms up here.
 - **Hong Kong** (northeast, new): the paifang gate off East Line Rd, Lantern Street with
@@ -57,6 +59,17 @@ width) and Ocean Drive (z = 66). Each outer district has its own random seed; th
 The Hill are unchanged, so The Hill generates exactly as before.
 
 `npx tsx tools/map-preview.ts out.svg --greater` draws the whole map from above.
+
+## Billboards and live scores
+
+Billboards stand around town (`billboards()` in `greaterTowne.ts`): ads for the local spots,
+and screens showing live scores that turn a page every 6 seconds (a league a page, live games
+first, then finals, then start times). The game server reads ESPN's public scoreboards for the
+NBA, NFL, MLB, NHL, WNBA and college football and basketball (`server/src/scores.ts`), at most
+once a minute, and serves them at `/api/scores`; the game asks only its own server, so nothing
+about a player goes anywhere else. If the feed can't be reached, the screens keep the last
+scores, then say "SCOREBOARD OFF AIR". `SCORES=off` turns it off; `SCORES_FEED_URL` points it
+elsewhere.
 
 ## Building types
 
@@ -142,10 +155,45 @@ the USE button.
   world builds in ~65 ms, and a JUMP OFF THE PORCH bot match runs at about 0.12–0.18 ms per
   server tick.
 
+## Ibuprofen (armor)
+
+Orange pill bottles, in bookbags and lying around the map (about 40 at the start). Picking a
+bottle up puts it in your pockets (you carry up to four); nothing happens until you take one:
+pick it on the weapon wheel, or hold HEAL when your health is full. Taking one takes two
+seconds and gives 25 armor on top of your 100 health, up to 100 armor (four bottles' worth).
+With full armor a bottle does nothing, so it is not used up. Armor shows as four blue segments
+over the health bar and soaks gunfire before health does (not the riot). Knocked out, the
+bottles you carry drop where you fell. The old armor vests are out of the loot pool.
+
+## The districts are fenced off
+
+A low black railing (0.95 m) runs down the middle of every border road (West Line Rd, East
+Line Rd, Porch St, Ocean Drive) and across the sand between the docks, the lake and the
+boardwalk (`districtFences()` in `greaterTowne.ts`). You can't walk through it, but a jump
+clears it (a jump goes about 1.25 m up), and bullets and grenades go through it. Wherever
+something already stood on the line (a palm tree, the end of a wall) the railing stops around
+it. Bots jump it when it is in their way.
+
+## Bots landing
+
+Bots don't touch down armed: they aim to land five to ten metres from a bookbag (never on it),
+take a second or two to look around after landing, and going through a bag takes them a
+moment, so their first gun comes a few seconds after they land (tested: never under 1.5 s).
+
+## Area names over the map
+
+From the blimp and in the air, each district's name floats over it in its own lettering style
+(`client/src/game/porch/airLabels.ts`, styles in `client/src/styles/theme.css`): all in Paytone
+One, a free chunky display face, in cream and pink with a dark outline. BABYLON is in a
+starburst, THE HILL is extruded, HONG KONG is striped and slanted, JUNGLE is hatched, WHOOPA
+TOWNE sits between rows of dots, DOWNTOWN is outlined, THE DOCKS is stacked, LAKE LINDA is in a
+speech bubble, and the BOARDWALK sparkles.
+
 ## JUMP OFF THE PORCH warm-up
 
 The pregame is now a minute (`PORCH.pregame` in `shared/src/config/porch.ts`) on foot in
-Babylon (`map.warmup`). Everyone spawns armed with their loadout and can shoot around; nothing
+Babylon (`map.warmup`), with the blimp circling the town overhead (it comes round to the
+start of its route just as everyone boards). Everyone spawns armed with their loadout and can shoot around; nothing
 counts (no kills, deaths, or eliminations) and you're back in 3 seconds. Bots don't all appear
 at once: each one turns up at a random moment of the pregame (`PORCH.warmup.joinFrom` /
 `joinTo`), entering the roster, the "players" count and the world then, with a

@@ -7,11 +7,11 @@ import type { DeviceKind } from './types';
  */
 
 /** Actions with a key (keyboard). */
-export const KEY_ACTIONS = ['jump', 'crouch', 'crouchHold', 'sprint', 'reload', 'throw', 'shoulder', 'use', 'heal', 'drop', 'scores'] as const;
+export const KEY_ACTIONS = ['jump', 'crouch', 'crouchHold', 'sprint', 'reload', 'throw', 'shoulder', 'use', 'heal', 'drop', 'wheel', 'scores'] as const;
 export type KeyAction = (typeof KEY_ACTIONS)[number];
 
 /** Actions with a button (controller). */
-export const PAD_ACTIONS = ['fire', 'aim', 'jump', 'crouch', 'sprint', 'reload', 'swap', 'throw', 'shoulder', 'use', 'heal', 'scores'] as const;
+export const PAD_ACTIONS = ['fire', 'aim', 'jump', 'crouch', 'sprint', 'reload', 'prev', 'swap', 'throw', 'shoulder', 'use', 'heal', 'scores'] as const;
 export type PadAction = (typeof PAD_ACTIONS)[number];
 
 export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
@@ -23,6 +23,8 @@ export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
   sprint: 'Sprint',
   reload: 'Reload',
   swap: 'Next weapon',
+  prev: 'Previous weapon (tap) · weapon wheel (hold)',
+  wheel: 'Weapon wheel (hold)',
   throw: 'Throw',
   shoulder: 'Swap shoulder',
   use: 'Use: doors, windows, search, pick up, talk',
@@ -42,6 +44,7 @@ export const DEFAULT_KEYS: Record<KeyAction, string> = {
   use: 'KeyE',
   heal: 'KeyH',
   drop: 'KeyX',
+  wheel: 'KeyB',
   scores: 'Tab',
 };
 
@@ -51,22 +54,33 @@ export const PAD = {
   SELECT: 8, START: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15, TOUCHPAD: 17,
 } as const;
 
+/**
+ * The controller layout: hold L1 to aim, R2 fires; tap L2 / R1 for the previous / next gun and
+ * hold L2 for the weapon and gadget wheel; triangle throws, R3 swaps the shoulder.
+ */
 export const DEFAULT_PAD: Record<PadAction, number> = {
   fire: PAD.R2,
-  aim: PAD.L2,
+  aim: PAD.L1,
   jump: PAD.SOUTH,
   crouch: PAD.EAST,
   sprint: PAD.L3,
   reload: PAD.WEST,
-  swap: PAD.NORTH,
-  throw: PAD.L1,
-  shoulder: PAD.R1,
+  prev: PAD.L2,
+  swap: PAD.R1,
+  throw: PAD.NORTH,
+  shoulder: PAD.R3,
   // search and heal share the d-pad down by default (it picks up when there is something in
   // reach and heals otherwise); give heal its own button to split them
   use: PAD.DOWN,
   heal: PAD.DOWN,
   scores: PAD.SELECT,
 };
+/** The controller layout before the weapon wheel (saved layouts still on it move to the new one). */
+const OLD_DEFAULT_PAD: Partial<Record<PadAction, number>> = {
+  fire: PAD.R2, aim: PAD.L2, jump: PAD.SOUTH, crouch: PAD.EAST, sprint: PAD.L3, reload: PAD.WEST, swap: PAD.NORTH,
+  throw: PAD.L1, shoulder: PAD.R1, use: PAD.DOWN, heal: PAD.DOWN, scores: PAD.SELECT,
+};
+const BINDINGS_VERSION = 2;
 
 /** Buttons a controller binding may not take (they always do the same thing). */
 export const PAD_RESERVED: readonly number[] = [PAD.START, PAD.LEFT, PAD.RIGHT, PAD.UP];
@@ -87,11 +101,25 @@ class BindingStore {
 
   constructor() {
     try {
-      const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as { keys?: Record<string, unknown>; pad?: Record<string, unknown> } | null;
+      const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as { v?: number; keys?: Record<string, unknown>; pad?: Record<string, unknown> } | null;
       for (const a of KEY_ACTIONS) if (typeof raw?.keys?.[a] === 'string' && !KEY_RESERVED.includes(raw.keys[a] as string)) this.keys[a] = raw.keys[a] as string;
+      const pad: Partial<Record<PadAction, number>> = {};
       for (const a of PAD_ACTIONS) {
         const v = raw?.pad?.[a];
-        if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 20 && !PAD_RESERVED.includes(v)) this.pad[a] = v;
+        if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 20 && !PAD_RESERVED.includes(v)) pad[a] = v;
+      }
+      const old = (raw?.v ?? 1) < BINDINGS_VERSION;
+      // a controller layout saved before the weapon wheel that was never changed: the new layout
+      const untouched = old && (Object.keys(OLD_DEFAULT_PAD) as PadAction[]).every((a) => pad[a] === undefined || pad[a] === OLD_DEFAULT_PAD[a]);
+      if (!untouched) {
+        Object.assign(this.pad, pad);
+        // a layout of the player's own keeps every button; the new wheel button goes on L2 if
+        // that is free, otherwise on the first free button
+        if (old && pad.prev === undefined) {
+          const taken = new Set(Object.entries(this.pad).filter(([a]) => a !== 'prev').map(([, v]) => v));
+          const free = [PAD.L2, PAD.R1, PAD.L1, PAD.R3, PAD.NORTH].find((b) => !taken.has(b));
+          if (free !== undefined) this.pad.prev = free;
+        }
       }
     } catch {
       /* storage blocked or bad data: defaults */
@@ -110,7 +138,7 @@ class BindingStore {
 
   private save(): void {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ keys: this.keys, pad: this.pad }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ v: BINDINGS_VERSION, keys: this.keys, pad: this.pad }));
     } catch {
       /* not saved: still applies until the tab closes */
     }

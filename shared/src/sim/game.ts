@@ -567,9 +567,10 @@ export class GameSim {
     p.protectedUntil = 0; // shooting ends spawn protection
     const eyeX = s.x, eyeY = s.y + eyeHeight(s.crouching), eyeZ = s.z;
 
-    // Aim origin: the client's camera, clamped to a sane distance from the head. Bots aim from the eye.
+    // Aim origin: the client's camera, clamped to a sane distance from the head. Bots aim from
+    // the eye, and so does a punch (its reach is measured from the body, not the camera).
     let camX = eyeX, camY = eyeY, camZ = eyeZ;
-    if (!p.isBot) {
+    if (!p.isBot && w.kind !== 'melee') {
       const d = Math.hypot(cmd.ox - eyeX, cmd.oy - eyeY, cmd.oz - eyeZ);
       if (d <= NET.maxAimOriginDist) {
         camX = cmd.ox;

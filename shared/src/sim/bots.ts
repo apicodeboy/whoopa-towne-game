@@ -4,6 +4,7 @@ import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, type Loadout, type Weapon
 import { DEG, Rng, clamp, hash32, wrapAngle, yawToward } from '../math';
 import { PHASE, type BotDifficulty } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
+import { Q_FENCE, Q_PROJECTILE } from './physics';
 import {
   AIR_BALLOON, AIR_RIDING, AIR_SKYDIVE, BTN, eyeHeight, magOf, pickHeal, reserveOf, weaponInSlot, type InputCmd,
 } from './player';
@@ -44,7 +45,7 @@ const RANGE_BAND: Record<WeaponId, [number, number]> = {
   ar: [9, 30],
   pistol: [5, 16],
   sniper: [18, 70],
-  fists: [0.6, 1.5],
+  fists: [0.5, 1.15],
 };
 
 /** Throw distance for a handful of pitch angles (flat ground), computed once. */
@@ -140,6 +141,12 @@ export class BotBrain {
   private jumpAt = 0;
   private landX = 0;
   private landZ = 0;
+  /** Up in the air last tick (to notice the touchdown). */
+  private wasAir = false;
+  /** After landing: a moment to get its bearings before it moves off or touches anything. */
+  private bearingsUntil = 0;
+  /** Searching takes a beat: when the bot may open what it is standing at (0 = not at anything). */
+  private searchAt = 0;
   private useAt = 0;
   private healAt = 0;
   private lootGoal = false;
@@ -173,20 +180,26 @@ export class BotBrain {
       // where to land: a random bookbag (the same one as the rest of the squad), or anywhere people can stand
       const porch = this.sim.porch, bags = porch.bags;
       const squadSize = SQUAD_MODES[porch.squadMode].size;
+      // (never right on top of the bag: a bot lands a few steps off and has to go and search it,
+      // like anybody else, so nobody touches down already armed)
+      const near = (b: { x: number; z: number }) => {
+        const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(5, 10);
+        this.landX = b.x + Math.cos(a) * d;
+        this.landZ = b.z + Math.sin(a) * d;
+      };
       if (bags.length && squadSize > 1) {
-        const b = bags[(this.me.squad * 7919 + 13) % bags.length];
-        this.landX = b.x + this.rng.range(-6, 6);
-        this.landZ = b.z + this.rng.range(-6, 6);
+        near(bags[(this.me.squad * 7919 + 13) % bags.length]);
       } else if (bags.length && this.rng.chance(0.75)) {
-        const b = this.rng.pick(bags);
-        this.landX = b.x;
-        this.landZ = b.z;
+        near(this.rng.pick(bags));
       } else {
         const idx = this.sim.nav.randomWalkable(this.rng);
         this.landX = this.sim.nav.cellX(idx);
         this.landZ = this.sim.nav.cellZ(idx);
       }
       this.jumpAt = 0;
+      this.wasAir = false;
+      this.bearingsUntil = 0;
+      this.searchAt = 0;
     }
   }
 
@@ -283,8 +296,21 @@ export class BotBrain {
     cmd.yaw = this.yaw;
     cmd.pitch = this.pitch;
     if (!me.alive) return;
-    if (sim.porch && this.thinkAir(cmd)) return;
+    if (sim.porch && this.thinkAir(cmd)) {
+      this.wasAir = true;
+      return;
+    }
+    if (this.wasAir) {
+      // just touched down: look around for a moment first
+      this.wasAir = false;
+      this.bearingsUntil = now + this.rng.range(1200, 2800);
+      this.scanYaw = this.yaw + this.rng.range(-1.6, 1.6);
+    }
     if (sim.phase !== PHASE.PLAYING) return;
+    if (now < this.bearingsUntil) {
+      cmd.yaw = this.yaw = wrapAngle(this.yaw + clamp(wrapAngle(this.scanYaw - this.yaw), -3 * TICK_DT, 3 * TICK_DT));
+      return;
+    }
 
     if ((sim.tickCount + me.idx * 3) % 6 === 0) this.perceive();
     if (this.target && !this.target.alive) {
@@ -402,8 +428,10 @@ export class BotBrain {
         if (mag < weapon.magSize * 0.5 && res > 0 && s.reloadT <= 0) buttons |= BTN.RELOAD;
       }
       if (porch) {
-        // patch up between fights (holding HEAL until the item is done)
-        if (s.hp < 65 && s.healT <= 0 && pickHeal(s) >= 0 && now >= this.healAt && !urgent) {
+        // patch up between fights (holding HEAL until the item is done), and take ibuprofen
+        // when there is a bottle and a quarter of armor or more to fill
+        const wantArmor = s.pills > 0 && s.armor <= PORCH.maxArmor - PORCH.ibuprofen.armor;
+        if ((s.hp < 65 || wantArmor) && s.healT <= 0 && pickHeal(s) >= 0 && now >= this.healAt && !urgent) {
           buttons |= BTN.HEAL;
           this.healAt = now + 400;
         }
@@ -477,13 +505,28 @@ export class BotBrain {
     if (porch && s.healT <= 0) {
       const { bag, pickup } = porch.reachable(s);
       const want = bag || (pickup && (pickup.kind !== 1 || !this.armed() || weaponInSlot(s, SLOT_PRIMARY_B)?.id === 'fists'));
-      if (want && now >= this.useAt) {
+      // a bag takes a moment to go through; things lying loose are quicker to grab
+      if (!want) this.searchAt = 0;
+      else if (this.searchAt === 0) this.searchAt = now + (bag ? this.rng.range(700, 1300) : this.rng.range(250, 500));
+      if (want && now >= this.searchAt && now >= this.useAt) {
         buttons |= BTN.USE;
         this.useAt = now + 350;
+        this.searchAt = 0;
         this.lootGoal = false;
         this.hasGoal = false;
         this.idleUntil = now + 200;
       }
+    } else {
+      this.searchAt = 0;
+    }
+
+    // ---------------------------------------------------------------- fences
+    // battle royale: a low fence across the way (the railings between the districts): jump it
+    if (porch && wantMove && s.grounded && (moveX !== 0 || moveZ !== 0) && (sim.tickCount & 3) === 0) {
+      const ml = Math.hypot(moveX, moveZ) || 1;
+      const dx = moveX / ml, dz = moveZ / ml;
+      const fence = sim.phys.raycast(s.x, s.y + 0.45, s.z, dx, 0, dz, PLAYER.radius + 0.7, Q_FENCE);
+      if (fence >= 0 && sim.phys.raycast(s.x, s.y + 1.2, s.z, dx, 0, dz, fence + 0.6, Q_PROJECTILE) < 0) buttons |= BTN.JUMP;
     }
 
     // ---------------------------------------------------------------- unstick

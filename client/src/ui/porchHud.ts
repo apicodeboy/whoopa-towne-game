@@ -4,6 +4,8 @@ import { stageName, STAGE_DEPLOY, STAGE_EARLY, STAGE_ENDED, STAGE_RIOT } from '@
 import type { PorchSnap, StandingRow } from '@shared/protocol';
 import { el, button } from './dom';
 import { escapeHtml } from './hud';
+import { glyphHtml } from './prompts';
+import type { DeviceKind } from '../input/types';
 
 /**
  * JUMP OFF THE PORCH HUD, drawn over the regular one (health, reticle, kill feed and minimap
@@ -33,11 +35,13 @@ export interface PorchHudState {
   /** 0..1 progress using a healing item, -1 when not healing. */
   healing: number;
   healName: string;
+  /** Picked from the weapon wheel: it carries on by itself (no need to hold the button). */
+  healAuto: boolean;
   /** Low-health warning (HTML: may hold a button glyph), or ''. */
   lowHealth: string;
   /** The card over the pickup in reach (HTML and its screen position), or null. */
   card: { html: string; x: number; y: number } | null;
-  /** Interaction prompt (plain text), or ''. */
+  /** Interaction prompt (HTML: it carries button glyphs), or ''. */
   prompt: string;
   /** Seconds until the transport doors open (0 = open). */
   doorsIn: number;
@@ -50,7 +54,7 @@ export interface PorchHudState {
   yaw: number;
   /** Players in the match. */
   total: number;
-  device: string;
+  device: DeviceKind;
 }
 
 function fmt(sec: number): string {
@@ -158,7 +162,7 @@ export class PorchHud {
     this.boardEl = el('div', 'ph-board hidden');
 
     this.root = el('div', 'porch-hud', [
-      top, this.compassEl, this.squadEl, this.armorBox, this.invEl, this.bagEl, this.healBar, this.lowEl, this.cardEl,
+      top, this.compassEl, this.squadEl, this.invEl, this.bagEl, this.healBar, this.lowEl, this.cardEl,
       this.promptEl, this.bannerEl, this.riotEl, this.toastsEl, this.specEl, this.outEl, this.winEl, this.boardEl,
     ]);
     parent.append(this.root);
@@ -195,6 +199,7 @@ export class PorchHud {
     else if (kind === ITEM.AMMO) text = `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`;
     else if (kind === ITEM.HEAL) text = `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`;
     else if (kind === ITEM.ARMOR) text = `Armor (${code})`;
+    else if (kind === ITEM.IBUPROFEN) text = `${count}× Ibuprofen`;
     else if (kind === ITEM.THROWABLE) text = `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`;
     if (!text || count <= 0) return;
     const t = el('div', 'ph-toast', `+ ${text}`);
@@ -287,11 +292,11 @@ export class PorchHud {
         (n.children[2] as HTMLElement).textContent = slot.empty ? '' : i === 3 ? `×${slot.mag}` : `${slot.mag}/${slot.reserve}`;
       });
     });
-    const bag = `${s.heals.join(',')}|${s.ammo.join(',')}`;
+    const bag = `${s.heals.join(',')}|${s.ammo.join(',')}|${s.device}`;
     this.set('bag', bag, () => {
       const heals = HEAL_KINDS.map((k, i) => `<span class="h h-${k}" title="${PORCH.heals[k].name}">${s.heals[i]}</span>`).join('');
       const ammo = AMMO_TYPES.map((t, i) => `<span class="a a-${t}" title="${AMMO_NAMES[t]}">${s.ammo[i]}</span>`).join('');
-      this.bagEl.innerHTML = `<div class="row">${heals}<kbd>${s.device === 'kbm' ? 'H' : '▼'}</kbd></div><div class="row">${ammo}</div>`;
+      this.bagEl.innerHTML = `<div class="row">${heals}${glyphHtml(s.device, 'heal') || glyphHtml(s.device, 'use')}</div><div class="row">${ammo}</div>`;
     });
     this.set('healing', s.healing >= 0, () => this.healBar.classList.toggle('hidden', s.healing < 0));
     this.set('card', s.card?.html ?? '', () => {
@@ -305,19 +310,19 @@ export class PorchHud {
     });
     if (s.healing >= 0) {
       this.healFill.style.width = `${Math.round(s.healing * 100)}%`;
-      this.set('healName', s.healName, () => (this.healText.textContent = `HOLD TO KEEP HEALING · ${s.healName.toUpperCase()}`));
+      this.set('healName', `${s.healName}|${s.healAuto}`, () => (this.healText.textContent = s.healAuto ? `TAKING ${s.healName.toUpperCase()}… FIRE TO STOP` : `HOLD TO KEEP HEALING · ${s.healName.toUpperCase()}`));
     }
 
     // ---- prompts ----
     let prompt = s.prompt;
     if (s.alive && s.air === 1) {
-      prompt = !Number.isFinite(s.doorsIn) ? '' : s.doorsIn > 0 ? `DOORS OPEN IN ${Math.ceil(s.doorsIn)}` : `[${s.device === 'kbm' ? 'SPACE' : 'A'}] JUMP OFF THE PORCH`;
+      prompt = !Number.isFinite(s.doorsIn) ? '' : s.doorsIn > 0 ? `DOORS OPEN IN ${Math.ceil(s.doorsIn)}` : `${this.key(s.device, 'jump', 'JUMP')} JUMP OFF THE PORCH`;
     }
-    else if (s.alive && s.air === 2) prompt = `STEER WITH ${s.device === 'kbm' ? 'WASD' : 'THE STICK'} · HOLD ${s.device === 'kbm' ? 'C' : 'B'} TO DROP FASTER`;
-    else if (s.alive && s.air === 3) prompt = `FLY WITH ${s.device === 'kbm' ? 'WASD' : 'THE STICK'} · HOLD ${s.device === 'kbm' ? 'C' : 'B'} TO DIVE · [${s.device === 'kbm' ? 'SPACE' : 'A'}] BALLOONS UP`;
+    else if (s.alive && s.air === 2) prompt = `STEER WITH ${this.key(s.device, 'move', 'THE STICK')} · HOLD ${this.key(s.device, 'crouch', 'CROUCH')} TO DROP FASTER`;
+    else if (s.alive && s.air === 3) prompt = `FLY WITH ${this.key(s.device, 'move', 'THE STICK')} · HOLD ${this.key(s.device, 'crouch', 'CROUCH')} TO DIVE · ${this.key(s.device, 'jump', 'JUMP')} BALLOONS UP`;
     this.set('prompt', prompt, () => {
       this.promptEl.classList.toggle('hidden', !prompt);
-      this.promptEl.textContent = prompt;
+      this.promptEl.innerHTML = prompt;
       this.promptEl.classList.toggle('jump', s.air === 1);
     });
     this.set('riot', s.inRiot && s.alive, () => this.riotEl.classList.toggle('hidden', !(s.inRiot && s.alive)));
@@ -333,14 +338,19 @@ export class PorchHud {
       this.outBy.innerHTML = s.killer ? `by <b>${escapeHtml(s.killer)}</b>` : '';
       this.outPlace.innerHTML = `<b>#${snap!.place}</b><span>OF ${s.total}</span>`;
       this.outStats.innerHTML = `<div><b>${s.kills}</b><span>ELIMINATIONS</span></div><div><b>${snap!.damage}</b><span>DAMAGE</span></div>`;
-      this.outHint.textContent = s.device === 'kbm' ? 'CLICK TO SPECTATE · ESC FOR THE MENU' : '';
+      this.outHint.innerHTML = s.device === 'kbm' ? 'CLICK TO SPECTATE · ESC FOR THE MENU' : s.device === 'touch' ? '' : `${glyphHtml(s.device, 'fire')} SPECTATE · ${glyphHtml(s.device, 'pause')} MENU`;
       this.outEl.classList.remove('hidden');
     }
     this.set('spec', s.spectating, () => {
       this.specEl.classList.toggle('hidden', !s.spectating);
-      this.specEl.innerHTML = s.spectating ? `SPECTATING <b>${escapeHtml(s.spectating)}</b><span>${s.device === 'kbm' ? 'CLICK' : 'FIRE'} FOR NEXT</span>` : '';
+      this.specEl.innerHTML = s.spectating ? `SPECTATING <b>${escapeHtml(s.spectating)}</b><span>${s.device === 'kbm' ? 'CLICK' : s.device === 'touch' ? 'FIRE' : glyphHtml(s.device, 'fire')} FOR NEXT</span>` : '';
     });
     this.root.classList.toggle('dead', !s.alive);
+  }
+
+  /** A button's glyph for a prompt (the plain word on touch). */
+  private key(device: DeviceKind, action: Parameters<typeof glyphHtml>[1], touchWord: string): string {
+    return device === 'touch' ? touchWord : glyphHtml(device, action);
   }
 
   /** Spectating started some other way (fire): put the elimination card away. */

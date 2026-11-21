@@ -1,8 +1,8 @@
 /**
- * Urban Ink anatomy: a stylized adult body (about 7 heads tall) sculpted as blended masses on
- * the rig's joints: ribcage, pecs, lats, obliques, pelvis, glutes, trapezius, deltoids, biceps,
- * triceps, forearm flexors, a real hand with five jointed fingers, quads, hamstrings, calves,
- * and a head with brow ridge, cheekbones, jaw, chin, eye sockets and lids, nose, lips and ears.
+ * The character's anatomy: a stylized adult body sculpted as blended masses on the rig's
+ * joints: ribcage, pecs, lats, obliques, pelvis, glutes, trapezius, deltoids, biceps, triceps,
+ * forearm flexors, a real hand with five jointed fingers, quads, hamstrings, calves, and a
+ * faceless head: a smooth egg with plain ears and a blank face plate over the front.
  *
  * Everything is in the T-pose bind space: meters, +Y up, facing +Z, the character's left at +X.
  */
@@ -33,9 +33,10 @@ export interface Anatomy {
   /** Which side (for limbs), 0 for the middle. */
   sideOf(x: number): number;
   j: (k: string) => V3;
-  /** Lips (for the lip color), nostrils and inner ears (darker skin). */
-  lips: SDF;
-  dark: SDF;
+  /** The blank face: a shell over the whole head above the neckline (its own piece and color). */
+  face: SDF;
+  /** The skin of the head piece that shows: the neck, up to the face shell's edge. */
+  neckSkin: SDF;
   /** Head center and size, for the clothing and the face. */
   headCenter: V3;
   /** The neck (outer, as the head piece has it). */
@@ -148,72 +149,52 @@ export function makeAnatomy(sk: InkSkeleton): Anatomy {
   };
 
   // ---------------------------------------------------------------- head
-  // a stylized head: a little larger than life (about 7 heads tall overall)
-  const HS = 1.14;
-  const HC = P(0, headJ[1] + 0.098 * HS, cz + 0.012);
+  // The faceless head: a smooth egg (cranium, face, a soft chin and jaw) with plain ears and
+  // no features at all. The face is a separate smooth plate over the front of it (`face`),
+  // painted its own color: a blank mask.
+  const HS = 1.07;
+  const HC = P(0, headJ[1] + 0.1 * HS, cz + 0.012);
   const at = (x: number, y: number, z: number): V3 => [HC[0] + x * HS, HC[1] + y * HS, HC[2] + z * HS];
   const R = (x: number, y: number, z: number): V3 => [x * HS, y * HS, z * HS];
-  const eyeR = 0.0122 * HS;
-  const eyeC: Record<Side, V3> = { L: at(0.031, 0.008, 0.083), R: at(-0.031, 0.008, 0.083) };
+  // (no eyes are drawn: these mark where they would be, so hats, glasses and hair can be fitted)
+  const eyeR = 0.0105 * HS;
+  const eyeC: Record<Side, V3> = { L: at(0.031, 0.008, 0.066), R: at(-0.031, 0.008, 0.066) };
   const headParts: Array<[SDF, number]> = [
-    [ellipsoid(at(0, 0.026, -0.012), R(0.076, 0.097, 0.097)), 0], // cranium
-    [ellipsoid(at(0, -0.04, 0.024), R(0.064, 0.076, 0.078)), 0.035], // face + jaw
-    [ellipsoid(at(0, -0.095, 0.08), R(0.031, 0.022, 0.025)), 0.024], // chin
-    [roundCone(at(-0.042, 0.027, 0.087), at(0.042, 0.027, 0.087), 0.0135 * HS, 0.0135 * HS), 0.024], // brow ridge
-    [roundCone(at(0, 0.012, 0.098), at(0, -0.024, 0.108), 0.0075 * HS, 0.0098 * HS), 0.012], // nose bridge
-    [sphere(at(0, -0.028, 0.107), 0.0115 * HS), 0.01], // nose tip
-    [ellipsoid(at(0.0135, -0.034, 0.098), R(0.0112, 0.0088, 0.009)), 0.008], // nostril wings
-    [ellipsoid(at(-0.0135, -0.034, 0.098), R(0.0112, 0.0088, 0.009)), 0.008],
-    [ellipsoid(at(0, -0.054, 0.09), R(0.026, 0.014, 0.014)), 0.012], // upper lip area (over the teeth)
-    [ellipsoid(at(0, -0.057, 0.1), R(0.0222, 0.0066, 0.0105)), 0.009], // upper lip
-    [ellipsoid(at(0, -0.0682, 0.097), R(0.0195, 0.0074, 0.0105)), 0.009], // lower lip
+    [ellipsoid(at(0, 0.03, -0.012), R(0.075, 0.094, 0.095)), 0], // cranium
+    [ellipsoid(at(0, -0.036, 0.022), R(0.063, 0.08, 0.077)), 0.04], // face
+    [ellipsoid(at(0, -0.094, 0.056), R(0.031, 0.024, 0.028)), 0.034], // chin
   ];
   for (const s of SIDES) {
     const k = sx(s);
-    headParts.push(
-      [ellipsoid(at(k * 0.046, -0.006, 0.062), R(0.022, 0.014, 0.02)), 0.025], // cheekbone
-      [ellipsoid(at(k * 0.04, -0.042, 0.056), R(0.024, 0.028, 0.026)), 0.03], // cheek
-      [ellipsoid(at(k * 0.046, -0.066, 0.006), R(0.02, 0.028, 0.038)), 0.04], // jaw angle
-    );
+    headParts.push([ellipsoid(at(k * 0.042, -0.064, 0.008), R(0.02, 0.03, 0.038)), 0.045]); // jaw angle
   }
   let head = blend(headParts);
-  // eye sockets, then the eyelids that wrap the eyeballs
-  for (const s of SIDES) head = subtract(head, sphere(add(eyeC[s], R(0, 0.001, 0.011)), 0.0158 * HS), 0.008);
-  const lids: SDF[] = [];
-  for (const s of SIDES) {
-    const c = eyeC[s];
-    const k = sx(s);
-    // upper lid: a shell over the top of the eyeball, edge tilting up toward the outer corner
-    const upper = intersect(sphere(c, eyeR + 0.0017), plane(add(c, R(0, 0.0046, 0)), P(-k * 0.14, -1, -0.32)));
-    const lower = intersect(sphere(c, eyeR + 0.0011), plane(add(c, R(0, -0.0068, 0)), P(0, 1, -0.3)));
-    lids.push(upper, lower);
-  }
-  for (const l of lids) head = ((h) => (x: number, y: number, z: number) => smin(h(x, y, z), l(x, y, z), 0.004))(head);
-  // the mouth line, the dip under the nose, the nostrils
-  head = subtract(head, ellipsoid(at(0, -0.0626, 0.111), R(0.0205, 0.0011, 0.011)), 0.002);
-  for (const s of SIDES) head = subtract(head, ellipsoid(at(sx(s) * 0.0078, -0.0395, 0.104), R(0.0037, 0.0027, 0.0052)), 0.002);
-  // ears: a shell with a hollow (concha) and a rolled rim (helix)
+  // ears: plain shells (they carry earrings; most hair covers them)
   for (const s of SIDES) {
     const k = sx(s);
-    const ec = at(k * 0.076, -0.004, -0.006);
-    const ef = frame(ec, P(0, 1, -0.22), P(k * 1, 0, 0.12));
-    const earShell = ellipsoidIn(ef, R(0.021, 0.034, 0.0095));
-    const concha = ellipsoidIn(frame(add(ec, R(k * 0.0045, -0.004, 0.003)), P(0, 1, -0.22), P(k * 1, 0, 0.12)), R(0.012, 0.018, 0.0042));
-    const ear = subtract(earShell, concha, 0.003);
-    head = ((h) => (x: number, y: number, z: number) => smin(h(x, y, z), ear(x, y, z), 0.006))(head);
+    const ec = at(k * 0.075, -0.006, -0.008);
+    const ear = ellipsoidIn(frame(ec, P(0, 1, -0.2), P(k * 1, 0, 0.14)), R(0.018, 0.03, 0.0085));
+    head = ((h) => (x: number, y: number, z: number) => smin(h(x, y, z), ear(x, y, z), 0.007))(head);
   }
   const headWithNeck = blend([[head, 0], [neckOuter, 0.035]]);
   // the head piece's neck runs down and rounds off inside the chest (its end never shows)
   const headPiece = headWithNeck;
 
-  const lips: SDF = blend([
-    [ellipsoid(at(0, -0.057, 0.1), R(0.0236, 0.0074, 0.0113)), 0],
-    [ellipsoid(at(0, -0.0682, 0.097), R(0.0206, 0.0082, 0.0113)), 0.003],
-  ]);
-  const dark: SDF = blend([
-    ...SIDES.map((s): [SDF, number] => [ellipsoid(at(sx(s) * 0.0078, -0.0395, 0.104), R(0.006, 0.005, 0.008)), 0]),
-    ...SIDES.map((s): [SDF, number] => [ellipsoid(at(sx(s) * 0.08, -0.006, -0.004), R(0.008, 0.017, 0.009)), 0]),
-  ]);
+  // the blank face: a smooth shell over the whole head down to the jaw and the nape (the neck
+  // under it stays skin), standing a couple of millimetres proud with a clean edge
+  const neckline = (x: number, y: number, z: number): number => {
+    const ly = (y - HC[1]) / HS, lz = (z - HC[2]) / HS;
+    // under the chin in front, rising under the jaw to the ear lobes, then level round the back
+    const cut = lz >= -0.02 ? -0.113 + 0.82 * (0.062 - lz) : -0.046 - 0.25 * (-0.02 - lz);
+    void x;
+    return (cut - ly) * 0.75 * HS;
+  };
+  const face: SDF = (x, y, z) => {
+    const h = head(x, y, z);
+    return Math.max(h - 0.0026, -(h + 0.0014), neckline(x, y, z));
+  };
+  // the skin that shows: the neck, up to just inside the face shell's edge (nothing under the shell)
+  const neckSkin: SDF = (x, y, z) => Math.max(headWithNeck(x, y, z), -neckline(x, y, z) - 0.004);
 
   // ---------------------------------------------------------------- assembly
   const armL = arm('L'), armR = arm('R'), legL = leg('L'), legR = leg('R');
@@ -260,10 +241,13 @@ export function makeAnatomy(sk: InkSkeleton): Anatomy {
   };
   void clamp;
   void smax;
+  void intersect;
+  void plane;
+  void sphere;
   return {
     skin, body, head: headPiece, hand: { L: handL, R: handR },
     eyes: { center: eyeC, radius: eyeR, look: norm(P(0, -0.02, 1)) },
-    region, sideOf: (x) => (x > 0.01 ? 1 : x < -0.01 ? -1 : 0), j, lips, dark, headCenter: HC, neck: neckOuter,
+    region, sideOf: (x) => (x > 0.01 ? 1 : x < -0.01 ? -1 : 0), j, face, neckSkin, headCenter: HC, neck: neckOuter,
   };
   void chest; void neckJ; void hips;
 }

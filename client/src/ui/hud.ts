@@ -37,6 +37,8 @@ export interface HudState {
   myTeam: TeamId;
   alive: boolean;
   health: number;
+  /** Armor on top of health (0..100, four segments of 25), or -1 where there is none (crew modes). */
+  armor: number;
   spawnProtected: boolean;
   loadout: Loadout;
   slot: number;
@@ -79,7 +81,7 @@ export interface HudState {
 export function makeHudState(): HudState {
   return {
     mode: 'tdm', phase: PHASE.WARMUP, timeLeft: 0, scores: [0, 0], zones: [], myZone: -1, myTeam: 0,
-    alive: true, health: 100, spawnProtected: false,
+    alive: true, health: 100, armor: -1, spawnProtected: false,
     loadout: { primary: 'ar', secondary: 'pistol', throwable: 'grenade' }, slot: 0,
     mag: 0, reserve: 0, magSize: 30, reload: -1, throwables: 0,
     spreadDeg: 1, fovV: 60, aimT: 0, blocked: false, onTarget: false,
@@ -138,6 +140,9 @@ export class Hud {
   private healthFill: HTMLElement;
   private healthNum: HTMLElement;
   private healthBox: HTMLElement;
+  /** Ibuprofen armor: four segments of 25 over the health bar. */
+  private armorEl: HTMLElement;
+  private armorSegs: HTMLElement[];
   private gunPic: HTMLElement;
   private gunPicImg: HTMLImageElement;
   private gunPicName: HTMLElement;
@@ -236,8 +241,11 @@ export class Hud {
     this.healthFill = el('div', 'fill');
     this.healthNum = el('div', 'num', '100');
     this.shieldEl = el('div', 'shield hidden', 'SPAWN SHIELD');
+    this.armorSegs = [0, 1, 2, 3].map(() => el('i', '', [el('b')]));
+    this.armorEl = el('div', 'armor-segs hidden', this.armorSegs);
     this.healthBox = el('div', 'health', [
       el('div', 'cap', 'HEALTH'),
+      this.armorEl,
       el('div', 'row', [this.healthNum, el('div', 'bar', [this.healthFill])]),
       this.shieldEl,
     ]);
@@ -397,6 +405,15 @@ export class Hud {
       this.healthNum.textContent = String(hp);
       this.healthFill.style.width = `${hp}%`;
       this.healthBox.classList.toggle('low', hp <= 35);
+    });
+    const ar = Math.round(s.armor);
+    this.set('armor', ar, () => {
+      this.armorEl.classList.toggle('hidden', ar < 0);
+      this.armorEl.classList.toggle('some', ar > 0);
+      this.armorSegs.forEach((seg, i) => {
+        const fill = Math.max(0, Math.min(1, (ar - i * 25) / 25));
+        (seg.firstChild as HTMLElement).style.width = `${fill * 100}%`;
+      });
     });
     this.set('shield', s.spawnProtected && s.alive, () => this.shieldEl.classList.toggle('hidden', !(s.spawnProtected && s.alive)));
     const lowK = s.alive ? Math.pow(1 - Math.min(1, s.health / 100), 1.6) : 0.75;

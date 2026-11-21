@@ -42,7 +42,8 @@ export const PORCH = {
 
   // ---- the transport (a party blimp flying a straight line over the town) ------------
   transport: {
-    altitude: 100,
+    /** Meters up (where you jump from). */
+    altitude: 150,
     /** Meters per second. */
     speed: 9,
     /** How far beyond the map edge the route starts and ends. */
@@ -99,20 +100,32 @@ export const PORCH = {
   endedSeconds: 14,
 
   // ---- player ------------------------------------------------------------------------
+  /** Armor on top of health (four ibuprofen bottles' worth). */
   maxArmor: 100,
+  /**
+   * Ibuprofen: orange pill bottles. They go in your pockets when you pick them up; taking one
+   * (HEAL, or from the weapon wheel) adds this much armor. `loose`: bottles lying around the
+   * map at the start.
+   */
+  ibuprofen: { armor: 25, loose: 40 },
   /** Carry limits. */
   carry: {
     ammo: { light: 240, medium: 180, shells: 40, heavy: 30 },
     bandage: 10,
     medkit: 3,
     drink: 4,
+    ibuprofen: 4,
     throwables: 4,
   },
-  /** Healing items: seconds to use, health given, and the health they can heal up to. */
+  /**
+   * Healing items: seconds to use, what they give and up to how much. Ibuprofen gives armor
+   * (`armor: true`), the rest health.
+   */
   heals: {
-    bandage: { name: 'Bandage', time: 2.5, amount: 15, cap: 75 },
-    medkit: { name: 'First-Aid Kit', time: 6, amount: 100, cap: 100 },
-    drink: { name: 'Corner Store Drink', time: 2, amount: 25, cap: 100 },
+    bandage: { name: 'Bandage', time: 2.5, amount: 15, cap: 75, armor: false },
+    medkit: { name: 'First-Aid Kit', time: 6, amount: 100, cap: 100, armor: false },
+    drink: { name: 'Corner Store Drink', time: 2, amount: 25, cap: 100, armor: false },
+    ibuprofen: { name: 'Ibuprofen', time: 2, amount: 25, cap: 100, armor: true },
   },
   /** Movement speed multiplier while using a healing item. */
   healSlow: 0.5,
@@ -129,8 +142,8 @@ export const PORCH = {
 } as const;
 
 export type HealKind = keyof typeof PORCH.heals;
-/** Wire codes for healing items. */
-export const HEAL_KINDS: readonly HealKind[] = ['bandage', 'medkit', 'drink'];
+/** Wire codes for healing items (append only). */
+export const HEAL_KINDS: readonly HealKind[] = ['bandage', 'medkit', 'drink', 'ibuprofen'];
 
 // ---- items -------------------------------------------------------------------------------
 /** What a bookbag or the ground can hold. `code` meaning depends on the kind. */
@@ -145,6 +158,8 @@ export const ITEM = {
   ARMOR: 4,
   /** code = throwable index (THROWABLE_IDS), count = how many */
   THROWABLE: 5,
+  /** Ibuprofen bottles (code 0), count = how many: carried, each taken adds PORCH.ibuprofen.armor armor. */
+  IBUPROFEN: 6,
 } as const;
 
 export interface Item {
@@ -179,7 +194,7 @@ export const BAGS = [
 /** How rarity multiplies with a bag's luck. */
 export const RARITY_LUCK: Record<Rarity, number> = { common: 0, uncommon: 0.5, rare: 1, epic: 1.4 };
 
-const W = ITEM.WEAPON, A = ITEM.AMMO, H = ITEM.HEAL, R = ITEM.ARMOR, T = ITEM.THROWABLE;
+const W = ITEM.WEAPON, A = ITEM.AMMO, H = ITEM.HEAL, I = ITEM.IBUPROFEN, T = ITEM.THROWABLE;
 /**
  * The loot pool. Weapon codes follow WEAPON_IDS (0 smg, 1 ar, 2 shotgun, 3 pistol, 4 sniper);
  * ammo codes follow AMMO_TYPES (0 light, 1 medium, 2 shells, 3 heavy); heal codes HEAL_KINDS;
@@ -199,8 +214,8 @@ export const LOOT: LootEntry[] = [
   { item: { kind: H, code: 0, count: 3 }, weight: 9, rarity: 'common' }, // bandages
   { item: { kind: H, code: 2, count: 1 }, weight: 6, rarity: 'common' }, // drink
   { item: { kind: H, code: 1, count: 1 }, weight: 3, rarity: 'rare' }, // first-aid kit
-  { item: { kind: R, code: 50, count: 1 }, weight: 5, rarity: 'uncommon' },
-  { item: { kind: R, code: 100, count: 1 }, weight: 1.5, rarity: 'epic' },
+  { item: { kind: I, code: 0, count: 1 }, weight: 7, rarity: 'uncommon' }, // ibuprofen
+  { item: { kind: I, code: 0, count: 2 }, weight: 2.5, rarity: 'rare' },
   { item: { kind: T, code: 0, count: 2 }, weight: 4, rarity: 'uncommon' }, // grenades
   { item: { kind: T, code: 1, count: 2 }, weight: 3, rarity: 'common' }, // smokes
 ];

@@ -50,7 +50,7 @@ test('appearance: wire codes are short and round-trip exactly', () => {
     const a = randomAppearance(rand);
     assertValid(a, `random #${i}`);
     const code = encodeAppearance(a);
-    assert(code.length <= 48, `code too long (${code.length})`);
+    assert(code.length <= 56, `code too long (${code.length})`);
     const b = decodeAppearance(code);
     assert(JSON.stringify(b) === JSON.stringify(a), `round trip changed look #${i}: ${code}`);
   }
@@ -104,6 +104,37 @@ test('appearance: Urban Ink fields: codes saved before them decode unchanged, ne
   const look: Appearance = { ...before, shoulders: 'broad', headSize: 'large', mask: 'facemask', carry: 'phone', waistChain: 'silver', top: 'puffervest', hat: 'graffitibeanie', hair: 'locs' };
   assert(sameAppearance(decodeAppearance(encodeAppearance(look)), look), 'new fields round-trip');
   assert(sanitizeAppearance({ ...look, mask: 'nope', shoulders: 42 }).mask === 'none', 'bad values are cleaned');
+});
+
+test('appearance: the faceless character: new fields round-trip, old starter looks move to the new default, customized looks stay', () => {
+  const look: Appearance = { ...DEFAULT_APPEARANCE, tattoos: {}, details: [], face: 'black', faceMark: 'star', belt: 'blackstuds', legPrint: 'flames', hair: 'wicks', necklace: 'icedpendant', wrist: 'glovewatches' };
+  assert(sameAppearance(decodeAppearance(encodeAppearance(look)), look), 'new fields round-trip');
+  assert(sanitizeAppearance({ ...look, face: 'plaid', belt: 7 }).face === DEFAULT_APPEARANCE.face, 'bad values are cleaned');
+  assert(DEFAULT_APPEARANCE.hair === 'spikylocs' && DEFAULT_APPEARANCE.face === 'gray' && DEFAULT_APPEARANCE.top === 'puffer' && DEFAULT_APPEARANCE.bottom === 'baggyjeans', 'the default is the faceless look');
+  // the default look as it was saved before (an object without the new fields, and its wire code)
+  const old = {
+    bodyType: 'masc', build: 'average', height: 'average', skin: 's05', headShape: 'oval', faceShape: 'defined', eyes: 'average', eyeColor: 'brown',
+    brows: 'natural', nose: 'average', ears: 'average', hair: 'shortdreads', hairColor: 'black', facialHair: 'none', facialHairColor: 'darkbrown',
+    lips: 'average', mouthAcc: 'none', mouthProp: 'none', teeth: 'natural', top: 'puffer', topColor: 'black', bottom: 'baggyjeans', bottomColor: 'gray',
+    shoes: 'chunky', shoeColor: 'white', hat: 'beanie', glasses: 'none', earrings: 'diamondstuds', necklace: 'diamond', wrist: 'none', faceAcc: 'none',
+    weaponSkin: 'gold', backpack: 'none', shoulders: 'average', headSize: 'average', mask: 'none', carry: 'none', waistChain: 'none', tattoos: {}, details: [],
+  };
+  const moved = sanitizeAppearance(old);
+  assert(moved.hair === 'spikylocs' && moved.hat === 'none' && moved.shoes === 'lowtops' && moved.belt === 'redstuds', 'an untouched old default becomes the new default');
+  assert(moved.weaponSkin === 'gold', 'what was bought at AJ\'S stays on');
+  // its wire code, as written before the new fields existed (it ends after the pants chain)
+  const full = encodeAppearance({ ...DEFAULT_APPEARANCE, ...old } as Appearance);
+  const oldCode = full.slice(0, full.length - 4);
+  const viaCode = decodeAppearance(oldCode);
+  assert(viaCode.hair === 'spikylocs' && viaCode.weaponSkin === 'gold', 'the same through an old wire code');
+  // a look somebody made their own is left exactly as it was (it only gains the new fields' defaults)
+  const mine = sanitizeAppearance({ ...old, hair: 'cornrows', topColor: 'red' });
+  assert(mine.hair === 'cornrows' && mine.topColor === 'red' && mine.hat === 'beanie' && mine.shoes === 'chunky', 'a customized old look is kept');
+  const mineCode = encodeAppearance({ ...DEFAULT_APPEARANCE, ...old, hair: 'cornrows' } as Appearance);
+  assert(decodeAppearance(mineCode.slice(0, mineCode.length - 4)).hair === 'cornrows', 'and through an old wire code');
+  // a new-format look that happens to match the old default's clothes is not touched either
+  const kept = sanitizeAppearance({ ...old, face: 'gray', faceMark: 'none', belt: 'none', legPrint: 'none' });
+  assert(kept.hair === 'shortdreads' && kept.hat === 'beanie', 'a look saved after the change is never moved');
 });
 
 test('appearance: the starter looks are complete, valid, and free (nothing from AJ\'S)', () => {

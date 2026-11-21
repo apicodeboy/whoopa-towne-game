@@ -93,6 +93,7 @@ export class MainMenu {
   private squadButtons = new Map<SquadMode, HTMLButtonElement>();
   private diffButtons = new Map<BotDifficulty, HTMLButtonElement>();
   private squadPill: HTMLElement;
+  private loadoutPill: HTMLButtonElement;
   private diffPill: HTMLElement;
   private headEl: HTMLElement;
   private subEl: HTMLElement;
@@ -126,11 +127,13 @@ export class MainMenu {
     store.classList.add('hm-aj');
     const trap = pill('TRAP', () => actions.openTrap());
     trap.classList.add('hm-trap');
+    // (JUMP OFF THE PORCH has no loadout: you find your guns)
+    this.loadoutPill = pill('Loadout', () => actions.openLoadout());
     const navLeft = el('nav', 'hm-nav-left', [
       store,
       trap,
       pill('Character', () => actions.openCharacter()),
-      pill('Loadout', () => actions.openLoadout()),
+      this.loadoutPill,
       pill('Settings', () => actions.openSettings()),
     ]);
     const logo = el('img');
@@ -358,6 +361,7 @@ export class MainMenu {
     for (const [id, card] of this.modeCards) card.classList.toggle('hidden', id === mode);
     const porch = mode === 'porch';
     this.squadPill.classList.toggle('hidden', !porch);
+    this.loadoutPill.classList.toggle('hidden', porch);
     // JUMP OFF THE PORCH has no bot settings: bot levels vary on their own
     this.diffPill.classList.toggle('hidden', porch);
     this.root.dataset.mode = mode;

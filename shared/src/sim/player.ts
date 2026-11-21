@@ -52,15 +52,17 @@ export interface InputCmd {
   oz: number;
   /** Server time the client was rendering other players at (for lag compensation). */
   rt: number;
+  /** Which healing item HEAL uses: HEAL_KINDS index + 1 (picked from the weapon wheel), 0 = the best one for the moment. */
+  heal: number;
 }
 
 export function makeInputCmd(): InputCmd {
-  return { seq: 0, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 0, slot: 0, ox: 0, oy: 0, oz: 0, rt: 0 };
+  return { seq: 0, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 0, slot: 0, ox: 0, oy: 0, oz: 0, rt: 0, heal: 0 };
 }
 
 export function copyInputCmd(dst: InputCmd, src: InputCmd): InputCmd {
   dst.seq = src.seq; dst.mx = src.mx; dst.mz = src.mz; dst.yaw = src.yaw; dst.pitch = src.pitch;
-  dst.buttons = src.buttons; dst.slot = src.slot; dst.ox = src.ox; dst.oy = src.oy; dst.oz = src.oz; dst.rt = src.rt;
+  dst.buttons = src.buttons; dst.slot = src.slot; dst.ox = src.ox; dst.oy = src.oy; dst.oz = src.oz; dst.rt = src.rt; dst.heal = src.heal;
   return dst;
 }
 
@@ -157,6 +159,8 @@ export interface PlayerState {
   climbBZ: number;
   /** Climbing through a window (a vault): the height the feet go over (0 for a ledge pull-up). */
   climbH: number;
+  /** Ibuprofen bottles carried (each taken adds armor). */
+  pills: number;
 }
 
 export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
@@ -169,6 +173,7 @@ export const PSTATE_KEYS: ReadonlyArray<keyof PlayerState> = [
   'bandages', 'medkits', 'drinks', 'healT', 'healKind',
   'air', 'windX', 'windZ', 'riot', 'hp', 'armor', 'airT', 'airJumps',
   'rollT', 'rollX', 'rollZ', 'climbT', 'climbAX', 'climbAY', 'climbAZ', 'climbBX', 'climbBY', 'climbBZ', 'climbH',
+  'pills',
 ];
 
 export function makePlayerState(): PlayerState {
@@ -205,7 +210,7 @@ export function playerStateDiffers(a: PlayerState, b: PlayerState): boolean {
   if (a.throwables !== b.throwables || a.shots !== b.shots) return true;
   if (a.wA !== b.wA || a.wB !== b.wB || a.wH !== b.wH || a.thr !== b.thr || a.magB !== b.magB || a.air !== b.air) return true;
   if (a.ammoL !== b.ammoL || a.ammoM !== b.ammoM || a.ammoS !== b.ammoS || a.ammoH !== b.ammoH) return true;
-  if (a.bandages !== b.bandages || a.medkits !== b.medkits || a.drinks !== b.drinks || a.riot !== b.riot) return true;
+  if (a.bandages !== b.bandages || a.medkits !== b.medkits || a.drinks !== b.drinks || a.pills !== b.pills || a.riot !== b.riot) return true;
   if (Math.abs(a.healT - b.healT) > 1e-4 || a.hp !== b.hp || a.armor !== b.armor) return true;
   if (Math.abs(a.fireCd - b.fireCd) > 1e-4 || Math.abs(a.reloadT - b.reloadT) > 1e-4) return true;
   if (Math.abs(a.swapT - b.swapT) > 1e-4 || Math.abs(a.throwCd - b.throwCd) > 1e-4) return true;
@@ -286,16 +291,39 @@ function setReserve(s: PlayerState, slot: number, v: number): void {
   else if (slot === SLOT_SECONDARY) s.res1 = v;
 }
 
-/** Which healing item the HEAL button would use right now (HEAL_KINDS index), or -1. */
-export function pickHeal(s: PlayerState): number {
-  const hp = s.hp;
-  if (hp >= PLAYER.maxHealth) return -1;
-  const B = HEAL_KINDS.indexOf('bandage'), M = HEAL_KINDS.indexOf('medkit'), D = HEAL_KINDS.indexOf('drink');
-  if (hp < 50 && s.medkits > 0) return M;
-  if (hp < PORCH.heals.bandage.cap && s.bandages > 0) return B;
-  if (s.drinks > 0) return D;
-  if (s.medkits > 0) return M;
-  return -1;
+/** How many of a healing item (HEAL_KINDS index) are carried. */
+export function healCount(s: PlayerState, kind: number): number {
+  switch (HEAL_KINDS[kind]) {
+    case 'bandage': return s.bandages;
+    case 'medkit': return s.medkits;
+    case 'drink': return s.drinks;
+    case 'ibuprofen': return s.pills;
+    default: return 0;
+  }
+}
+
+/** Whether a healing item would do anything right now (carried, and not already topped up). */
+export function canHeal(s: PlayerState, kind: number): boolean {
+  const k = HEAL_KINDS[kind];
+  if (!k || healCount(s, kind) <= 0) return false;
+  const h = PORCH.heals[k];
+  return h.armor ? s.armor < Math.min(h.cap, PORCH.maxArmor) : s.hp < Math.min(h.cap, PLAYER.maxHealth);
+}
+
+/**
+ * Which healing item HEAL uses right now (HEAL_KINDS index), or -1. `want` is the one picked
+ * on the weapon wheel; otherwise health comes first, then ibuprofen tops up the armor.
+ */
+export function pickHeal(s: PlayerState, want = -1): number {
+  if (want >= 0) return canHeal(s, want) ? want : -1;
+  const B = HEAL_KINDS.indexOf('bandage'), M = HEAL_KINDS.indexOf('medkit'), D = HEAL_KINDS.indexOf('drink'), I = HEAL_KINDS.indexOf('ibuprofen');
+  if (s.hp < PLAYER.maxHealth) {
+    if (s.hp < 50 && s.medkits > 0) return M;
+    if (canHeal(s, B)) return B;
+    if (s.drinks > 0) return D;
+    if (s.medkits > 0) return M;
+  }
+  return canHeal(s, I) ? I : -1;
 }
 
 /** Things that happened during a step. The server turns them into hits/events, the client into effects. */
@@ -769,11 +797,12 @@ export function stepPlayer(
         if (kind === 'bandage' && s.bandages > 0) s.bandages--;
         else if (kind === 'medkit' && s.medkits > 0) s.medkits--;
         else if (kind === 'drink' && s.drinks > 0) s.drinks--;
+        else if (kind === 'ibuprofen' && s.pills > 0) s.pills--;
         act.healed = s.healKind;
       }
     }
   } else if (healBtn && !s.healHeld && s.reloadT <= 0) {
-    const kind = pickHeal(s);
+    const kind = pickHeal(s, (cmd.heal | 0) - 1);
     if (kind >= 0) {
       s.healKind = kind;
       s.healT = PORCH.heals[HEAL_KINDS[kind]].time;

@@ -17,8 +17,8 @@ import { addWhoopaTowne } from './whoopaTowne';
  *      |               |  (the classic    |                |
  *      |               |   map)           |                |
  *      +---------------+-- Ocean Drive ---+----------------+  z=61..71
- *      |  THE DOCKS    |   WHOOPA BEACH   | THE BOARDWALK  |
- *      +---------------+------------------+----------------+  z=118, the ocean beyond
+ *      |  THE DOCKS    |    LAKE LINDA    | THE BOARDWALK  |
+ *      +---------------+------------------+----------------+  z=118, the lake beyond
  *
  * West Line Rd (x=-86), East Line Rd (x=86), Porch St (z=-56) and Ocean Drive (z=66) are the
  * borders. Everything is generated from fixed seeds, so the server and every client build
@@ -43,7 +43,6 @@ const CELL = {
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 const inRect = (r: Rect, x: number, z: number, pad = 0) => x > r.x0 - pad && x < r.x1 + pad && z > r.z0 - pad && z < r.z1 + pad;
 
-const HOUSE_COLORS = [0x9fb2c4, 0xc9b48a, 0xa9b7a0, 0xb9a0a0, 0xd8c7a6, 0x8fa3b8, 0xc4a68a, 0xa3a8c9, 0xb8c4a0, 0xd1b0a0];
 const PASTELS = [0xf2b8c6, 0x9fd8d0, 0xc9b8e8, 0xf6d7a0, 0xa8d8f0, 0xf4c2a1, 0xb8e0b0];
 
 export function buildGreaterTowne(): MapDef {
@@ -62,7 +61,7 @@ export function buildGreaterTowne(): MapDef {
   cliffs(b, rng, 'n', OLD_WEST - 10, -86);
   cliffs(b, rng, 'w', GREATER.minZ - 10, SHORE + 2);
   cliffs(b, rng, 'e', 61, SHORE + 2);
-  // the ocean: you can walk to the water's edge and no further
+  // LAKE LINDA: you can walk to the water's edge and no further
   b.box('bound', GREATER.minX - 6, GREATER.maxX + 6, SHORE, SHORE + 4, 0, 40);
 
   // ---- the border roads ----
@@ -81,13 +80,16 @@ export function buildGreaterTowne(): MapDef {
   beach(b, new Rng(SEED ^ 0xbea));
   docks(b, new Rng(SEED ^ 0xd0c));
 
+  billboards(b);
+  districtFences(b);
+
   b.label('BABYLON', -150, -66);
   b.label('THE HILL', 0, -128);
   b.label('HONG KONG', 150, -66);
   b.label('JUNGLE', -150, 50);
   b.label('DOWNTOWN', 150, -48);
   b.label('THE DOCKS', -145, 80);
-  b.label('WHOOPA BEACH', 0, 100);
+  b.label('LAKE LINDA', 0, 100);
   b.label('BOARDWALK', 150, 104);
   b.label('OCEAN DRIVE', -60, 66);
   // the names people call out from the blimp
@@ -99,7 +101,7 @@ export function buildGreaterTowne(): MapDef {
     { name: 'WHOOPA TOWNE', x: 0, z: 0 },
     { name: 'DOWNTOWN', x: 145, z: 5 },
     { name: 'THE DOCKS', x: -145, z: 95 },
-    { name: 'WHOOPA BEACH', x: 0, z: 97 },
+    { name: 'LAKE LINDA', x: 0, z: 97 },
     { name: 'BOARDWALK', x: 145, z: 95 },
   );
   // JUMP OFF THE PORCH: before the match, everyone warms up in BABYLON
@@ -107,6 +109,99 @@ export function buildGreaterTowne(): MapDef {
 
   b.backdrop = { n: 'city', e: 'city', w: 'desert', s: 'ocean' };
   return b.build('greater-towne', 'Greater Whoopa Towne', { ...GREATER });
+}
+
+/**
+ * Billboards around town: ads for the local spots, and big screens showing live scores (the
+ * client fills those in from the game server's /api/scores). `face` is the side the front
+ * looks toward; the back carries another ad (or the scores again).
+ */
+/** How tall the railings between the districts are (low enough to jump: a jump clears about 1.25 m). */
+export const DISTRICT_FENCE_H = 0.95;
+
+/**
+ * Each district is fenced off from its neighbours: a low steel railing down the middle of every
+ * border road (and across the beach between the docks, the lake and the boardwalk). It blocks
+ * walking but not jumping, bullets or grenades (it is a fence, not a wall). Wherever something
+ * already stands on the line (a palm tree, the end of a wall) the railing stops and starts
+ * again around it, so that thing is part of the fence.
+ */
+function districtFences(b: MapBuilder): void {
+  const H = DISTRICT_FENCE_H, T = 0.07, PIECE = 12;
+  const lines: Array<{ along: 'x' | 'z'; at: number; from: number; to: number }> = [
+    { along: 'z', at: -86, from: GREATER.minZ, to: SHORE }, // West Line Rd, then across the sand
+    { along: 'z', at: 86, from: GREATER.minZ, to: SHORE }, // East Line Rd
+    { along: 'x', at: -56, from: GREATER.minX, to: GREATER.maxX }, // Porch St
+    { along: 'x', at: 66, from: GREATER.minX, to: GREATER.maxX }, // Ocean Drive
+  ];
+  // the spans of each line taken by something already there (gaps in the railing)
+  const solidsBefore = b.solids.slice();
+  for (const l of lines) {
+    const gaps: Array<[number, number]> = [];
+    for (const s of solidsBefore) {
+      if (s.y + s.sy / 2 < 0.05 || s.y - s.sy / 2 > H + 0.2) continue;
+      // (a rotated box: its bounding circle)
+      const rx = s.ry ? Math.hypot(s.sx, s.sz) / 2 : s.sx / 2, rz = s.ry ? rx : s.sz / 2;
+      const across = l.along === 'z' ? Math.abs(s.x - l.at) - rx : Math.abs(s.z - l.at) - rz;
+      if (across > 0.1) continue;
+      const c = l.along === 'z' ? s.z : s.x, r = l.along === 'z' ? rz : rx;
+      gaps.push([c - r - 0.05, c + r + 0.05]);
+    }
+    for (const p of b.props) {
+      const across = l.along === 'z' ? Math.abs(p.x - l.at) : Math.abs(p.z - l.at);
+      if (across > 0.9) continue;
+      const c = l.along === 'z' ? p.z : p.x;
+      gaps.push([c - 0.9, c + 0.9]);
+    }
+    gaps.sort((a, c) => a[0] - c[0]);
+    // the open stretches between the gaps, in pieces
+    let t = l.from;
+    const runs: Array<[number, number]> = [];
+    for (const [g0, g1] of [...gaps, [l.to, l.to] as [number, number]]) {
+      if (g0 > t + 0.3) runs.push([t, Math.min(g0, l.to)]);
+      t = Math.max(t, g1);
+      if (t >= l.to) break;
+    }
+    for (const [r0, r1] of runs) {
+      const n = Math.max(1, Math.round((r1 - r0) / PIECE));
+      for (let i = 0; i < n; i++) {
+        const a = r0 + ((r1 - r0) * i) / n, c = r0 + ((r1 - r0) * (i + 1)) / n;
+        if (l.along === 'z') b.box('rail', l.at - T / 2, l.at + T / 2, a, c, 0, H, { col: 'fence', meta: { border: 1 } });
+        else b.box('rail', a, c, l.at - T / 2, l.at + T / 2, 0, H, { col: 'fence', meta: { border: 1 } });
+      }
+    }
+  }
+}
+
+function billboards(b: MapBuilder): void {
+  const T = 0.35;
+  const put = (x: number, z: number, face: Side, o: { front: string; back?: string; w?: number; h?: number; y0?: number; clear?: number }) => {
+    const w = o.w ?? 9, h = o.h ?? 4.2, y0 = o.y0 ?? 0, clear = o.clear ?? 5.2;
+    const ns = face === 'n' || face === 's';
+    // two steel legs, a catwalk, the panel
+    for (const d of [-w * 0.3, w * 0.3]) {
+      const px = ns ? x + d : x, pz = ns ? z : z + d;
+      b.box('pillar', px - 0.22, px + 0.22, pz - 0.22, pz + 0.22, y0, y0 + clear + 0.2, { color: 0x3a3f46 });
+    }
+    b.solids.push({
+      kind: 'billboard', x, y: y0 + clear + h / 2, z, sx: ns ? w : T, sy: h, sz: ns ? T : w,
+      meta: { face, front: o.front, back: o.back ?? '' },
+    });
+  };
+  // ---- live scoreboards ----
+  put(150, 10.5, 's', { front: 'live', back: 'live', w: 13, h: 6, clear: 4.6 }); // the plaza's big screen
+  put(196.5, -105, 'w', { front: 'live', back: 'hk', w: 10, h: 4.8, clear: 6.2 }); // over Lantern Street
+  put(68.5, -108.6, 's', { front: 'live', back: 'ibu', w: 9, h: 4.2 }); // Stoop Ave, by the park
+  put(150, 79.2, 'n', { front: 'live', back: 'live', w: 10, h: 4.6, clear: 4.4 }); // the boardwalk
+  put(-93.2, 20, 'e', { front: 'live', back: 'jotp', w: 9, h: 4.2 }); // West Line Rd
+  // ---- ads ----
+  put(-150, -50.2, 'e', { front: 'jotp', back: 'ajs' }); // Porch St through the jungle
+  put(-93.4, -128, 's', { front: 'mart', back: 'suds' }); // West Line Rd, by BABYLON's wall
+  put(108, -25, 's', { front: 'tower', back: 'grams', y0: 6.5, clear: 1.6, w: 10 }); // on the bank's roof
+  put(-27, 59.8, 'w', { front: 'lake', back: 'shack', w: 8, h: 3.8 }); // Ocean Drive
+  put(-150, 73.6, 'n', { front: 'kicks', back: 'docks', w: 8, h: 3.8 }); // the docks' promenade
+  put(92.6, 32, 'n', { front: 'wings', back: 'dimsum' }); // East Line Rd
+  put(23.3, -78, 'w', { front: 'ajs', back: 'ibu', w: 8, h: 3.8, clear: 5.6 }); // the Hill, by the Food Mart
 }
 
 let cached: MapDef | null = null;
@@ -217,87 +312,170 @@ function hood(b: MapBuilder, rng: Rng): void {
       else if (key === '3,1') foodMart(b, r);
       else if (key === '1,0') projects(b, r);
       else if (key === '4,0') porchPark(b, rng, r);
-      else if (key === '1,1') {
-        // AJ's took over this block. The houses that stood here are still "drawn" from the
-        // seed (and thrown away) so everything generated after it stays exactly where it was.
-        houseBlock(new MapBuilder(), rng, r, `h${xi}${zi}`, false);
-        ajsStore(b, r);
-      } else houseBlock(b, rng, r, `h${xi}${zi}`, zi === 0);
-      // cars parked along the curbs
+      else if (key === '1,1') ajsStore(b, r);
+      else projectBlock(b, rng, r, `h${xi}${zi}`, zi === 0);
+      // cars along the curbs: some have not moved in a long time
       for (const [z, ry] of [[z0 - 1.5, Math.PI / 2], [z1 + 1.5, -Math.PI / 2]] as const) {
         if (z < GREATER.minZ + 1) continue;
-        for (let x = x0 + 4; x < x1 - 4; x += rng.range(9, 16)) if (rng.chance(0.45)) b.prop('car', x, z, ry, rng.int(8));
+        for (let x = x0 + 4; x < x1 - 4; x += rng.range(9, 16)) {
+          if (!rng.chance(0.45)) continue;
+          if (rng.chance(0.18)) b.rbox('burntcar', x, z, 1.8, 4.2, 0.28, 1.25, ry);
+          else b.prop('car', x, z, ry, rng.int(8));
+        }
       }
       b.prop('lamp', x0 + 1.2, z1 - 1.1, 0, 0);
       if (zi === 1) b.prop('hydrant', x1 - 1.2, z1 - 1.2, 0, 0);
+      // the sidewalks and gutters all round the block: litter, bags left at the curb,
+      // trash cans nobody empties
+      const ring: Rect[] = [
+        { x0: x0 - 1.4, x1: x1 + 1.4, z0: z1 - 2.2, z1: z1 + 1.2 }, { x0: x0 - 1.4, x1: x1 + 1.4, z0: z0 - 1.2, z1: z0 + 2.2 },
+        { x0: x0 - 1.2, x1: x0 + 2.2, z0, z1 }, { x0: x1 - 2.2, x1: x1 + 1.2, z0, z1 },
+      ];
+      for (const q of ring) {
+        if (q.z0 < GREATER.minZ + 0.5) continue;
+        const long = Math.max(q.x1 - q.x0, q.z1 - q.z0);
+        filth(b, rng, q, Math.round(long * 1.1), Math.round(long * 0.16));
+      }
+      for (const [tx, tz] of [[x0 + 1.1, z0 + 1.1], [x1 - 1.1, z1 - 1.3], [(x0 + x1) / 2, z1 - 1.0]] as const) {
+        if (tz < GREATER.minZ + 2) continue;
+        b.prop('trashcan', tx, tz, rng.range(0, 6), 0);
+        filth(b, rng, { x0: tx - 1.2, x1: tx + 1.2, z0: tz - 1.2, z1: tz + 1.2 }, 7, 3, [{ x0: tx - 0.35, x1: tx + 0.35, z0: tz - 0.35, z1: tz + 0.35 }]);
+      }
       b.hotspot((x0 + x1) / 2, z1 + 0.5);
     });
   });
+  // the housing authority's sign, tagged over
+  b.box('post', -80.4, -80.2, -62.6, -62.4, 0, 2.6, { color: 0x4a4a48 });
+  b.box('post', -76.6, -76.4, -62.6, -62.4, 0, 2.6, { color: 0x4a4a48 });
+  b.sign({ text: 'THE HILL HOMES · HOUSING AUTHORITY', x: -78.4, y: 2.1, z: -62.44, yaw: Math.PI, width: 4.2, height: 0.9, style: 'store', color: '#e9e2c9', bg: '#3b4a3a' });
+  b.sign({ text: 'SEC 8', x: -78.2, y: 1.35, z: -62.42, yaw: Math.PI, width: 2.0, height: 0.7, style: 'graffiti', color: '#ff4fa3' });
 }
 
-/** Houses on their lots, front yards to the street, fenced back yards in the middle. */
-function houseBlock(b: MapBuilder, rng: Rng, r: Rect, id: string, northEdge: boolean): void {
-  b.area('grass', r.x0 + 2.2, r.x1 - 2.2, r.z0 + 2.2, r.z1 - 2.2, 1);
-  const rows: Array<{ facing: Side; zA: number; zB: number }> = [{ facing: 's', zA: r.z1 - 13.6, zB: r.z1 - 4.8 }];
-  if (!northEdge) rows.push({ facing: 'n', zA: r.z0 + 4.8, zB: r.z0 + 13.6 });
-  let n = 0;
-  for (const row of rows) {
-    let x = r.x0 + 3.2;
-    while (x < r.x1 - 9) {
-      let w = rng.range(7.5, 10.5);
-      if (x + w > r.x1 - 3.2) w = r.x1 - 3.2 - x;
-      if (w < 6.5) break;
-      house(b, rng, `${id}_${n++}`, { x0: x, x1: x + w, z0: row.zA, z1: row.zB }, row.facing);
-      // driveway car or trash cans in the gap
-      const gap = rng.range(2.6, 4.2);
-      const gx = x + w + gap / 2;
-      if (gap > 3.2 && rng.chance(0.4)) b.prop('car', gx, (row.zA + row.zB) / 2 + (row.facing === 's' ? 2 : -2), 0, rng.int(8));
-      else if (rng.chance(0.5)) b.prop('trashcan', gx, row.facing === 's' ? row.zB - 0.5 : row.zA + 0.5, 0, 0);
-      x += w + gap;
+/** Tags sprayed on THE HILL's walls. */
+const HILL_TAGS = ['HILL BOYZ', 'RIP TEE', 'SEC 8', 'NO SNITCH', '187', 'FREE DRE', 'HILLSIDE', 'TRAP', 'RENT DUE', 'BROKE', '5-0 OUT', 'ONE WAY'];
+const HILL_TAG_COLORS = ['#ff4fa3', '#4fd1ff', '#ffe14d', '#7dff6b', '#ff8a3d', '#c59bff', '#ffffff', '#e23b3b'];
+const TRASH_PAPER = [0xe9e4d6, 0xd9d2bf, 0xc9b98f, 0xb8b2a4, 0xd94a3a, 0x3f7fd1, 0xf2c94c, 0x8a8478];
+const TRASH_BAGS = [0x1b1c1e, 0x232528, 0x1f2a22, 0xe6e6e2, 0x2a2420];
+
+/**
+ * Litter over a rectangle: scraps of paper and wrappers, cups, and trash bags (some torn open),
+ * skipping the `keep` rectangles (buildings). All of it is drawn only: nothing to trip on.
+ */
+function filth(b: MapBuilder, rng: Rng, r: Rect, scraps: number, bags: number, keep: Rect[] = []): void {
+  const spot = (): [number, number] | null => {
+    for (let k = 0; k < 8; k++) {
+      const x = rng.range(r.x0, r.x1), z = rng.range(r.z0, r.z1);
+      if (!keep.some((q) => inRect(q, x, z, 0.4))) return [x, z];
     }
+    return null;
+  };
+  for (let i = 0; i < scraps; i++) {
+    const p = spot();
+    if (!p) continue;
+    const w = rng.range(0.14, 0.5), d = rng.range(0.12, 0.36);
+    b.solids.push({ kind: 'litter', x: p[0], y: 0.022 + (i % 5) * 0.001, z: p[1], sx: w, sy: 0.006, sz: d, ry: rng.range(0, Math.PI), col: 'none', color: rng.pick(TRASH_PAPER) });
+    // a few cans and cups standing or tipped
+    if (rng.chance(0.18)) b.solids.push({ kind: 'litter', x: p[0] + rng.range(-0.4, 0.4), y: 0.06, z: p[1] + rng.range(-0.4, 0.4), sx: 0.08, sy: 0.12, sz: 0.08, ry: rng.range(0, 3), col: 'none', color: rng.pick([0xc23a2a, 0x2f6fd1, 0xd9d9d4, 0x3a8a4a]) });
   }
-  // back yards: a fence line with gaps, sheds, junk
-  const zm = northEdge ? r.z0 + 6 : (r.z0 + r.z1) / 2;
-  const gaps = [r.x0 + (r.x1 - r.x0) * rng.range(0.15, 0.35), r.x0 + (r.x1 - r.x0) * rng.range(0.6, 0.85)];
-  let fx = r.x0 + 3;
-  for (const g of gaps) {
-    b.box('fence_wood', fx, g - 1.2, zm - 0.08, zm + 0.08, 0, 2.0);
-    fx = g + 1.2;
-  }
-  b.box('fence_wood', fx, r.x1 - 3, zm - 0.08, zm + 0.08, 0, 2.0);
-  const yardZ = northEdge ? (r.z0 + 6 + r.z1 - 13.6) / 2 : zm + (rng.chance(0.5) ? 3 : -3);
-  b.box('shed', r.x0 + 5, r.x0 + 8.5, yardZ - 1.5, yardZ + 1.5, 0, 2.5, { style: 'wood' });
-  b.prop(rng.pick(['tires', 'pallet', 'crate', 'dumpster'] as const), r.x1 - 8, yardZ, rng.range(0, 3), 0);
-  b.prop('tree', (r.x0 + r.x1) / 2 + rng.range(-4, 4), yardZ + rng.range(-1.5, 1.5), 0, rng.int(3));
-  if (northEdge) {
-    b.prop('car', r.x0 + 14, r.z0 + 3.4, Math.PI / 2, rng.int(8));
-    b.loot(r.x1 - 6, r.z0 + 4);
+  for (let i = 0; i < bags; i++) {
+    const p = spot();
+    if (!p) continue;
+    // bags pile up: one to three together
+    const n = 1 + rng.int(3);
+    for (let k = 0; k < n; k++) {
+      const s = rng.range(0.45, 0.8);
+      b.solids.push({ kind: 'trashbag', x: p[0] + rng.range(-0.5, 0.5) * k, y: s * 0.36, z: p[1] + rng.range(-0.5, 0.5) * k, sx: s, sy: s * 0.8, sz: s * rng.range(0.8, 1.1), ry: rng.range(0, 6), col: 'none', color: rng.pick(TRASH_BAGS) });
+    }
   }
 }
 
 /**
- * A house on its lot: every one can be walked into now. The ones that used to be walk-in
- * single rooms are one-floor homes; the others (once solid blocks) have two floors.
+ * A block of THE HILL: Section 8 walk-ups. Tired brick apartment blocks (you can go into every
+ * one: stair halls, a unit on each floor, the roof) round a dirt yard that nobody has cleaned
+ * in years: overflowing dumpsters, bags of trash, a stripped car, a couch somebody dragged out,
+ * broken windows, tags on every wall.
  */
-function house(b: MapBuilder, rng: Rng, id: string, r: Rect, facing: Side): void {
-  const style = rng.pick(['siding', 'stucco', 'brick', 'siding'] as const);
-  const color = style === 'brick' ? undefined : rng.pick(HOUSE_COLORS);
-  const oneFloor = rng.chance(0.34);
-  // (the same draws the old houses made, so everything generated after them stays put)
-  if (oneFloor) {
-    rng.chance(0.5);
-    rng.int(4);
-  } else rng.pick([6.2, 6.5, 7.0]);
-  // two-floor brick houses are flat-roofed townhouses
-  const type = oneFloor ? 'house1' : style === 'brick' ? 'townhouse' : 'house2';
-  construct(b, { id, type, ...r, facing, style, color, roofColor: ROOF_COLORS[hashStr(id) % ROOF_COLORS.length] });
-}
+function projectBlock(b: MapBuilder, rng: Rng, r: Rect, id: string, northEdge: boolean): void {
+  const yard: Rect = { x0: r.x0 + 2.2, x1: r.x1 - 2.2, z0: r.z0 + 2.2, z1: r.z1 - 2.2 };
+  b.area('dirt', yard.x0, yard.x1, yard.z0, yard.z1, 1, 0x8f7f69);
+  // what is left of the grass
+  for (let i = 0; i < 5; i++) {
+    const x = rng.range(yard.x0 + 1, yard.x1 - 5), z = rng.range(yard.z0 + 1, yard.z1 - 4);
+    b.area('grass', x, x + rng.range(2, 4.5), z, z + rng.range(1.5, 3.5), 2, 0x9aa57c);
+  }
+  const keep: Rect[] = [];
+  const w = (r.x1 - r.x0 - 7.0) / 2;
+  let n = 0;
+  /** One walk-up; some of its windows are already broken. */
+  const walkUp = (x0: number, z0: number, facing: Side, fireEscape: boolean) => {
+    const R = { x0, x1: x0 + w, z0, z1: z0 + 11 };
+    const first = b.windows.length;
+    const name = `${id}_${n++}`;
+    construct(b, {
+      id: name, type: 'apartment', ...R, facing, floors: rng.pick([3, 3, 4]), fireEscape,
+      style: rng.pick(['brickdark', 'apartment', 'brickdark']), color: rng.pick([0x6f5246, 0x7a5a4b, 0x8a7566, 0x66544c]), plaster: rng.pick([0xbfb49c, 0xb7ad9c, 0xc2b6a0]),
+    });
+    for (let i = first; i < b.windows.length; i++) if (b.windows[i].breakable && rng.chance(0.2)) b.windows[i].broken = true;
+    keep.push({ x0: R.x0 - 2.4, x1: R.x1 + 2.4, z0: R.z0 - 0.3, z1: R.z1 + 0.3 });
+    // tags on the back wall and a side
+    const back = facing === 's' ? R.z0 - 0.07 : R.z1 + 0.07;
+    for (let k = 0; k < 2; k++) {
+      b.sign({
+        text: rng.pick(HILL_TAGS), x: R.x0 + 1.8 + k * (w - 3.6) + rng.range(-0.4, 0.4), y: rng.range(1.2, 1.9), z: back,
+        yaw: facing === 's' ? 0 : Math.PI, width: rng.range(2.2, 3.4), height: rng.range(0.8, 1.2), style: 'graffiti', color: rng.pick(HILL_TAG_COLORS),
+      });
+    }
+    b.hotspot((R.x0 + R.x1) / 2, facing === 's' ? R.z1 + 2 : R.z0 - 2);
+  };
+  // the row on the street to the south (its fire escape on the west end)
+  const zs = r.z1 - 4.4 - 11;
+  walkUp(r.x0 + 4.6, zs, 's', true);
+  walkUp(r.x0 + 4.6 + w, zs, 's', false);
+  // and the row behind it: facing the next street, or (at the top of the map) the yard
+  if (northEdge) {
+    walkUp(r.x0 + 4.6, r.z0 + 4.4, 's', true);
+    walkUp(r.x0 + 4.6 + w, r.z0 + 4.4, 's', false);
+  } else {
+    walkUp(r.x0 + 2.4, r.z0 + 4.4, 'n', false);
+    walkUp(r.x0 + 2.4 + w, r.z0 + 4.4, 'n', true);
+  }
 
-const ROOF_COLORS = [0x4a4442, 0x5a3f38, 0x3d4650, 0x4d4a3c, 0x6b3a2e];
-function hashStr(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return h >>> 0;
+  // ---- the yard between the rows ----
+  const y0 = northEdge ? r.z0 + 16.5 : r.z0 + 16.5, y1 = zs - 1.2;
+  const mid = (y0 + y1) / 2;
+  const cx = (r.x0 + r.x1) / 2;
+  // dumpsters that stopped being emptied, bags heaped against them
+  for (const dx of [-7.5, 6.5]) {
+    const dz = mid + rng.range(-2, 2);
+    b.prop('dumpster', cx + dx, dz, rng.range(-0.3, 0.3), rng.int(2));
+    filth(b, rng, { x0: cx + dx - 2.4, x1: cx + dx + 2.4, z0: dz - 2.2, z1: dz + 2.2 }, 10, 6, [{ x0: cx + dx - 0.8, x1: cx + dx + 0.8, z0: dz - 1.2, z1: dz + 1.2 }]);
+  }
+  // a car on blocks, burnt out
+  b.rbox('burntcar', cx + rng.range(-3, 3), mid + rng.range(-1.5, 1.5), 1.8, 4.2, 0.28, 1.25, rng.range(0, Math.PI));
+  // furniture nobody came for
+  b.rbox('furn', cx - 3.5 + rng.range(-1, 1), y0 + 1.2, 2.0, 0.9, 0, 0.85, rng.range(-0.4, 0.4), { col: 'solid', meta: { t: 'couch', old: 1 } });
+  b.rbox('mattress', cx + 4 + rng.range(-1, 1), y1 - 1.4, 1.4, 1.95, 0, 0.22, rng.range(0, Math.PI));
+  b.rbox('mattress', cx - 8 + rng.range(-1, 1), y1 - 1.0, 0.95, 1.9, 0, 0.2, rng.range(0, Math.PI));
+  b.prop('tires', cx + 9, y0 + rng.range(1, 3), 0, 0);
+  b.prop('pallet', cx - 9.5, mid + 4, rng.range(0, 3), 0);
+  b.prop(rng.pick(['crate', 'crate_big'] as const), cx + 2.5, y0 + 1.5, rng.range(0, 3), 0);
+  for (let i = 0; i < 3; i++) b.rbox('cart', cx + rng.range(-9, 9), rng.range(y0 + 1, y1 - 1), 0.6, 0.95, 0, 0.55, rng.range(0, 6), { meta: { tipped: i % 2 } });
+  // standing water that never drains
+  for (let i = 0; i < 3; i++) {
+    const x = rng.range(yard.x0 + 2, yard.x1 - 5), z = rng.range(y0, y1 - 2);
+    b.area('puddle', x, x + rng.range(1.2, 3), z, z + rng.range(0.8, 1.8), 3);
+  }
+  // a clothesline between two poles
+  b.box('post', cx - 5, cx - 4.85, mid - 3.4, mid - 3.25, 0, 2.4, { color: 0x5c5a55 });
+  b.box('post', cx + 4.85, cx + 5, mid - 3.4, mid - 3.25, 0, 2.4, { color: 0x5c5a55 });
+  b.box('wire', cx - 4.9, cx + 4.9, mid - 3.34, mid - 3.31, 2.3, 2.33, { col: 'none', color: 0x2a2a2a });
+  for (let i = 0; i < 5; i++) b.box('laundry', cx - 4 + i * 1.9, cx - 4 + i * 1.9 + rng.range(0.6, 1.1), mid - 3.345, mid - 3.305, 1.45 + rng.range(0, 0.3), 2.3, { col: 'none', color: rng.pick([0xd9d4c6, 0x8a2f2f, 0x2f4f7a, 0xc9b98f, 0x4a4a4a]) });
+  // trash everywhere else
+  filth(b, rng, yard, 70, 14, keep);
+  filth(b, rng, { x0: yard.x0, x1: yard.x1, z0: y0, z1: y1 }, 45, 10, keep);
+  b.loot(cx + rng.range(-6, 6), mid);
+  b.loot(cx + rng.range(-8, 8), y0 + 1);
+  b.hotspot(cx, mid);
 }
 
 function school(b: MapBuilder, r: Rect): void {
@@ -391,8 +569,15 @@ function foodMart(b: MapBuilder, r: Rect): void {
 function projects(b: MapBuilder, r: Rect): void {
   // two walk-up apartment blocks (three floors, a unit on each), the old outside stairs still
   // running up the front to the east block's roof
-  construct(b, { id: 'projectsA', type: 'apartment', x0: -46, x1: -35, z0: -146, z1: -134, facing: 's', floors: 3, story: 3.0, style: 'apartment' });
-  construct(b, { id: 'projectsB', type: 'apartment', x0: -35, x1: -24, z0: -146, z1: -134, facing: 's', floors: 3, story: 3.0, style: 'apartment', fireEscape: false, gaps: [{ side: 's', at: -31.4, w: 1.7 }] });
+  const firstWin = b.windows.length;
+  construct(b, { id: 'projectsA', type: 'apartment', x0: -46, x1: -35, z0: -146, z1: -134, facing: 's', floors: 3, story: 3.0, style: 'apartment', color: 0x8a7566, plaster: 0xbfb49c });
+  construct(b, { id: 'projectsB', type: 'apartment', x0: -35, x1: -24, z0: -146, z1: -134, facing: 's', floors: 3, story: 3.0, style: 'apartment', color: 0x8a7566, plaster: 0xb7ad9c, fireEscape: false, gaps: [{ side: 's', at: -31.4, w: 1.7 }] });
+  for (let i = firstWin; i < b.windows.length; i += 5) if (b.windows[i].breakable) b.windows[i].broken = true;
+  const pr = new Rng(0x5ec8);
+  filth(b, pr, { x0: -46, x1: -24, z0: -133.5, z1: -125 }, 45, 9);
+  b.rbox('mattress', -38, -127.5, 1.4, 1.95, 0, 0.22, 0.6);
+  b.rbox('cart', -29, -130, 0.6, 0.95, 0, 0.55, 2.1, { meta: { tipped: 1 } });
+  for (const [x, t] of [[-43, 'HILL BOYZ'], [-28, 'RIP TEE']] as const) b.sign({ text: t, x, y: 1.5, z: -146.07, yaw: 0, width: 3, height: 1, style: 'graffiti', color: '#4fd1ff' });
   b.ramp({ kind: 'stairs', x: -44, z: -133.15, y0: 0, dir: 'e', run: 12.6, rise: 9, width: 1.7, rails: 'right', style: 'concrete', group: 'projectsA' });
   construct(b, { id: 'laundry', type: 'laundromat', x0: -46, x1: -30, z0: -124, z1: -114, facing: 's', style: 'brickdark', sign: { text: 'SUDS LAUNDRY', color: '#ffffff', bg: '#2a6f97' } });
   b.area('lot', -46, -24, -132.5, -126, 1);
@@ -1192,7 +1377,7 @@ function hotelRow(b: MapBuilder, rng: Rng, r: Rect, xi: number): void {
 }
 
 // =================================================================================== BEACH
-/** WHOOPA BEACH (south middle) and the BOARDWALK (southeast): sand, towers, a tiki bar. */
+/** LAKE LINDA's beach (south middle) and the BOARDWALK (southeast): sand, towers, a tiki bar. */
 function beach(b: MapBuilder, rng: Rng): void {
   const PROM0 = 71, PROM1 = 76;
   const W0 = CELL.c.x0 - 4.5; // the docks have the shore west of here

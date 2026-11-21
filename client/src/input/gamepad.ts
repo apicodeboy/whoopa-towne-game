@@ -28,6 +28,8 @@ const PITCH_SPEED = 2.3;
 const TRIGGER_THRESHOLD = 0.25;
 const NAV_REPEAT_FIRST = 0.38;
 const NAV_REPEAT = 0.13;
+/** Holding the previous-weapon button this long opens the weapon wheel instead (seconds). */
+const WHEEL_HOLD = 0.22;
 
 /** Which family of controller this is, from the id string browsers report. */
 export function detectPadKind(id: string): DeviceKind {
@@ -52,11 +54,13 @@ function applyDeadzone(x: number, y: number, dz: number, out: { x: number; y: nu
 }
 
 /**
- * Xbox / PS5 DualSense (and any "standard" mapped pad) through the Gamepad API.
+ * Xbox / PS5 DualSense (and any "standard" mapped pad) through the Gamepad API (default layout;
+ * the buttons can be changed in Settings → Controls):
  *
- *   Left stick move · Right stick look · RT/R2 fire · LT/L2 aim · A/Cross jump · B/Circle crouch
- *   X/Square reload · Y/Triangle switch weapon · LB/L1 throw · RB/R1 swap shoulder · L3 sprint
- *   D-pad weapon slots · View/Create (or touchpad) scoreboard · Menu/Options pause
+ *   Left stick move · Right stick look · R2 fire · hold L1 aim · tap L2 / R1 previous / next gun
+ *   hold L2 weapon & gadget wheel (point with the right stick, let go to pick) · Cross jump
+ *   Circle crouch · Square reload · Triangle throw · R3 swap shoulder · L3 sprint
+ *   D-pad weapon slots, ▼ use / heal · Create (or touchpad) scoreboard · Options pause
  */
 export class GamepadSource implements InputSource {
   readonly kind = 'gamepad' as const;
@@ -69,6 +73,9 @@ export class GamepadSource implements InputSource {
   private lookRamp = 0;
   private index = -1;
   private padId = '';
+  /** How long the previous-weapon / wheel button has been held (seconds; -1 = up). */
+  private prevHeld = -1;
+  private wheelOpen = false;
   /** Fired when a controller is plugged in / removed. */
   onConnection: ((connected: boolean, kind: DeviceKind, id: string) => void) | null = null;
   private onConnect = (e: GamepadEvent) => {
@@ -154,7 +161,24 @@ export class GamepadSource implements InputSource {
       }
       // response curve: fine control near the center, full speed at the edge, a little extra
       // turn speed after holding the stick hard over (so 180s do not take forever)
-      const mag = Math.hypot(rx, ry);
+      // the wheel: hold the previous-weapon button; while it is open the right stick points at
+      // a slot instead of turning the camera
+      const m0 = bindings.pad;
+      if (btn(m0.prev)) {
+        this.prevHeld = this.prevHeld < 0 ? 0 : this.prevHeld + dt;
+        if (this.prevHeld >= WHEEL_HOLD) this.wheelOpen = true;
+      } else if (this.prevHeld >= 0) {
+        if (this.wheelOpen) frame.wheelClose = true;
+        else frame.slotCycle = -1;
+        this.prevHeld = -1;
+        this.wheelOpen = false;
+      }
+      if (this.wheelOpen) {
+        frame.wheel = true;
+        frame.wheelStickX = rx;
+        frame.wheelStickY = ry;
+      }
+      const mag = this.wheelOpen ? 0 : Math.hypot(rx, ry);
       if (mag > 0) {
         this.lookRamp = mag > 0.92 ? Math.min(1, this.lookRamp + dt * 2.2) : 0;
         const curve = Math.pow(mag, 1.7) / mag;
@@ -178,6 +202,7 @@ export class GamepadSource implements InputSource {
       if (pressed(m.sprint)) frame.sprintPress = true;
       if (pressed(m.shoulder)) frame.swapShoulder = true;
       if (pressed(m.swap)) frame.slotCycle = 1;
+      if (this.wheelOpen) frame.fire = false;
       if (pressed(B.LEFT)) frame.slotSelect = 0;
       if (pressed(B.RIGHT)) frame.slotSelect = 1;
       if (pressed(B.UP)) frame.slotSelect = 2;
@@ -189,6 +214,8 @@ export class GamepadSource implements InputSource {
         if (btn(m.heal)) frame.heal = true;
       }
     } else {
+      this.prevHeld = -1;
+      this.wheelOpen = false;
       // ---- menu navigation: d-pad or left stick, with key-repeat ----
       let nx = 0, ny = 0;
       if (btn(B.LEFT) || lx < -0.6) nx = -1;
