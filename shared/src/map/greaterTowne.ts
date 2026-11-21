@@ -7,7 +7,7 @@ import type { MapDef } from './types';
 
 /**
  * GREATER WHOOPA TOWNE — the JUMP OFF THE PORCH map: nine districts in a 3×3 grid with CAP'S
- * HOUSE (a farm round a gigantic barndominium) in the middle, all inside one round map: open
+ * HOUSE (a farm round a four-story cabin up on a hill) in the middle, all inside one round map: open
  * country fills the ring between the grid and the circle, a rim of rock runs round it, and
  * LAKE LINDA lies to the south. (The classic WHOOPA TOWNE map is its own map, for Team
  * Deathmatch and Turf War, and is not touched by any of this.)
@@ -19,7 +19,7 @@ import type { MapDef } from './types';
  *      +---------------+---- Porch St ----+----------------+  z=-56
  *      |   JUNGLE      |   CAP'S HOUSE    |   DOWNTOWN     |
  *      |               |  (the farm, the  |                |
- *      |               |   barndominium)  |                |
+ *      |               |   cabin on a hill)|                |
  *      +---------------+-- Ocean Drive ---+----------------+  z=61..71
  *      |  THE DOCKS    |    LAKE LINDA    | THE BOARDWALK  |
  *      +---------------+------------------+----------------+  z=118, the lake beyond

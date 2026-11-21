@@ -5,18 +5,25 @@ A browser-based online multiplayer third-person shooter. Two crews, **S-Curve** 
 switch away): a winding S-shaped road on the west side, a rail yard and crossing on the east,
 and a corner-store strip in the middle.
 
-- 2–8 players (4v4), empty slots can be filled with bots
+- 2–8 players (4v4), empty slots can be filled with bots; **JUMP OFF THE PORCH**, the battle
+  royale, takes 60 per match (bots fill whatever humans don't)
 - **Team Deathmatch** (first to 50 kills, or most kills after 10 minutes) and
   **Gang Turf War** (hold zones A, B and C; first to 200)
 - Keyboard + mouse, PS5 / Xbox controllers, and phone touch controls
 - Authoritative server with client-side prediction, interpolation and lag-compensated hits
 - No accounts: pick a display name, Quick Play, or share a 6-character invite code
-- **Character Creator**: a faceless character (a blank gray face, big spiky locs) in flat cel
-  shading with a bold outline. Three starter looks (hooded puffer, puffer vest, white tee),
-  then change anything: face color and a face mark, body type, build, height, skin tone, 22
+- **Character Creator**: a character with a human face (eyes, brows, nose, lips) and big spiky
+  locs, in flat cel shading with a bold outline. Three starter looks (hooded puffer, puffer
+  vest, white tee), then change anything: eyes and eye color, brows, nose, mouth, ears, facial
+  hair, a face tattoo, body type, build, skin tone, 22
   hairstyles, tops, wide stacked pants, a studded belt, a graphic on the pant leg, shoes and
-  colors, hats, glasses, chains, watches and gloves. Everyone in a match sees your character;
-  teammates are told apart by their name tags.
+  colors, hats, glasses, chains, watches and gloves. Everyone stands the same height. The
+  creator (and TRAP) look like a 3D editor: a dark drafting grid, round tools with their labels
+  under them, a front view of your character in a measured selection box beside a 3D view on a
+  studio floor, and a row of color swatches for whatever you are editing. Everyone in a match
+  sees your character; teammates are told apart by their name tags.
+- Behind the menus, a tour of the big map: every area in turn, 7 seconds each, its name in the
+  corner.
 
 Built with Three.js + TypeScript + Vite (client), Node.js + Colyseus (server) and Rapier
 (physics, shared by both). Art is original or CC0; all sound is synthesized in code.
@@ -100,7 +107,7 @@ headshot multipliers and damage falloff. In Turf War, standing in a zone alone c
 | Previous / next gun | Mouse wheel, 1 / 2 / 3 (/ 4) | L2 (tap) / R1 | LT (tap) / RB | SWAP |
 | Weapon & gadget wheel | B (hold, point with the mouse, let go) | L2 (hold, point with the right stick, let go) | LT (hold) | — |
 | Mark danger (your squad sees it) | Z, or click while holding B | R2 while holding L2 | RT while holding LT | — |
-| Throw grenade / smoke | G | △ | Y | THROW |
+| Grenade / smoke: take it out (again: put it away). Hold Aim to see where it lands, Fire throws it | G (or middle click) | △, then L1 to aim, R2 to throw | Y, then LB / RT | THROW, then AIM / FIRE |
 | Swap camera shoulder | Q | R3 | RS | ⇄ |
 | Heal / take Perc 29 (hold) | H | D-pad down | D-pad down | HEAL |
 | Use (doors, windows, bags, pick up; hold to lock a door from inside) | E | □ (the same button as reload) | X | USE / tap the prompt |
@@ -230,16 +237,19 @@ be climbed through, all synced by the server. The JUMP OFF THE PORCH map is roun
 districts (Babylon, The Hill, Hong Kong, Jungle, CAP'S HOUSE, Downtown, the Docks, Lake Linda,
 the Boardwalk) inside one big circle, open country ("96": fields and farmsteads, north of The Hill;
 the Badlands) filling the ring out to a rim of rock, and Lake Linda to the south. In the middle
-is **CAP'S HOUSE**: a gigantic two-floor barndominium (shop, great room open to the loft,
-master suite, game room, bedrooms, a deck), an in-ground pool you can drop into, a red barn and
-silos, horses, cows, pigs, goats, sheep and chickens in their pens, a cornfield and an orchard.
-Every section is fenced off by rails you can jump. The classic map (Team Deathmatch and Turf
+is **CAP'S HOUSE**: a four-story log cabin up on a steep hill you can run up from any side
+(real sloped ground, about 30° on average), with a balcony across every upper floor looking out
+to the lake, a stone fireplace, a game room at the top, and a four-car garage holding a
+stainless wedge pickup, a two-tone hypercar, a lifted off-road truck and a high-roof cargo van.
+A drive climbs the hill from a ranch gate on Ocean Drive. At the foot of the hill: an in-ground
+pool you can drop into, the cabana, a red barn and silos, horses, cows, pigs, goats, sheep and
+chickens in their pens, a cornfield and an orchard. Every section is fenced off by rails you can jump. The classic map (Team Deathmatch and Turf
 War) is untouched. The match warms up in Babylon. Billboards around town carry ads and live
 sports scores. How it works, how to add buildings: [docs/BUILDINGS.md](docs/BUILDINGS.md).
 
 ## Characters
 
-The characters are WHOOPA TOWNE's own: a faceless figure (blank gray face, spiky locs, hooded
+The characters are WHOOPA TOWNE's own: a figure with a human face (spiky locs, hooded
 puffer, wide stacked pants, studded belt, chain, gloves and watches, white low-tops) sculpted
 and dressed by `tools/characters` into `client/public/assets/characters/ink.glb`, skinned to
 the CC0 rig and its animations, drawn in flat two-tone cel shading with a bold ink outline.

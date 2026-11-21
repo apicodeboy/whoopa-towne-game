@@ -1,6 +1,6 @@
 # The characters
 
-WHOOPA TOWNE's character: faceless. A smooth blank gray face, big spiky freeform locs, a black
+WHOOPA TOWNE's character: a human face (eyes, brows, nose, lips, ears), big spiky freeform locs, a black
 hooded puffer (or a puffer vest over a long sleeve, or a plain white tee), very wide pants that
 stack in rolls on the shoe, a red studded belt with the boxers' waistband showing above it, a
 blue graphic on the left thigh, a chain with a round pendant, black gloves with a watch on each
@@ -27,7 +27,7 @@ held, and how to add new clothing. (The code and the asset still carry the worki
 | Assembling a look at runtime | `client/src/game/characters/look/assemble.ts` (`buildInkOutfit`) |
 | Flat cel shading and ink outline | `assemble.ts` (`LOOK_MATERIAL`), `skinnedCharacter.ts` (`outlineMaterial`) |
 | Hair (spiky locs, wicks, ...), hats, masks | `client/src/game/characters/look/hair.ts`, `headwear.ts` |
-| The mouth line and face marks, glasses, earrings | `client/src/game/characters/look/face.ts` (`buildFaceMarks`) |
+| Beards, grills, piercings, face tattoos, glasses, earrings | `client/src/game/characters/look/face.ts` |
 | Chains and the pendant, watches, gloves, bags, pants chain | `client/src/game/characters/look/jewelry.ts` |
 | The graphic on the pant leg (the print atlas) | `client/src/game/characters/look/legPrint.ts` |
 | How guns are held | `client/src/game/characters/skinnedCharacter.ts` (`GUN_FIT`, `turnHand`, `closeHand`) |
@@ -45,9 +45,12 @@ held, and how to add new clothing. (The code and the asset still carry the worki
 2. **Sculpt.** Each part is a signed distance shape built from blended anatomical masses:
    pelvis, ribcage, pecs, lats, obliques, glutes, trapezius, deltoids, biceps and triceps,
    forearm muscles; a palm with a heel and thumb pad and five jointed fingers; quads,
-   hamstrings, calves and knees. The head is a smooth egg with plain ears and no features;
-   the blank face is its own piece, a shell over the whole head down to the jaw and the nape
-   (the neck under it stays skin). Clothing is a real cloth shell a few millimetres thick,
+   hamstrings, calves and knees. The head has a human face: brow ridge, cheekbones, jaw and
+   chin, eye sockets with lids wrapped round real eyeballs (white, iris, pupil), a nose with
+   nostrils, lips (their own color, from a soft mask) and ears. Over the face the shading
+   normals lean toward a smooth rounded head, so the cel shading's hard light/shadow edge runs
+   cleanly across it instead of breaking up on every bump (the shape stays as sculpted).
+   Eyebrows are a thin layer on the brow ridge. Clothing is a real cloth shell a few millimetres thick,
    shaped around that body, with hems, cuffs, folds and designed details: big clean puffer
    baffles, a hood, a zip, pants that pile up in rolls above the hem, a belt with two rows of
    pyramid studs and a buckle.
@@ -141,7 +144,7 @@ Saved looks from before a field existed decode with that default.
 | --- | --- |
 | Starter looks | Hooded Puffer, Puffer Vest, White Tee (the three reference fits; editable) |
 | Body | body type, build, height, shoulder width, skin tone, head size |
-| Head & face | face color (gray, bone white, black, skin tone, red, blue), a face mark (star, cross, teardrops, lightning bolt), head shape, jaw |
+| Head & face | head shape, face shape, eyes, eye color, eyebrows, nose, mouth, teeth, ears, facial hair and its color, freckles / scar / beauty mark, a face tattoo (star, cross, teardrops, lightning bolt), expression preview |
 | Hair | spiky locs, wicks, locs, dreads, twists, braids, cornrows, afros, fades, waves and more; colors |
 | Clothing | hooded puffer, puffer vest over a long sleeve, boxy tee, tank, crop, hoodie, zip-up hoodie; baggy stacked pants, regular and slim jeans, cargo, leggings, shorts; a studded belt (red, black, white); a pants graphic (Go Crazy + scorpion, flames, stars); low-tops, running shoes, chunky sneakers, boots; hats |
 | Accessories | chains (round pendant, gold, silver, stacked silver, medallion, diamond), earrings, watches, black gloves with a watch on each wrist, glasses, face masks, pants chain, something in the mouth, phone in hand (menus), bags (AJ'S) |
@@ -169,7 +172,7 @@ codes (so nothing old breaks) but nothing draws them.
 
 ## Budgets and performance
 
-About 24–32k triangles and 26–34k vertices per assembled character (the face shell 2k, hands
+About 24–32k triangles and 26–34k vertices per assembled character (the head 3.4k, hands
 ~1.9k, each garment 2–4.6k, the studded belt ~3k, spiky locs ~5k), in one draw call plus the
 outline. A look is assembled in about 0.2 s the first time and cached. Characters far away
 skip the outline. The GLB is about 3.6 MB (served precompressed).

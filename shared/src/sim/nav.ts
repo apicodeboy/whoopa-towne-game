@@ -1,8 +1,12 @@
+import { PLAYER } from '../config/game';
+import { terrainHeight } from '../map/terrain';
 import type { MapDef } from '../map/types';
 import type { Rng } from '../math';
 import type { PhysicsWorld } from './physics';
 
 const SQRT2 = Math.SQRT2;
+/** Most cells one search may expand (a path right across the map needs far fewer). */
+const MAX_EXPANSIONS = 60000;
 
 /**
  * Ground-level navigation grid for bots (1m cells), built by probing the collision world
@@ -19,6 +23,8 @@ export class NavGrid {
   readonly walk: Uint8Array;
   /** Extra traversal cost (cells hugging walls). */
   private penalty: Float32Array;
+  /** Connected piece of walkable ground per cell (-1: not walkable). */
+  readonly comp: Int32Array;
 
   private g: Float32Array;
   private f: Float32Array;
@@ -50,9 +56,20 @@ export class NavGrid {
       for (let i = 0; i < this.w; i++) {
         const x = this.minX + (i + 0.5) * this.cell;
         const z = this.minZ + (j + 0.5) * this.cell;
-        this.walk[j * this.w + i] = phys.canStandAt(x, 0.03, z) ? 1 : 0;
+        // on a hill: probe at the highest ground under the player's feet (a capsule on a slope
+        // touches the uphill side), on level ground just above it
+        let gy = 0;
+        if (map.terrain) {
+          const r = PLAYER.radius;
+          gy = Math.max(
+            terrainHeight(map.terrain, x, z), terrainHeight(map.terrain, x + r, z), terrainHeight(map.terrain, x - r, z),
+            terrainHeight(map.terrain, x, z + r), terrainHeight(map.terrain, x, z - r),
+          );
+        }
+        this.walk[j * this.w + i] = phys.canStandAt(x, gy + (gy > 0 ? 0.07 : 0.03), z) ? 1 : 0;
       }
     }
+    this.comp = this.label();
     // Penalize cells next to obstacles so bots keep to the middle of lanes and round corners wide.
     for (let j = 0; j < this.h; j++) {
       for (let i = 0; i < this.w; i++) {
@@ -69,6 +86,48 @@ export class NavGrid {
         this.penalty[idx] = blocked > 0 ? 0.6 + blocked * 0.25 : 0;
       }
     }
+  }
+
+  /**
+   * Which connected piece of walkable ground each cell belongs to (moving the way the search
+   * moves: 8 ways, no corner cutting), so a path to a place you can't reach is turned down at
+   * once instead of searching the whole map first.
+   */
+  private label(): Int32Array {
+    const w = this.w, h = this.h, walk = this.walk;
+    const comp = new Int32Array(w * h).fill(-1);
+    const stack: number[] = [];
+    let id = 0;
+    for (let c = 0; c < comp.length; c++) {
+      if (!walk[c] || comp[c] >= 0) continue;
+      comp[c] = id;
+      stack.push(c);
+      while (stack.length) {
+        const cur = stack.pop()!;
+        const ci = cur % w, cj = (cur - ci) / w;
+        for (let dj = -1; dj <= 1; dj++) {
+          const nj = cj + dj;
+          if (nj < 0 || nj >= h) continue;
+          for (let di = -1; di <= 1; di++) {
+            const ni = ci + di;
+            if ((di === 0 && dj === 0) || ni < 0 || ni >= w) continue;
+            const nb = nj * w + ni;
+            if (!walk[nb] || comp[nb] >= 0) continue;
+            if (di !== 0 && dj !== 0 && (!walk[cj * w + ni] || !walk[nj * w + ci])) continue;
+            comp[nb] = id;
+            stack.push(nb);
+          }
+        }
+      }
+      id++;
+    }
+    return comp;
+  }
+
+  /** Can you walk from one point to the other (both on walkable ground, the same piece of it)? */
+  connected(x0: number, z0: number, x1: number, z1: number): boolean {
+    const a = this.nearestWalkable(x0, z0), b = this.nearestWalkable(x1, z1);
+    return a >= 0 && b >= 0 && this.comp[a] === this.comp[b];
   }
 
   cellAt(x: number, z: number): number {
@@ -186,6 +245,8 @@ export class NavGrid {
     const start = this.nearestWalkable(x0, z0);
     const goal = this.nearestWalkable(x1, z1);
     if (start < 0 || goal < 0) return -1;
+    // somewhere you can't get to from here: no search at all
+    if (this.comp[start] !== this.comp[goal]) return -1;
     if (start === goal) {
       out.push(x1, z1);
       return Math.hypot(x1 - x0, z1 - z0);
@@ -204,8 +265,10 @@ export class NavGrid {
     this.stamp[start] = gen;
     this.push(start);
     let found = false;
+    // (a safety net: a search this long is not worth a frame)
+    let budget = MAX_EXPANSIONS;
 
-    while (this.heapSize > 0) {
+    while (this.heapSize > 0 && budget-- > 0) {
       const cur = this.pop();
       if (this.closed[cur] === gen) continue;
       this.closed[cur] = gen;

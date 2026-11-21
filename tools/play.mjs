@@ -53,7 +53,7 @@ page.on('console', (m) => {
   if (t === 'error' || t === 'warning') errors.push(`[console.${t}] ${m.text()}`);
   if (opt.verbose) console.log(`[page ${t}] ${m.text()}`);
 });
-page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}`));
+page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}${process.env.STACK ? '\n' + (e.stack ?? '') : ''}`));
 page.on('requestfailed', (r) => errors.push(`[requestfailed] ${r.url()} ${r.failure()?.errorText}`));
 
 const ctx = {

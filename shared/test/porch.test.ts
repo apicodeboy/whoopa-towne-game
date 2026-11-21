@@ -63,9 +63,9 @@ function wait(sim: GameSim, seconds: number, p?: SimPlayer, over: Partial<InputC
 
 const of = (evs: number[][], type: number) => evs.filter((e) => e[0] === type);
 
-test('porch: 20-player lobby boards the transport; bags are placed with hidden loot', async () => {
-  const { sim, me } = await porchSim({ bots: 19 });
-  assert(sim.players.length === PORCH.lobbySize, `capacity ${sim.players.length}`);
+test('porch: a full lobby (60) boards the transport; bags are placed with hidden loot', async () => {
+  const { sim, me } = await porchSim({ bots: PORCH.lobbySize - 1 });
+  assert(PORCH.lobbySize === 60 && sim.players.length === PORCH.lobbySize, `capacity ${sim.players.length}`);
   assert(sim.players.every((p) => p && p.alive && p.state.air === AIR_RIDING), 'everyone starts on the transport');
   assert(me.state.y > 60, 'transport flies high above the town');
   const porch = sim.porch!;

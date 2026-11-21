@@ -104,6 +104,7 @@ test('bots fight a Team Deathmatch: kills happen, nobody gets stuck, sim stays f
   console.log(`       ${kills} kills, ${shots} shots, ${throws} throws in 150s of play; score ${sim.scores.join('-')}; ${perTick.toFixed(3)} ms/tick`);
   assert(kills >= 12, `expected a real firefight, only ${kills} kills`);
   assert(shots > 200, 'bots shoot');
+  assert(throws >= 3, `bots take their throwables out and throw them (${throws})`);
   for (const p of sim.players) {
     if (!p) continue;
     const s = start.get(p.idx)!;

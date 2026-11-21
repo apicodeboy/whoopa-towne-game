@@ -8,6 +8,7 @@ import { CharacterPreview } from '../game/characters/characterPreview';
 import type { CharacterVisual } from '../game/characters/characterTypes';
 import { ApiError, type AccountService } from '../net/account';
 import { button, clear, el } from './dom';
+import { ED, tool } from './editorKit';
 import { gIcon, gramsHtml, itemArt, rarityTag } from './economyArt';
 
 export interface EconomyDeps {
@@ -513,19 +514,51 @@ export class TrapScreen extends ShopLike {
     super(parent, deps, 'trap', 'TRAP', 'Everything you own. Pick it, preview it, put it on.');
     this.openStore = deps.openStore;
     this.filterBox.append(this.filters());
+    this.editorLook();
+  }
+
+  /** The editor look (as the Character Creator): round tools with labels, the studio floor. */
+  private editorLook(): void {
+    const back = this.root.querySelector<HTMLButtonElement>('.eco-back');
+    if (back) {
+      back.className = 'eco-back ed-b solo';
+      back.innerHTML = `<span class="ed-i">${ED.back}</span><span class="ed-l">Back</span>`;
+      back.setAttribute('aria-label', 'Back');
+    }
+    const ctrl = this.root.querySelector('.eco-stage-ctrl');
+    if (ctrl) {
+      ctrl.className = 'eco-stage-ctrl ed-pill';
+      ctrl.replaceChildren(
+        tool(ED.turnL, 'Turn left', () => this.preview.turnStep(-1)),
+        tool(ED.zoomOut, 'Zoom out', () => this.preview.zoomBy(-1)),
+        tool(ED.zoomIn, 'Zoom in', () => this.preview.zoomBy(1)),
+        tool(ED.turnR, 'Turn right', () => this.preview.turnStep(1)),
+      );
+    }
+    this.preview.setStudio(true);
+    // the whole character, standing in the middle of the view
+    this.preview.setZoom(1.5);
   }
 
   protected filters(): HTMLElement {
     const nav = el('nav', 'eco-tabs');
+    const pill = el('div', 'ed-pill eco-catpill');
+    const ICON: Record<string, [string, string]> = {
+      all: [ED.all, 'Everything'], characters: [ED.body, 'Characters'], clothing: [ED.top, 'Clothing'], sneakers: [ED.shoes, 'Sneakers'],
+      accessories: [ED.gem, 'Accessories'], weapons: [ED.gun, 'Skins'], backpacks: [ED.bag, 'Backpacks'], special: [ED.star, 'Special'],
+    };
     for (const c of [{ id: 'all', name: 'Everything' }, ...TRAP_CATEGORIES]) {
-      const b = button(c.name, 'eco-tab', () => {
+      const [icon, label] = ICON[c.id] ?? [ED.star, c.name];
+      const b = tool(icon, label, () => {
         this.category = c.id as TrapCategory | 'all';
         for (const [id, t] of this.tabs) t.classList.toggle('on', id === c.id);
         this.render();
-      });
+      }, 'eco-tab');
+      b.title = c.name;
       this.tabs.set(c.id, b);
-      nav.append(b);
+      pill.append(b);
     }
+    nav.append(pill);
     this.tabs.get('all')?.classList.add('on');
     const chips = el('div', 'eco-chips');
     for (const r of ['all', ...RARITIES]) {

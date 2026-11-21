@@ -172,21 +172,40 @@ stage('hands', () => { for (const s of ['L', 'R'] as const) {
   add_('Body', 'Skin_Hand', m, shadeOf(m, A.skin, 1.1), weigh(m.pos, m.idx, { regionAt: () => 'hand' }));
 } });
 
-// ------------------------------------------------------------------ head (faceless) and its blank face plate
+// ------------------------------------------------------------------ head
 stage('head', () => {
-  // (only the neck: the face shell covers the rest of the head)
-  const m = meshShape(A.neckSkin, [-0.11, 1.32, -0.09], [0.11, 1.72, 0.19], 0.0022 * Q, 900);
+  const m = meshShape(A.head, [-0.11, 1.32, -0.09], [0.11, 1.83, 0.19], 0.0021 * Q, 3400);
   log(`head: ${m.idx.length / 3} tris`);
-  add_('Head', 'Skin', m, shadeOf(m, A.skin, 1.2), weigh(m.pos, m.idx, { regionAt: (x, y, z) => (y < 1.5 ? 'neck' : A.region(x, y, z)) }));
-});
-stage('face', () => {
-  const c = A.headCenter;
-  const m = meshShape(A.face, [c[0] - 0.105, c[1] - 0.135, c[2] - 0.125], [c[0] + 0.105, c[1] + 0.14, c[2] + 0.12], 0.0019 * Q, 2000);
-  log(`face: ${m.idx.length / 3} tris`);
-  add_('Head', 'Face', m, new Float32Array(m.pos.length / 3).fill(1), weigh(m.pos, m.idx, { regionAt: () => 'head' }));
+  // Cel shading draws the line between light and shadow hard, so every bump of the cheeks and
+  // jaw would show as a blotch. Over the face the shading normals lean toward those of a smooth
+  // rounded head (the shape, outline and features stay exactly as sculpted): the light falls
+  // across it in one clean edge, the way faces are drawn.
+  {
+    const c = A.headCenter, rx = 0.074 * 1.07, ry = 0.1 * 1.07, rz = 0.092 * 1.07;
+    for (let i = 0; i < m.pos.length / 3; i++) {
+      const x = m.pos[i * 3] - c[0], y = m.pos[i * 3 + 1] - c[1], z = m.pos[i * 3 + 2] - c[2];
+      // the front of the head, from the brows down to under the chin (fading out at the edges)
+      const front = Math.max(0, Math.min(1, (z + 0.005) / 0.04));
+      const band = Math.max(0, Math.min(1, (y + 0.135) / 0.03)) * Math.max(0, Math.min(1, (0.05 - y) / 0.03));
+      // (the eye sockets keep their own shading: it is what frames the eyes)
+      const de = Math.min(...(['L', 'R'] as const).map((e) => Math.hypot(m.pos[i * 3] - A.eyes.center[e][0], m.pos[i * 3 + 1] - A.eyes.center[e][1], m.pos[i * 3 + 2] - A.eyes.center[e][2])));
+      const eyes = Math.max(0, Math.min(1, (de - 0.019) / 0.012));
+      const w = 0.62 * front * band * eyes;
+      if (w <= 0) continue;
+      let nx = x / (rx * rx), ny = y / (ry * ry), nz = z / (rz * rz);
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nx /= l; ny /= l; nz /= l;
+      const ox = m.nrm[i * 3], oy = m.nrm[i * 3 + 1], oz = m.nrm[i * 3 + 2];
+      let ax = ox + (nx - ox) * w, ay = oy + (ny - oy) * w, az = oz + (nz - oz) * w;
+      const k = Math.hypot(ax, ay, az) || 1;
+      m.nrm[i * 3] = ax / k; m.nrm[i * 3 + 1] = ay / k; m.nrm[i * 3 + 2] = az / k;
+    }
+  }
+  // one skin piece: lips (G) and darker skin (B) are soft masks, painted per vertex at runtime
+  add_('Head', 'Skin', m, shadeOf(m, A.skin, 0.95), weigh(m.pos, m.idx, { regionAt: (x, y, z) => (y < 1.5 ? 'neck' : A.region(x, y, z)) }), maskOf(m, A.lips, -0.0004, 0.0012), maskOf(m, A.dark, -0.001, 0.002));
 });
 
-// ------------------------------------------------------------------ eye and brow markers (never drawn: the runtime measures the head on them)
+// ------------------------------------------------------------------ eyes: a white eyeball, an iris and a pupil as clean caps on it
 stage('eyes', () => { for (const s of ['L', 'R'] as const) {
   const c = A.eyes.center[s], r = A.eyes.radius;
   const look = norm([s === 'L' ? 0.05 : -0.05, -0.04, 1]);
@@ -377,4 +396,4 @@ W.json.animations = (src.json.animations as any[]).map((a) => ({
 const out = resolve(ROOT, 'client/public/assets/characters/ink.glb');
 const bytes = W.write(out);
 log(`wrote ${out}: ${(bytes / 1024).toFixed(0)} KB, ${pieces.length} pieces, ${totalVerts} vertices, ${totalTris} triangles`);
-void len; void scale; void add; void plane; void maskOf;
+void len; void scale; void add; void plane;

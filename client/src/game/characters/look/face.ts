@@ -339,21 +339,14 @@ function decal(h: HeadRig, out: ProcMesh, x: number, y: number, pts: Array<[numb
 }
 
 /**
- * What little there is on the faceless head: a faint line where the mouth would be and, if
- * picked, one small mark (a star on the forehead, a cross, teardrops, a lightning bolt).
- * `dark`: the face itself is dark, so the marks are drawn light.
+ * A small face tattoo, if picked: a star or a cross on the forehead, teardrops under the right
+ * eye, a lightning bolt down the left cheek. `light`: drawn in pale ink instead of dark.
  */
-export function buildFaceMarks(kind: string, h: HeadRig, out: ProcMesh, dark = false): void {
-  const cx = h.center.x;
-  const k = Math.max(0.6, (h.crownY - h.eyeY) / 0.116);
-  // the mouth: a thin sliver, a shade off the face's own color
-  const line: Array<[number, number]> = [];
-  const hw = 0.0125 * k, th = 0.00075 * k;
-  for (let i = 0; i <= 8; i++) line.push([-hw + (2 * hw * i) / 8, -th * Math.sin((Math.PI * i) / 8) - 0.0004 * Math.sin((Math.PI * i) / 8)]);
-  for (let i = 8; i >= 0; i--) line.push([-hw + (2 * hw * i) / 8, th * Math.sin((Math.PI * i) / 8) - 0.0004 * Math.sin((Math.PI * i) / 8)]);
-  decal(h, out, cx, h.mouth.y, line, style(SLOT.FACE, { shade: dark ? 1.7 : 0.7, rough: 0.9 }));
+export function buildFaceMarks(kind: string, h: HeadRig, out: ProcMesh, light = false): void {
   if (kind === 'none') return;
-  const ink = fixed(dark ? 0xe9e8e3 : 0x24252a, { rough: 0.9 });
+  const k = Math.max(0.6, (h.crownY - h.eyeY) / 0.116);
+  const cx = h.center.x;
+  const ink = fixed(light ? 0xe9e8e3 : 0x1c1d22, { rough: 0.9 });
   const foreheadY = h.eyeY + 0.041 * k;
   switch (kind) {
     case 'star': {

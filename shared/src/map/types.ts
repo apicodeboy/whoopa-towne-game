@@ -1,4 +1,5 @@
 import type { TeamId } from '../config/crews';
+import type { TerrainDef } from './terrain';
 
 /**
  * How a solid participates in collision:
@@ -48,7 +49,7 @@ export type PropType =
   // the outer districts (JUMP OFF THE PORCH)
   | 'palm' | 'bush' | 'rock' | 'boulder' | 'log' | 'umbrella' | 'boat'
   // CAP'S HOUSE
-  | 'tractor';
+  | 'tractor' | 'wedgetruck' | 'hypercar' | 'liftedtruck' | 'highvan';
 
 export interface Prop {
   type: PropType;
@@ -208,6 +209,8 @@ export interface MapDef {
   };
   /** Farm animals grazing their pens. Scenery: no collision, not part of the match. */
   pens?: PenDef[];
+  /** Hills (ground that is not flat): see terrain.ts. */
+  terrain?: TerrainDef;
 }
 
 export type AnimalKind = 'cow' | 'horse' | 'pig' | 'goat' | 'sheep' | 'chicken';

@@ -3,6 +3,7 @@ import { GamepadSource } from './gamepad';
 import { KeyboardMouseSource } from './keyboardMouse';
 import type { TouchSource } from './touch';
 import { clearInputFrame, makeInputFrame, type DeviceKind, type InputContext, type InputFrame, type InputSource } from './types';
+import { SLOT_THROWABLE as THROWABLE_SLOT } from '@shared/config/weapons';
 
 /**
  * Merges every input device into one InputFrame per rendered frame and keeps the
@@ -163,14 +164,14 @@ export class InputManager {
 
   selectSlot(slot: number): void {
     if (slot < 0 || slot > (this.porchSlots ? 3 : 2)) return;
-    if (this.slot < 2) this.lastGunSlot = this.slot;
+    if (this.slot !== THROWABLE_SLOT) this.lastGunSlot = this.slot;
     this.slot = slot;
   }
 
   /** The game calls this when the simulation changed the slot on its own (e.g. out of throwables). */
   syncSlot(slot: number): void {
     this.slot = slot;
-    if (slot < 2) this.lastGunSlot = slot;
+    if (slot !== THROWABLE_SLOT) this.lastGunSlot = slot;
   }
 
   get previousGunSlot(): number {

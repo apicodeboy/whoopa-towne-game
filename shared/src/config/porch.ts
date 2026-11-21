@@ -26,7 +26,7 @@ export const PORCH = {
 
   // ---- lobby -----------------------------------------------------------------
   /** Players per match (humans first, bots fill the rest). The sim supports up to `maxPlayers`. */
-  lobbySize: 20,
+  lobbySize: 60,
   maxPlayers: 100,
   /** Public lobbies start counting down once this many humans are waiting. */
   minHumansToStart: 1,

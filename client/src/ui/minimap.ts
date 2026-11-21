@@ -1,5 +1,6 @@
 import { CREWS } from '@shared/config/crews';
 import type { MapDef } from '@shared/map/types';
+import { terrainHeight } from '@shared/map/terrain';
 import type { HudState } from './hud';
 
 const W = 232;
@@ -88,6 +89,20 @@ export class Minimap {
     for (const a of [...this.map.areas].sort((p, q) => (p.layer ?? 1) - (q.layer ?? 1))) {
       g.fillStyle = AREA_FILL[a.kind] ?? '#2a2c31';
       g.fillRect(this.X(a.x0), this.Z(a.z0), (a.x1 - a.x0) * s, (a.z1 - a.z0) * s);
+    }
+    // hills: lighter the higher they are, a darker rim at the foot
+    const T = this.map.terrain;
+    if (T) {
+      const top = Math.max(...T.hills.map((h) => h.height));
+      for (let x = T.x0; x < T.x1; x += 1) {
+        for (let z = T.z0; z < T.z1; z += 1) {
+          const y = terrainHeight(T, x + 0.5, z + 0.5);
+          if (y < 0.15) continue;
+          const k = y / top;
+          g.fillStyle = `rgba(${Math.round(60 + 70 * k)},${Math.round(84 + 70 * k)},${Math.round(52 + 40 * k)},0.9)`;
+          g.fillRect(this.X(x), this.Z(z), s + 0.5, s + 0.5);
+        }
+      }
     }
     for (const r of this.map.roads) {
       g.beginPath();

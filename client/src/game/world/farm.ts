@@ -25,6 +25,8 @@ const WOOD_FENCE = 0x7a5a3a;
 const POOL_TILE = 0x6cc6dc, POOL_LINE = 0x24718a;
 
 let bale: THREE.CylinderGeometry | null = null;
+let firepitRing: THREE.CylinderGeometry | null = null;
+let ember: THREE.BufferGeometry | null = null;
 let band: THREE.CylinderGeometry | null = null;
 let stalk: THREE.OctahedronGeometry | null = null;
 let tassel: THREE.ConeGeometry | null = null;
@@ -38,7 +40,7 @@ export function farmSolid(d: Draw, s: Solid, onGround: boolean, index: number): 
   const top = s.y + s.sy / 2, bottom = s.y - s.sy / 2;
   switch (s.kind) {
     case 'wainscot':
-      // a stone band round the bottom of the barndominium
+      // a stone band round the bottom of a building's walls
       d.box('brick').add(spec, { color: 0x9a9184, tile: 1.4, skipBottom: true });
       return true;
     case 'coping':
@@ -150,6 +152,34 @@ export function farmSolid(d: Draw, s: Solid, onGround: boolean, index: number): 
     case 'shed':
       d.box('wood').add(spec, { color: s.color ?? 0x8a6f52, tile: 1.3, skipBottom: true, skipTop: true });
       return true;
+    case 'fireplace': {
+      // a stone chimney breast with the hearth opening into the room, a fire in it
+      d.box('brick').add(spec, { color: 0x8f877b, tile: 1.2, skipBottom: true });
+      const f = String(s.meta?.face ?? 'e');
+      const fx = f === 'e' ? 1 : f === 'w' ? -1 : 0, fz = f === 's' ? 1 : f === 'n' ? -1 : 0;
+      const across = fx !== 0 ? s.sz : s.sx, depth = fx !== 0 ? s.sx : s.sz;
+      const ox = s.x + fx * (depth / 2 + 0.005), oz = s.z + fz * (depth / 2 + 0.005);
+      const w = Math.min(1.2, across * 0.6);
+      d.box('flat').add({ x: ox, y: bottom + 0.55, z: oz, sx: fx ? 0.02 : w, sy: 0.9, sz: fz ? 0.02 : w }, { color: 0x15110e });
+      d.box('lit').add({ x: ox, y: bottom + 0.22, z: oz, sx: fx ? 0.03 : w * 0.7, sy: 0.18, sz: fz ? 0.03 : w * 0.7 }, { color: 0xff8a2a });
+      d.box('wood').add({ x: ox + fx * 0.12, y: bottom + 1.12, z: oz + fz * 0.12, sx: fx ? 0.3 : across + 0.2, sy: 0.12, sz: fz ? 0.3 : across + 0.2 }, { color: 0x5a3a22, tile: 1 });
+      return true;
+    }
+    case 'chimney':
+      d.box('brick').add(spec, { color: 0x8a8276, tile: 1.4, skipBottom: true });
+      d.box('flat').add({ x: s.x, y: top + 0.08, z: s.z, sx: s.sx + 0.16, sy: 0.16, sz: s.sz + 0.16 }, { color: 0x3a3836 });
+      return true;
+    case 'firepit': {
+      // a ring of stones, the embers glowing
+      firepitRing ??= new THREE.CylinderGeometry(1, 1.08, 1, 14, 1, true);
+      ember ??= new THREE.CircleGeometry(1, 14).rotateX(-Math.PI / 2);
+      const r = s.sx / 2;
+      d.geo('faceted').add(firepitRing, trs(s.x, bottom + s.sy / 2, s.z, 0, r, s.sy, r), 0x8f877b);
+      d.geo('faceted').add(firepitRing, trs(s.x, bottom + s.sy / 2, s.z, 0, r * 0.78, s.sy, r * 0.78), 0x5d5750);
+      d.geo('faceted').add(ember, trs(s.x, bottom + s.sy * 0.45, s.z, 0, r * 0.78, 1, r * 0.78), 0x2a1d16);
+      d.box('lit').add({ x: s.x, y: bottom + s.sy * 0.5, z: s.z, sx: r * 0.7, sy: 0.05, sz: r * 0.5 }, { color: 0xff7a1f });
+      return true;
+    }
     default:
       return false;
   }
@@ -292,7 +322,8 @@ export function orchardTree(d: Draw, p: Prop, i: number): void {
 
 /** Disposes the shared shapes once the world is built. */
 export function disposeFarmShapes(): void {
-  for (const g of [bale, band, stalk, tassel, stem, head]) g?.dispose();
+  for (const g of [bale, band, stalk, tassel, stem, head, firepitRing, ember]) g?.dispose();
+  firepitRing = ember = null;
   bale = band = stem = head = null;
   stalk = null;
   tassel = null;

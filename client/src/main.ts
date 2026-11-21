@@ -10,6 +10,7 @@ import './styles/mainmenu.css';
 import './styles/economy.css';
 import './styles/menutheme.css';
 import './styles/gunpicker.css';
+import './styles/editor.css';
 import { CREWS } from '@shared/config/crews';
 import type { ModeId } from '@shared/config/game';
 import type { BotDifficulty } from '@shared/protocol';
@@ -63,6 +64,7 @@ async function boot(): Promise<void> {
     seed: num('seed'),
     warmup: num('warmup'),
     teamSize: num('size'),
+    lobbySize: num('lobby'),
     procedural: q.has('procedural'),
     onAssetProgress: (done, total) => loading.set(0.15 + 0.55 * (done / total)),
   });

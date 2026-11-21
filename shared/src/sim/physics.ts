@@ -1,6 +1,7 @@
 import { PLAYER } from '../config/game';
 import type { MapDef } from '../map/types';
 import { solidQuat } from '../map/types';
+import { terrainMesh } from '../map/terrain';
 
 /**
  * The Rapier module instance. Shared code never imports Rapier itself: the client and the
@@ -101,6 +102,12 @@ export class PhysicsWorld {
         .setRotation(solidQuat(s))
         .setCollisionGroups(groups(col === 'fence' ? GROUP_FENCE : GROUP_SOLID, 0xffff));
       this.world.createCollider(desc);
+    }
+
+    // hills: the ground sampled into one triangle mesh
+    if (map.terrain) {
+      const t = terrainMesh(map.terrain);
+      this.world.createCollider(R.ColliderDesc.trimesh(t.pos, t.idx).setCollisionGroups(groups(GROUP_SOLID, 0xffff)));
     }
 
     const probeGroups = groups(GROUP_PLAYER, GROUP_SOLID | GROUP_FENCE | GROUP_GLASS);

@@ -305,6 +305,8 @@ export class SkinnedCharacter implements CharacterVisual {
   private sprintT = 0;
   private crouchT = 0;
   private lowT = 0;
+  /** Winding up a throw (aiming with a grenade / smoke in hand). */
+  private windT = 0;
   /** 0..1 blend from the hip hold to the aimed (shouldered) hold. */
   private aimT = 0;
   private shootT = 0;
@@ -807,6 +809,8 @@ export class SkinnedCharacter implements CharacterVisual {
     this.crouchT = approach(this.crouchT, pose.crouching ? 1 : 0, dt * 7);
     this.lowT = approach(this.lowT, !armed && !unarmed ? 1 : 0, dt * 8);
     this.aimT = approach(this.aimT, pose.aiming && armed && this.sprintT < 0.5 ? 1 : 0, dt * 9);
+    const throwable = held === 'grenade' || held === 'smoke';
+    this.windT = approach(this.windT, pose.aiming && throwable && this.sprintT < 0.5 ? 1 : 0, dt * 8);
     this.shootT = Math.max(0, this.shootT - dt * (unarmed ? 3.2 : 5));
     this.recoil = Math.max(0, this.recoil - dt * 11);
     this.flinch = Math.max(0, this.flinch - dt * 5);
@@ -929,7 +933,7 @@ export class SkinnedCharacter implements CharacterVisual {
     // aim pitch through the spine (+ lean forward when crouched or sprinting, flinch when hit)
     const lean = this.crouchT * 0.42 + this.sprintT * 0.12;
     if (this.spine) {
-      const pitch = armed || this.throwT >= 0 ? pose.pitch : pose.pitch * 0.4;
+      const pitch = armed || this.throwT >= 0 || this.windT > 0.5 ? pose.pitch : pose.pitch * 0.4;
       _q1.setFromAxisAngle(_v5, pitch * 0.55 - lean + this.flinch * 0.15);
       rotateBoneWorld(this.spine, _q1);
     }
@@ -1043,7 +1047,12 @@ export class SkinnedCharacter implements CharacterVisual {
         reach(this.arms.L, this.root.localToWorld(rest), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
       }
     } else if (this.handR) {
-      // throwables (and nothing) ride in the right hand wherever the clip puts it
+      // a grenade / smoke is held like a weapon: ready in front of the chest, cocked back over
+      // the shoulder while a throw is lined up, then whipped over and down when it goes
+      if (throwable && this.arms.R && this.sprintT < 0.99) this.throwablePose(pose.pitch);
+      // gone from the hand once it is let go (the next one comes up when the arm is back)
+      if (throwable && this.gun) this.gun.visible = !(this.throwT >= 0.3 && this.throwT < 1);
+      // throwables (and nothing) ride in the right hand wherever the clip (or the pose) puts it
       this.handR.getWorldPosition(_v1);
       this.root.worldToLocal(_v1);
       this.gunMount.position.set(_v1.x, _v1.y, _v1.z - 0.04 + this.recoil * 0.04);
@@ -1283,6 +1292,46 @@ export class SkinnedCharacter implements CharacterVisual {
    * the little finger to the index (both in world space). The forearm takes part of the turn,
    * so the wrist does not look wrung.
    */
+  /** Arms for a grenade / smoke in hand: carried ready, wound up while aiming, and the throw. */
+  private throwablePose(pitch: number): void {
+    const R = this.arms.R!;
+    const rq = this.root.quaternion;
+    const keep = 1 - this.sprintT; // (sprinting: the run clip's arms take over)
+    const w = this.windT * this.windT * (3 - 2 * this.windT);
+    // from the right shoulder, in the character's own directions (x right, y up, -z forward)
+    const sh = this.root.worldToLocal(R.upper.getWorldPosition(new THREE.Vector3()));
+    const ready = new THREE.Vector3(0.03, -0.3, -0.25);
+    const wound = new THREE.Vector3(0.07, 0.15 + Math.max(0, pitch) * 0.08, 0.18);
+    const hand = ready.clone().lerp(wound, w);
+    const pole = new THREE.Vector3(1, -1.3, 0.5).lerp(new THREE.Vector3(1, -0.15, 0.35), w);
+    if (this.throwT >= 0) {
+      // a snap further back (from the hip: all the way back), over the top and out in front,
+      // let go, and the follow-through down across the body
+      const t = clamp(this.throwT, 0, 1);
+      const back = new THREE.Vector3(0.09, 0.16, 0.26);
+      const over = new THREE.Vector3(0.02, 0.12 + pitch * 0.2, -0.36);
+      const follow = new THREE.Vector3(-0.12, -0.3, -0.36);
+      if (t < 0.12) hand.lerp(back, t / 0.12);
+      else if (t < 0.4) hand.copy(back).lerp(over, (t - 0.12) / 0.28);
+      else hand.copy(over).lerp(follow, (t - 0.4) / 0.6);
+      pole.set(1, -0.3, 0.3);
+    }
+    const clipHand = R.wrist.getWorldPosition(new THREE.Vector3());
+    const want = this.root.localToWorld(hand.add(sh)).lerp(clipHand, 1 - keep);
+    reach(R, want, pole.applyQuaternion(rq));
+    this.closeHand('R', 0.9);
+    // the free arm points where it is going while winding up
+    const L = this.arms.L;
+    const lead = this.throwT >= 0 ? Math.max(0, 1 - clamp(this.throwT, 0, 1) * 1.6) * w : w;
+    if (L && lead * keep > 0.01) {
+      const shL = this.root.worldToLocal(L.upper.getWorldPosition(new THREE.Vector3()));
+      const out = new THREE.Vector3(-0.06, -0.04 + Math.sin(pitch) * 0.42, -0.46 * Math.cos(pitch)).add(shL);
+      const now = L.wrist.getWorldPosition(new THREE.Vector3());
+      reach(L, now.lerp(this.root.localToWorld(out), lead * keep), new THREE.Vector3(-1, -0.8, 0.2).applyQuaternion(rq));
+      this.closeHand('L', 0.2);
+    }
+  }
+
   private turnHand(side: 'L' | 'R', along: THREE.Vector3, across: THREE.Vector3): void {
     const arm = this.arms[side], h = this.hands[side];
     if (!arm || !h) return;

@@ -18,6 +18,8 @@ import { Game } from './game/game';
 import { Stage } from './game/stage';
 import { buildWorld } from './game/world/worldBuilder';
 import { mapForMode } from '@shared/map/maps';
+import { getGreaterTowne } from '@shared/map/greaterTowne';
+import type { MapDef } from '@shared/map/types';
 import { InputManager } from './input/inputManager';
 import { TouchSource } from './input/touch';
 import type { DeviceKind } from './input/types';
@@ -39,6 +41,37 @@ import { Toasts } from './ui/toast';
 
 type AppState = 'menu' | 'lobby' | 'playing';
 
+/** The menu's tour of the big map: seconds on each area, and how long the glide between takes. */
+const TOUR_SECONDS = 7;
+const TOUR_GLIDE = 1.4;
+
+interface TourStop { name: string; x: number; z: number; y: number; r: number; h: number }
+
+/** The order the tour goes round (neighbours follow each other); anything else comes after. */
+const TOUR_ORDER = ["CAP'S HOUSE", 'THE HILL', '96', 'BADLANDS', 'BABYLON', 'JUNGLE', 'THE DOCKS', 'LAKE LINDA', 'BOARDWALK', 'DOWNTOWN', 'HONG KONG'];
+/** Areas framed differently from the default (center, height of interest, distance, camera height). */
+const TOUR_FRAMING: Record<string, Partial<TourStop>> = {
+  "CAP'S HOUSE": { x: 2, z: -18, y: 7, r: 64, h: 36 },
+  'LAKE LINDA': { z: 92, r: 58, h: 26 },
+  BOARDWALK: { z: 92 },
+  'THE DOCKS': { z: 92 },
+};
+
+let tourCache: { map: MapDef; stops: TourStop[] } | null = null;
+function tourStops(map: MapDef): TourStop[] {
+  if (tourCache && tourCache.map === map) return tourCache.stops;
+  const list = [...(map.districts ?? [])];
+  const rank = (n: string) => (TOUR_ORDER.includes(n) ? TOUR_ORDER.indexOf(n) : TOUR_ORDER.length);
+  list.sort((a, b) => rank(a.name) - rank(b.name));
+  const stops = list.map((d) => ({ name: d.name, x: d.x, z: d.z, y: 3, r: 56, h: 30, ...TOUR_FRAMING[d.name] }));
+  tourCache = { map, stops };
+  return stops;
+}
+
+function smooth(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
 /** Extra knobs for automated tests (read from the URL). */
 export interface DebugOptions {
   nolock?: boolean;
@@ -46,6 +79,8 @@ export interface DebugOptions {
   seed?: number;
   warmup?: number;
   teamSize?: number;
+  /** Battle royale practice: players in the match (bots fill it), for testing. */
+  lobbySize?: number;
   /** Skip downloading models and use the built-in procedural visuals only. */
   procedural?: boolean;
   /** Called as each model finishes loading (or fails), for the loading screen's bar. */
@@ -139,9 +174,13 @@ export class App {
           // swap the stand-in props for the real models (a running match just keeps going)
           this.stage.setWorld(buildWorld(this.stage.map, this.assets));
           this.wantThumbs = true;
+          this.tourReady = true;
         }).catch(() => undefined);
 
     this.toasts = new Toasts(ui);
+    this.tourCaption = document.createElement('div');
+    this.tourCaption.className = 'tour-caption';
+    ui.append(this.tourCaption);
     this.menu = new MainMenu(ui, this.profile, {
       quickPlay: (mode) => void this.connect('quick', mode),
       createPrivate: (mode) => void this.connect('create', mode),
@@ -404,6 +443,10 @@ export class App {
 
   /** Pictures of the town for the menu's mode cards (taken once the real art has loaded). */
   private wantThumbs = false;
+  /** The menu tours the big map once the art is in and the mode cards have their pictures. */
+  private tourReady = false;
+  private tourCaption!: HTMLElement;
+  private tourShown = '';
 
   private captureMenuThumbs(): void {
     this.wantThumbs = false;
@@ -426,23 +469,74 @@ export class App {
     }
   }
 
-  /** Slow fly-around of the map behind the menus. */
+  /**
+   * Behind the menus: a tour of the big map, every area in turn for TOUR_SECONDS each (a short
+   * glide from one to the next, then a slow turn round it), its name in the corner. Until the
+   * art is in (or with no art at all) it is the old slow fly-around of the classic town.
+   */
   private backdropFrame = (now: number): void => {
     this.raf = requestAnimationFrame(this.backdropFrame);
-    if (this.game) return; // the game runs its own loop
+    if (this.game) {
+      this.showTourCaption('');
+      return; // the game runs its own loop
+    }
     if (this.wantThumbs) this.captureMenuThumbs();
-    const dt = Math.min(0.1, (now - this.lastFrame) / 1000 || 0);
+    // (a frame's timestamp can be a hair older than the last one we noted: never a step back)
+    const dt = Math.max(0, Math.min(0.1, (now - this.lastFrame) / 1000 || 0));
     this.lastFrame = now;
-    this.backdropT += dt;
     this.nav.handle(this.input.update(dt));
-    const t = this.backdropT * 0.045;
     const cam = this.backdropCam;
-    cam.position.set(Math.cos(t) * 62, 26 + Math.sin(t * 1.7) * 6, Math.sin(t) * 44);
-    cam.lookAt(Math.cos(t + 1.2) * 12, 2, Math.sin(t + 1.2) * 8);
+    if (this.tourReady && !this.wantThumbs && this.stage.map.id !== 'greater-towne') {
+      // the classic modes play on the classic town: back on the menu, the tour's map again
+      this.stage.useMap(getGreaterTowne(), this.assets);
+      this.backdropT = 0;
+      this.lastFrame = performance.now();
+      return;
+    }
+    this.backdropT += dt;
+    const stops = this.stage.map.id === 'greater-towne' ? tourStops(this.stage.map) : [];
+    if (stops.length) {
+      const T = Math.max(0, this.backdropT) / TOUR_SECONDS;
+      const k = Math.floor(T) % stops.length, local = T - Math.floor(T);
+      const cur = stops[k], prev = stops[(k + stops.length - 1) % stops.length];
+      // glide over from the last area, then turn slowly round this one
+      const g = smooth(Math.min(1, (local * TOUR_SECONDS) / TOUR_GLIDE));
+      const angle = (i: number, f: number) => i * 1.9 + f * 0.6;
+      const a = angle(k, local) * g + angle((k + stops.length - 1) % stops.length, 1) * (1 - g);
+      const cx = prev.x + (cur.x - prev.x) * g, cz = prev.z + (cur.z - prev.z) * g;
+      const r = prev.r + (cur.r - prev.r) * g, h = prev.h + (cur.h - prev.h) * g;
+      const ly = prev.y + (cur.y - prev.y) * g;
+      cam.position.set(cx + Math.cos(a) * r, h + Math.sin(this.backdropT * 0.4) * 1.5, cz + Math.sin(a) * r);
+      cam.lookAt(cx, ly, cz);
+      this.showTourCaption(this.state === 'playing' ? '' : cur.name);
+    } else {
+      const t = this.backdropT * 0.045;
+      cam.position.set(Math.cos(t) * 62, 26 + Math.sin(t * 1.7) * 6, Math.sin(t) * 44);
+      cam.lookAt(Math.cos(t + 1.2) * 12, 2, Math.sin(t + 1.2) * 8);
+      this.showTourCaption('');
+    }
     this.stage.world.update(dt, this.backdropT, cam.position);
-    this.stage.gfx.followShadow(cam.position.x * 0.4, cam.position.z * 0.4);
+    this.stage.gfx.followShadow(cam.position.x * 0.4 + this.tourFocus(stops).x * 0.6, cam.position.z * 0.4 + this.tourFocus(stops).z * 0.6);
     this.stage.gfx.render(cam);
   };
+
+  /** Where the tour is looking (for the shadows), or the middle of the map. */
+  private tourFocus(stops: TourStop[]): { x: number; z: number } {
+    if (!stops.length) return { x: 0, z: 0 };
+    const k = Math.floor(Math.max(0, this.backdropT) / TOUR_SECONDS) % stops.length;
+    return stops[k] ?? stops[0];
+  }
+
+  private showTourCaption(name: string): void {
+    if (name === this.tourShown) return;
+    this.tourShown = name;
+    this.tourCaption.innerHTML = name ? `<span>Now showing</span><b>${name.replace(/[<>&"]/g, '')}</b>` : '';
+    this.tourCaption.classList.toggle('on', !!name);
+    // restart the little slide-in for each new area
+    this.tourCaption.classList.remove('fresh');
+    void this.tourCaption.offsetWidth;
+    if (name) this.tourCaption.classList.add('fresh');
+  }
 
   // ------------------------------------------------------------------ online
   private async connect(kind: 'quick' | 'create' | 'join', mode: ModeId, code = ''): Promise<void> {
@@ -513,6 +607,7 @@ export class App {
       seed: this.debug.seed,
       warmup: this.debug.warmup,
       teamSize: this.debug.teamSize,
+      lobbySize: this.debug.lobbySize,
     };
     this.startGame(new LocalSession(this.R, opts));
   }

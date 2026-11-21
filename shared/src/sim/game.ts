@@ -189,9 +189,12 @@ export function stepProjectile(p: Projectile, dt: number, phys: PhysicsWorld): v
   }
 }
 
+/** What a throw needs to know about the thrower (the client fills it in to preview the arc). */
+export type Thrower = Pick<PlayerState, 'x' | 'y' | 'z' | 'vx' | 'vz' | 'yaw' | 'pitch' | 'crouching'>;
+
 /** Initial position and velocity of a throw from a player's view. */
 export function throwLaunch(
-  s: PlayerState, phys: PhysicsWorld, out: { x: number; y: number; z: number; vx: number; vy: number; vz: number },
+  s: Thrower, phys: PhysicsWorld, out: { x: number; y: number; z: number; vx: number; vy: number; vz: number },
 ): void {
   const f: Vec3 = { x: 0, y: 0, z: 0 };
   const r: Vec3 = { x: 0, y: 0, z: 0 };

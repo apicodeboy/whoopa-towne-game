@@ -586,11 +586,20 @@ export class Hud {
     if (s.alive && s.phase === PHASE.PLAYING && this.device !== 'touch') {
       if (gun && !s.melee && s.reload < 0 && s.reserve > 0 && s.mag <= Math.ceil(s.magSize * 0.25)) hint = 'reload';
       else if (gun && !s.melee && s.mag === 0 && s.reserve === 0) hint = 'swap';
+      // a grenade / smoke in hand: aim to see where it goes, fire to throw
+      else if (!gun && s.throwables > 0) hint = s.aimT > 0.5 ? 'throwAim' : 'throw';
     }
     this.set('hint', hint, () => {
       this.hintEl.classList.toggle('hidden', hint === '');
-      if (hint === 'reload') this.hintEl.innerHTML = `${glyphHtml(this.device, 'reload')}<span>Reload</span>`;
-      else if (hint === 'swap') this.hintEl.innerHTML = `${glyphHtml(this.device, 'swap')}<span>Out of ammo: switch weapon</span>`;
+      this.hintEl.classList.toggle('calm', hint === 'throw' || hint === 'throwAim');
+      const d = this.device;
+      if (hint === 'reload') this.hintEl.innerHTML = `${glyphHtml(d, 'reload')}<span>Reload</span>`;
+      else if (hint === 'swap') this.hintEl.innerHTML = `${glyphHtml(d, 'swap')}<span>Out of ammo: switch weapon</span>`;
+      else if (hint === 'throw') {
+        this.hintEl.innerHTML =
+          `${glyphHtml(d, 'aim')}<span>Aim</span><i class="sep"></i>${glyphHtml(d, 'fire')}<span>Throw</span>` +
+          `<i class="sep"></i>${glyphHtml(d, 'throw')}<span>Put away</span>`;
+      } else if (hint === 'throwAim') this.hintEl.innerHTML = `${glyphHtml(d, 'fire')}<span>Throw</span>`;
     });
 
     // ---- net / fps readout ----

@@ -1160,6 +1160,20 @@
   border-radius: 8px;
   animation: pulse 1.1s infinite;
 }
+/* (holding a grenade: a steady how-to, not a pulsing warning, and low enough to keep the
+   landing spot clear) */
+.hint.calm {
+  top: auto;
+  bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  animation: none;
+  opacity: 0.92;
+}
+.hint .sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: rgba(255, 255, 255, 0.25);
+}
 .pause-legend .lbl {
   margin: 8px 0 8px;
 }

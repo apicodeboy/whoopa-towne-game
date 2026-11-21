@@ -12,6 +12,7 @@ player.
 | Building layouts (all types, all floors) | `shared/src/map/architect.ts` |
 | Where buildings stand on the map, the districts | `shared/src/map/greaterTowne.ts` |
 | CAP'S HOUSE (the farm in the middle) | `shared/src/map/capsHouse.ts` |
+| Hills (sloped ground: height, collision mesh) | `shared/src/map/terrain.ts`; drawn by `client/src/game/world/terrainVisual.ts` |
 | The round map: the country ring, the rim | `shared/src/map/countryside.ts` |
 | How the farm looks (pool, crops, silos, windmill, tractor), the animals | `client/src/game/world/farm.ts`, `farmAnimals.ts` |
 | Door and window state, the rules for using them | `shared/src/sim/buildings.ts` |
@@ -54,14 +55,20 @@ cliffs are gone (their random draws still happen, into a scrap builder, so The H
 unchanged).
 
 - **CAP'S HOUSE** sits in the middle (`capsHouse.ts`): the classic town stays its own map
-  for Team Deathmatch and Turf War, untouched. A gigantic barndominium (type `barndo`, 50 ×
-  26 m, two 4.4 m floors under a black standing-seam roof, a covered porch with its name over
-  it), the drive in from Ocean Drive through a ranch gate, a fountain in the turnaround. Behind
-  the house the pool deck: an in-ground pool (a real hole in the ground, 1.4 m deep, with steps
-  at the east end and a diving board), loungers, umbrellas and a cabana. West: the red barn
-  (type `barn`) and two silos, the horse paddock, the chicken coop, the cow pasture with its
-  stock pond and windmill. East: the cornfield, the pig and goat pens, the orchard, the pole
-  barn with the tractor. Pens have post-and-rail fences (1.1 m: a jump clears them) with gates.
+  for Team Deathmatch and Turf War, untouched. A four-story log cabin (type `cabin`) and a
+  four-car garage (type `garage4`) stand on the flat top of a hill 8 m high (`HILL`). The hill
+  is real ground (`terrain.ts`, `MapDef.terrain`): a height function sampled every meter into
+  one collision mesh that the server, every client and the bots share. Its slopes average
+  about 30° (43° at the steepest; the controller climbs up to 50°), so you can run straight up
+  any side; a drive climbs the south side on an embankment. In the garage: a stainless wedge
+  pickup, a two-tone hypercar, a lifted off-road truck and a high-roof cargo van (props
+  `wedgetruck`, `hypercar`, `liftedtruck`, `highvan`, drawn in `client/src/game/world/vehicles.ts`;
+  no badges or brand names). In the front yard at the foot of the hill: an in-ground pool (a
+  real hole in the ground, 1.4 m deep, with steps at the east end and a diving board), loungers,
+  umbrellas and a cabana. West: the red barn (type `barn`) and two silos, the horse paddock,
+  the chicken coop, the cow pasture with its stock pond and windmill. East: the cornfield, the
+  pig and goat pens, the orchard, the pole barn with the tractor. Pens have post-and-rail
+  fences (1.1 m: a jump clears them) with gates.
 - **The Hill** is the projects: Section 8 brick walk-ups (three and four floors, a unit on
   every floor, stairs to the roof, fire escapes), some windows already broken, tags on the
   walls, dirt yards with overflowing dumpsters, trash bags, litter in every gutter, burnt-out
@@ -111,7 +118,8 @@ elsewhere.
 | `office` | 2–6 floors of open-plan desks and a meeting room behind a glass door, a lobby with a front desk, stairs to the roof. |
 | `warehouse` | One tall floor, an open roll-up bay, a mezzanine office with steel stairs. |
 | `workshop`, `storage`, `garage` | Smaller industrial units: workbenches; aisles of racks; a car in the bay. |
-| `barndo` | CAP'S HOUSE. Two tall floors. Downstairs the shop (two roll-up bays standing open, trucks inside), the great room open to the loft (living room at the front, the kitchen with its island, glass doors out to the pool), the master suite (bedroom, walk-in closet, a bath that locks). Upstairs the loft, the game room over the shop, two bedrooms and a bath, a deck over the pool. |
+| `cabin` | CAP'S HOUSE. Four floors, one stair up the left wall through all of them. Ground floor: the great room round a stone fireplace, the kitchen and dining table at the back, the front door onto the deck, a side door to the garage. Second: two bedrooms, a loft, a bath. Third: the master suite and a den. Top: the lookout game room. A balcony across the front of every upper floor. |
+| `garage4` | Four bays standing open, a side door, a workbench and tools. |
 | `barn` | One tall floor under a steep metal roof, the big doors at both ends standing open, stalls, a hay loft over the back with stairs up. |
 
 Every layout is generated in the building's own frame (`u` along the front wall, `v` from the
@@ -243,4 +251,7 @@ boards the blimp as before.
 - Farm animals are scenery each client wanders on its own (not synced, no collision). Crops
   are visual only: corn hides you from sight, but bullets go through it.
 - Bots walk round the pool rather than through it; one that lands in it has to find the steps
-  (the nav grid is one level).
+  (the nav grid is one level). On the hill they walk the slopes and the cabin's ground floor,
+  but like everywhere else they don't take stairs.
+- Any building can stand on raised ground (`base` in `BuildingSpec`): its ground floor gets a
+  floor finish of its own instead of a ground area.

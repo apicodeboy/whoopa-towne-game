@@ -1,7 +1,8 @@
 import {
-  BTN, DEFAULT_LOADOUT, EV, GameSim, GRENADE, PHASE, PLAYER, TICK_MS, WEAPONS, damageFalloff, makeInputCmd,
-  yawToward, type InputCmd, type Loadout, type SimPlayer,
+  BTN, DEFAULT_LOADOUT, EV, GameSim, GRENADE, PHASE, PLAYER, TICK_DT, TICK_MS, WEAPONS, damageFalloff, makeInputCmd,
+  stepProjectile, throwLaunch, yawToward, type InputCmd, type Loadout, type Projectile, type SimPlayer,
 } from '../src/index';
+import { SLOT_PRIMARY, SLOT_THROWABLE } from '../src/config/weapons';
 import { approx, assert, test } from './harness';
 import { initRapier } from './env';
 
@@ -267,6 +268,79 @@ test('lag compensation rewinds targets to where the shooter saw them', async () 
   sim.dispose();
 });
 
+/** Takes the throwable out like a weapon, waits for it to be in hand, and throws it with FIRE. */
+function holdAndThrow(sim: GameSim, p: SimPlayer, pitch: number): number[][] {
+  step(sim, p, { slot: SLOT_THROWABLE, pitch });
+  for (let i = 0; i < 30; i++) step(sim, p, { pitch });
+  return step(sim, p, { buttons: BTN.FIRE, pitch });
+}
+
+test('throwables are held like a weapon: aim, then FIRE throws', async () => {
+  const sim = await makeSim();
+  const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' } })!;
+  sim.start();
+  a.protectedUntil = 0;
+  place(a, -18, 30, 0);
+  for (let i = 0; i < 3; i++) step(sim, a);
+  // the old quick-throw button no longer throws anything by itself
+  let n = 0;
+  for (let i = 0; i < 5; i++) n += eventsOf(step(sim, a, { buttons: BTN.THROW }), EV.THROW).length;
+  assert(n === 0 && a.state.throwables === 2, 'THROW alone does not throw');
+  // firing a gun does not throw either
+  for (let i = 0; i < 5; i++) n += eventsOf(step(sim, a, { buttons: BTN.FIRE }), EV.THROW).length;
+  assert(n === 0 && a.state.throwables === 2, 'FIRE with a gun out does not throw');
+  // take it out: in hand, aiming lines it up (aiming state, slower feet), nothing thrown while held
+  const slot = (): number => a.state.slot;
+  const left = (): number => a.state.throwables;
+  step(sim, a, { slot: SLOT_THROWABLE });
+  assert(slot() === SLOT_THROWABLE, 'grenade in hand');
+  for (let i = 0; i < 30; i++) n += eventsOf(step(sim, a, { buttons: BTN.AIM, mz: 1 }), EV.THROW).length;
+  assert(n === 0, 'holding and aiming is not throwing');
+  assert(a.state.aiming === 1, 'aiming with a grenade in hand');
+  assert(Math.hypot(a.state.vx, a.state.vz) <= PLAYER.aimSpeed + 0.01, 'aiming a throw slows you down');
+  // FIRE throws one (once per press, after the cooldown)
+  let evs = step(sim, a, { buttons: BTN.FIRE | BTN.AIM });
+  assert(eventsOf(evs, EV.THROW).length === 1 && left() === 1, 'FIRE throws it');
+  assert(slot() === SLOT_THROWABLE, 'the next one is still in hand');
+  for (let i = 0; i < 90; i++) n += eventsOf(step(sim, a, { buttons: BTN.FIRE | BTN.AIM }), EV.THROW).length;
+  assert(n === 0, 'holding FIRE does not keep throwing');
+  step(sim, a);
+  evs = step(sim, a, { buttons: BTN.FIRE });
+  assert(eventsOf(evs, EV.THROW).length === 1 && left() === 0, 'a fresh press throws the last one (from the hip)');
+  assert(slot() === SLOT_PRIMARY, 'out of throwables: back to the gun');
+  // and it cannot be taken out empty
+  step(sim, a, { slot: SLOT_THROWABLE });
+  assert(slot() === SLOT_PRIMARY, 'no throwable to take out');
+  sim.dispose();
+});
+
+test('the aiming preview flies the same throw the server does (ends where it goes off)', async () => {
+  const sim = await makeSim();
+  const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' } })!;
+  sim.start();
+  a.protectedUntil = 0;
+  for (const [x, z, yaw, pitch] of [[-18, 30, 0, 0.12], [-18, 30, 0.4, 0.5], [-14, 20, -0.9, -0.1]]) {
+    place(a, x, z, yaw);
+    a.state.throwables = 2;
+    a.state.throwCd = 0;
+    step(sim, a, { slot: SLOT_THROWABLE, yaw, pitch });
+    for (let i = 0; i < 30; i++) step(sim, a, { buttons: BTN.AIM, yaw, pitch });
+    // what the client draws while aiming: launch from the thrower as they stand, fly to the fuse
+    const l = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
+    throwLaunch({ ...a.state, yaw, pitch }, sim.phys, l);
+    const p: Projectile = { id: 0, owner: 0, type: 0, ...l, fuse: GRENADE.fuse, resting: false };
+    while (p.fuse > 0) stepProjectile(p, TICK_DT, sim.phys);
+    // the real throw
+    step(sim, a, { buttons: BTN.FIRE | BTN.AIM, yaw, pitch });
+    let boom: number[] | undefined;
+    for (let i = 0; i < 300 && !boom; i++) boom = eventsOf(step(sim, a, { slot: SLOT_PRIMARY, yaw, pitch }), EV.EXPLODE)[0];
+    assert(boom, 'it went off');
+    const d = Math.hypot(boom[3] / 100 - p.x, boom[4] / 100 - p.y, boom[5] / 100 - p.z);
+    assert(d < 0.02, `preview ends ${d.toFixed(3)} m from where it went off`);
+  }
+  sim.dispose();
+});
+
 test('grenades bounce, explode on the fuse and respect cover', async () => {
   const sim = await makeSim();
   const a = sim.addPlayer({ id: 'a', name: 'A', team: 0, loadout: { primary: 'honeybadger', secondary: 'taurus', throwable: 'grenade', melee: 'fists' } })!;
@@ -279,7 +353,7 @@ test('grenades bounce, explode on the fuse and respect cover', async () => {
   place(c, -12, 13, Math.PI);  // inside the alley building footprint is solid; put C behind its corner instead
   place(c, -18, -20, Math.PI); // far away: unaffected
   for (let i = 0; i < 3; i++) step(sim, a);
-  const evs = step(sim, a, { buttons: BTN.THROW, pitch: 0.12 });
+  const evs = holdAndThrow(sim, a, 0.12);
   const thr = eventsOf(evs, EV.THROW)[0];
   assert(thr && thr[2] === a.idx && thr[3] === 0, 'throw event');
   assert(a.state.throwables === 1, 'one throwable left');
@@ -304,7 +378,7 @@ test('smoke blocks bot line of sight', async () => {
   place(a, -18, 30, 0);
   assert(sim.canSee(-18, 1.6, 30, -18, 1.2, 0), 'clear street');
   for (let i = 0; i < 3; i++) step(sim, a);
-  step(sim, a, { buttons: BTN.THROW, pitch: 0.1 });
+  holdAndThrow(sim, a, 0.1);
   let popped = false;
   for (let i = 0; i < 200 && !popped; i++) popped = eventsOf(step(sim, a), EV.EXPLODE).length > 0;
   assert(popped && sim.smokes.length === 1, 'smoke deployed');

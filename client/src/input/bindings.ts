@@ -26,7 +26,7 @@ export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
   prev: 'Previous weapon (tap) · weapon wheel (hold; fire in it to mark danger)',
   wheel: 'Weapon wheel (hold) · click in it to mark danger',
   mark: 'Mark danger (your squad sees it)',
-  throw: 'Throw',
+  throw: 'Grenade / smoke: take it out (aim to see where it lands, fire to throw)',
   shoulder: 'Swap shoulder',
   use: 'Use: doors, windows, search, pick up, talk',
   heal: 'Heal (hold)',

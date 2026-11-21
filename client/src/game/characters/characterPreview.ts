@@ -52,6 +52,21 @@ export class CharacterPreview {
   /** Eye height of the current character (meters), so framings fit tall and short ones. */
   private eyeH = 1.62;
   onUserTurn: (() => void) | null = null;
+  /**
+   * Split view (the Character Creator): a flat front view on the left half (the character as
+   * it stands, never turned), the 3D view on the right. In it the camera goes round the
+   * character instead of the character turning, so the front view stays a front view.
+   */
+  private split = false;
+  private frontCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 30);
+  /** Pixels the split view keeps free above and below the character (the toolbars). */
+  clear = { top: 160, bottom: 150 };
+  /** The character's size (meters) and where it sits in the front view (canvas pixels). */
+  private size = { w: 0.6, h: 1.85, cx: 0 };
+  private boxKey = '';
+  onFrontBox: ((box: { x: number; y: number; w: number; h: number; widthM: number; heightM: number } | null) => void) | null = null;
+  private floor: THREE.Mesh;
+  private stageFloor: THREE.Mesh;
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -71,11 +86,19 @@ export class CharacterPreview {
     void crewColorHex;
     this.scene.add(key, rim, fill);
     // a floor disc so the character stands on something
-    const floor = new THREE.Mesh(
+    this.floor = new THREE.Mesh(
       new THREE.CircleGeometry(0.75, 48).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, depthWrite: false }),
     );
-    this.scene.add(floor);
+    this.scene.add(this.floor);
+    // the split view stands it on a dark studio floor instead
+    this.stageFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x1d1d20, depthWrite: true }),
+    );
+    this.stageFloor.position.y = -0.002;
+    this.stageFloor.visible = false;
+    this.scene.add(this.stageFloor);
 
     const c = this.canvas;
     c.addEventListener('pointerdown', (e) => {
@@ -140,6 +163,14 @@ export class CharacterPreview {
     visual.setVisible(true);
     const f = visual.frame;
     if (f) this.eyeH = f.eyeY * f.scale;
+    // its size as it stands (for the front view's measurements)
+    visual.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(visual.root);
+    if (!box.isEmpty()) {
+      const top = f ? Math.max(f.topY * f.scale, this.eyeH + 0.1) : box.max.y;
+      this.size = { w: Math.min(1.4, box.max.x - box.min.x), h: Math.min(2.4, Math.max(top, box.max.y * 0.98)), cx: (box.min.x + box.max.x) / 2 };
+    }
+    this.boxKey = '';
     // render it right away (also when the screen is idle) so a change shows instantly
     this.visual.update(0, this.pose, true);
   }
@@ -178,6 +209,40 @@ export class CharacterPreview {
     this.showcase = null;
   }
 
+  /** Split view: the front view on the left, the 3D view on the right (see `split`). */
+  setSplit(on: boolean): void {
+    // the 3D view starts three-quarters on, the way a model is shown off
+    if (on && !this.split) this.yaw = SHOWCASE_YAW;
+    this.split = on;
+    this.floor.visible = !on;
+    this.stageFloor.visible = on;
+    this.boxKey = '';
+    if (!on) this.onFrontBox?.(null);
+    this.resize();
+  }
+
+  get isSplit(): boolean {
+    return this.split;
+  }
+
+  /** The dark studio floor under the character (TRAP), instead of the soft disc. */
+  setStudio(on: boolean): void {
+    this.floor.visible = !on;
+    this.stageFloor.visible = on;
+    if (on) this.yaw = SHOWCASE_YAW;
+  }
+
+  /** Turns the 3D view back round to the front. */
+  faceFront(): void {
+    const turn = Math.PI * 2;
+    this.showcase = Math.round(this.yaw / turn) * turn;
+    this.holdUntil = performance.now() + 2500;
+  }
+
+  get spinning(): boolean {
+    return this.spin !== 0;
+  }
+
   /** Slowly spin by itself (off by default: the player turns it). */
   setSpin(on: boolean): void {
     this.spin = on ? SPIN : 0;
@@ -214,8 +279,40 @@ export class CharacterPreview {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!this.renderer || w === 0 || h === 0) return;
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
+    this.camera.aspect = (this.split ? w / 2 : w) / h;
     this.camera.updateProjectionMatrix();
+    this.boxKey = '';
+  }
+
+  /**
+   * The flat front view: the whole character in the left half, clear of the toolbars along the
+   * top and the bottom (`clear` pixels kept free above and below it).
+   */
+  private placeFrontCam(w: number, h: number): void {
+    const H = this.size.h, aspect = w / 2 / h;
+    const T = this.clear.top, B = this.clear.bottom;
+    const s0 = Math.max(40, h - T - B) / H; // pixels per meter
+    const view = h / s0;
+    const c = this.frontCam;
+    c.top = view / 2;
+    c.bottom = -view / 2;
+    c.left = (-view / 2) * aspect;
+    c.right = (view / 2) * aspect;
+    c.updateProjectionMatrix();
+    // the character's top lands T pixels down, its feet B pixels up
+    const cy = (h / 2 - B) / s0;
+    c.position.set(0, cy, -8);
+    c.lookAt(0, cy, 0);
+    // where the character's box lands on the canvas (CSS pixels), for the measurements
+    const key = `${w}|${h}|${H}|${this.size.w}`;
+    if (key === this.boxKey) return;
+    this.boxKey = key;
+    const s = h / view;
+    const bw = this.size.w * s, bh = H * s;
+    // (seen from the front the character's left is screen right: the box is mirrored in x)
+    const x = w / 4 - this.size.cx * s - bw / 2;
+    const y = h / 2 - (H - cy) * s;
+    this.onFrontBox?.({ x, y, w: bw, h: bh, widthM: this.size.w, heightM: H });
   }
 
   private loop = (now: number): void => {
@@ -237,19 +334,39 @@ export class CharacterPreview {
     const narrow = this.camera.aspect < 0.8 ? 1.25 : 1;
     this.cam.look += (target.look - this.cam.look) * k;
     this.cam.y += (target.y - this.cam.y) * k;
-    this.cam.dist += (target.dist * this.zoom * narrow - this.cam.dist) * k;
+    const far = this.split ? 1.5 : 1;
+    this.cam.dist += (target.dist * this.zoom * narrow * far - this.cam.dist) * k;
     this.cam.fov += (target.fov - this.cam.fov) * k;
     this.camera.fov = this.cam.fov;
     this.camera.updateProjectionMatrix();
-    // the character faces -Z at yaw 0, so the camera looks at it from the -Z side
-    this.camera.position.set(0, this.cam.y * this.eyeH, -this.cam.dist);
+    // the character faces -Z at yaw 0, so the camera looks at it from the -Z side (in the
+    // split view the camera goes round it instead: turning it by yaw is seeing it from -yaw)
+    if (this.split) this.camera.position.set(Math.sin(this.yaw) * this.cam.dist, this.cam.y * this.eyeH, -Math.cos(this.yaw) * this.cam.dist);
+    else this.camera.position.set(0, this.cam.y * this.eyeH, -this.cam.dist);
     this.camera.lookAt(0, this.cam.look * this.eyeH, 0);
 
     if (this.visual) {
-      this.pose.yaw = this.yaw;
+      this.pose.yaw = this.split ? 0 : this.yaw;
       this.visual.update(dt, this.pose, true);
     }
-    this.renderer?.render(this.scene, this.camera);
+    const r = this.renderer;
+    if (!r) return;
+    if (!this.split) {
+      r.render(this.scene, this.camera);
+      return;
+    }
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    this.placeFrontCam(w, h);
+    r.setScissorTest(true);
+    r.setViewport(0, 0, w / 2, h);
+    r.setScissor(0, 0, w / 2, h);
+    this.stageFloor.visible = false;
+    r.render(this.scene, this.frontCam);
+    this.stageFloor.visible = true;
+    r.setViewport(w / 2, 0, w / 2, h);
+    r.setScissor(w / 2, 0, w / 2, h);
+    r.render(this.scene, this.camera);
+    r.setScissorTest(false);
   };
 
   dispose(): void {

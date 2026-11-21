@@ -3,7 +3,7 @@ import { decodeAppearance, type Appearance } from '@shared/config/appearance';
 import { CREWS, type TeamId } from '@shared/config/crews';
 import { INTERP_DELAY_MS, LEDGE, PLAYER, ROLL, TICK_DT, TURF } from '@shared/config/game';
 import { BAGS, HEAL_KINDS, ITEM, LOOT, PORCH } from '@shared/config/porch';
-import { AMMO_NAMES, AMMO_TYPES, SLOT_PRIMARY_B, THROWABLES, THROWABLE_IDS, WEAPONS, WEAPON_IDS, type Loadout, type WeaponDef } from '@shared/config/weapons';
+import { AMMO_NAMES, AMMO_TYPES, SLOT_PRIMARY_B, SLOT_THROWABLE, THROWABLES, THROWABLE_IDS, WEAPONS, WEAPON_IDS, type Loadout, type WeaponDef } from '@shared/config/weapons';
 import type { MapDef } from '@shared/map/types';
 import { DEG, Rng, clamp, wrapAngle, type Vec3 } from '@shared/math';
 import {
@@ -31,6 +31,7 @@ import { CameraRig } from './camera';
 import { makePose, type CharacterPose, type CharacterVisual } from './characters/characterTypes';
 import { ProceduralCharacter } from './characters/proceduralCharacter';
 import { Effects } from './fx/effects';
+import { ThrowArc } from './fx/throwArc';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
 import { AirLabels } from './porch/airLabels';
@@ -179,6 +180,11 @@ export class Game {
   private marks: DangerMarks;
   /** Ticks left to hold MARK down (a mark press reaches at least one input command). */
   private tapMark = 0;
+  /** Where a lined-up grenade / smoke will go (AIM with one in hand). */
+  private readonly throwArc = new ThrowArc();
+  private readonly thrower = { x: 0, y: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0, crouching: 0 };
+  /** THROW was down last tick (it takes the throwable out on a press). */
+  private throwWas = false;
   readonly gunIcons: GunIcons;
   private mySkin = 'none';
   /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
@@ -266,6 +272,7 @@ export class Game {
 
     this.effects = new Effects();
     this.gfx.scene.add(this.effects.group);
+    this.gfx.scene.add(this.throwArc.group);
     this.applyEffectDensity();
     this.unsubSettings = deps.settings.onChange(() => this.applyEffectDensity());
 
@@ -863,6 +870,15 @@ export class Game {
     p.heal = this.alive && st.healT > 0 ? st.healKind : -1;
     p.roll = this.alive && st.rollT > 0 ? 1 - st.rollT / ROLL.time : -1;
     p.climb = this.alive && st.climbT > 0 ? 1 - st.climbT / LEDGE.time : -1;
+    // lining up a throw: show where it goes (the same flight the server will fly)
+    const lining = this.alive && !spectating && air === AIR_GROUND && st.slot === SLOT_THROWABLE &&
+      st.aiming === 1 && st.throwables > 0 && st.thr > 0 && st.healT <= 0;
+    if (lining) {
+      const t = this.thrower;
+      t.x = st.x; t.y = st.y; t.z = st.z; t.vx = st.vx; t.vz = st.vz;
+      t.yaw = aimYaw; t.pitch = aimPitch; t.crouching = st.crouching;
+    }
+    this.throwArc.update(dt, lining, this.thrower, Math.max(0, st.thr - 1), this.phys, this.rig.camera);
     if (this.myLife >= 0) {
       this.localChar.update(dt, p);
       // (looking down a scope: out of the way, like a first-person view through the glass)
@@ -1015,6 +1031,14 @@ export class Game {
     cmd.pitch = clamp(this.view.pitch + this.recoilP, -PLAYER.maxPitch, PLAYER.maxPitch);
     cmd.buttons = active ? this.buttonBits() | this.latched : 0;
     this.latched = 0;
+    // THROW (triangle / G / middle mouse) takes the grenade or smoke out like a weapon; again puts
+    // it away. AIM lines the throw up, FIRE throws it.
+    const throwDown = active && f.throwBtn;
+    if (throwDown && !this.throwWas && this.alive && !frozen) {
+      if (input.slot === SLOT_THROWABLE) input.selectSlot(input.previousGunSlot);
+      else if (st.throwables > 0 && st.thr > 0) input.selectSlot(SLOT_THROWABLE);
+    }
+    this.throwWas = throwDown;
     cmd.slot = input.slot;
     cmd.heal = this.healLatch >= 0 ? this.healLatch + 1 : 0;
     this.rig.positionFor(st.x, st.y, st.z, cmd.yaw, cmd.pitch, this.camOrigin);
@@ -1112,7 +1136,6 @@ export class Game {
     const inReach = this.canTalkToAj || (this.porchWorld ? !!(this.promptTarget || this.bldTarget) : !!this.bldTarget);
     if (f.reload || (f.useOrReload && !inReach)) b |= BTN.RELOAD;
     if (f.useOrReload && inReach) b |= BTN.USE;
-    if (f.throwBtn) b |= BTN.THROW;
     if (f.roll) b |= BTN.ROLL;
     // marking danger: a press (held for a couple of commands so it is never missed)
     if (f.mark) this.tapMark = 2;
@@ -1665,6 +1688,8 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
     this.deps.audio?.crowd?.(0);
     this.deps.input.porchSlots = false;
     this.effects.dispose();
+    this.throwArc.group.removeFromParent();
+    this.throwArc.dispose();
     this.localChar.dispose();
     for (const z of this.stage.world.zones) z.group.visible = false;
   }

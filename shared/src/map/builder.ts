@@ -83,6 +83,7 @@ export class MapBuilder {
   backdrop: MapDef['backdrop'];
   round: MapDef['round'];
   pens: NonNullable<MapDef['pens']> = [];
+  terrain: MapDef['terrain'];
   spawns: [SpawnPoint[], SpawnPoint[]] = [[], []];
   zones: ZoneDef[] = [];
 
@@ -327,6 +328,7 @@ export class MapBuilder {
       ...(this.warmup ? { warmup: this.warmup } : {}),
       ...(this.round ? { round: this.round } : {}),
       ...(this.pens.length ? { pens: this.pens } : {}),
+      ...(this.terrain ? { terrain: this.terrain } : {}),
     };
   }
 }

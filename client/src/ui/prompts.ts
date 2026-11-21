@@ -131,7 +131,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   prev: 'Previous weapon',
   weapons: 'Weapons',
   wheel: 'Wheel (hold)',
-  throw: 'Throw',
+  throw: 'Grenade / smoke',
   shoulder: 'Swap shoulder',
   scores: 'Scores',
   pause: 'Menu',

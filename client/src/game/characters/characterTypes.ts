@@ -78,6 +78,8 @@ export interface CharacterVisual {
   setOutline?(on: boolean): void;
   /** Character screen: shows a facial expression for a moment. */
   previewExpression?(id: string): void;
+  /** Menus: a wave hello (the Character Creator's Action button). */
+  wave?(): void;
   /** Bind-pose heights the Character screen frames its camera on (meters, before `scale`). */
   readonly frame?: { eyeY: number; topY: number; chestY: number; scale: number };
 }

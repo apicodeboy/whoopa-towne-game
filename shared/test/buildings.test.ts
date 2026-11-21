@@ -92,8 +92,8 @@ const TYPES: Array<{ type: BuildingType; w: number; d: number; floors?: number }
   { type: 'restaurant', w: 12, d: 12, floors: 2 }, { type: 'office', w: 16, d: 14, floors: 3 }, { type: 'warehouse', w: 18, d: 16 }, { type: 'garage', w: 10, d: 10 },
   { type: 'workshop', w: 14, d: 12 }, { type: 'storage', w: 17, d: 14 },
   { type: 'townhouse', w: 8, d: 8.8 }, { type: 'duplex', w: 14, d: 8.8 },
-  // CAP'S HOUSE: the barndominium and the barns
-  { type: 'barndo', w: 50, d: 26 }, { type: 'barn', w: 16, d: 18 }, { type: 'barn', w: 18, d: 16 },
+  // CAP'S HOUSE: the cabin, its garage; the barns
+  { type: 'cabin', w: 20, d: 16 }, { type: 'garage4', w: 16, d: 9 }, { type: 'barn', w: 16, d: 18 }, { type: 'barn', w: 18, d: 16 },
 ];
 
 test('buildings: on every floor of every type, every room can be walked to (doors open)', async () => {
@@ -102,8 +102,8 @@ test('buildings: on every floor of every type, every room can be walked to (door
     const map = lotMap(t.type, t.w, t.d, t.floors);
     // no Buildings on this world: doors and windows have no collision (all open)
     const phys = new PhysicsWorld(R, map);
-    const story = t.type === 'office' ? 3.4 : t.type === 'warehouse' ? 6.4 : t.type === 'garage' || t.type === 'workshop' || t.type === 'storage' || t.type === 'barndo' ? 4.4 : t.type === 'barn' ? 6.2 : 3.2;
-    const nf = t.type === 'house2' || t.type === 'townhouse' || t.type === 'duplex' || t.type === 'barndo' ? 2 : t.floors ?? 1;
+    const story = t.type === 'office' ? 3.4 : t.type === 'warehouse' ? 6.4 : t.type === 'garage' || t.type === 'workshop' || t.type === 'storage' ? 4.4 : t.type === 'barn' ? 6.2 : t.type === 'cabin' ? 3.4 : t.type === 'garage4' ? 3.6 : 3.2;
+    const nf = t.type === 'house2' || t.type === 'townhouse' || t.type === 'duplex' ? 2 : t.type === 'cabin' ? 4 : t.floors ?? 1;
     const step = 0.1;
     for (let f = 0; f < nf; f++) {
       const y = f * story;

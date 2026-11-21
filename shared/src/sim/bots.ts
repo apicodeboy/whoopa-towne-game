@@ -1,6 +1,6 @@
 import { HITBOX, PLAYER, THROW, TICK_DT } from '../config/game';
 import { PORCH, SQUAD_MODES } from '../config/porch';
-import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, type Loadout, type WeaponClass, type WeaponId } from '../config/weapons';
+import { SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, SLOT_THROWABLE, type Loadout, type WeaponClass, type WeaponId } from '../config/weapons';
 import { DEG, Rng, clamp, hash32, wrapAngle, yawToward } from '../math';
 import { PHASE, type BotDifficulty } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
@@ -151,6 +151,8 @@ export class BotBrain {
   private wantSlot = 0;
   private throwPlanned = false;
   private throwAt = 0;
+  /** Sim time until which the throwable stays out (taken out to line up a throw). */
+  private throwOut = 0;
   private scanYaw = 0;
   // JUMP OFF THE PORCH
   private jumpAt = 0;
@@ -191,6 +193,7 @@ export class BotBrain {
     this.stuckCheckAt = 0;
     this.idleUntil = 0;
     this.throwPlanned = false;
+    this.throwOut = 0;
     if (this.sim.porch) {
       // where to land: a random bookbag (the same one as the rest of the squad), or anywhere people can stand
       const porch = this.sim.porch, bags = porch.bags;
@@ -503,11 +506,17 @@ export class BotBrain {
           wantMove = false;
           moveX = moveZ = 0;
           if (Math.abs(wrapAngle(wantYaw - this.yaw)) < 0.08 && Math.abs(best.pitch - this.pitch) < 0.08) {
-            if (this.throwAt === 0) this.throwAt = now + 120;
-            if (now >= this.throwAt) {
-              buttons |= BTN.THROW;
-              this.throwPlanned = false;
-              this.throwAt = 0;
+            // the same as a player: take it out, aim, and throw it with FIRE
+            this.throwOut = now + 400;
+            buttons |= BTN.AIM;
+            if (s.slot === SLOT_THROWABLE && s.swapT <= 0) {
+              if (this.throwAt === 0) this.throwAt = now + 120;
+              if (now >= this.throwAt) {
+                buttons |= BTN.FIRE;
+                this.throwPlanned = false;
+                this.throwAt = 0;
+                this.throwOut = now + 100;
+              }
             }
           }
         } else {
@@ -613,7 +622,7 @@ export class BotBrain {
       cmd.mx = clamp(moveX * cosY - moveZ * sinY, -1, 1);
     }
     cmd.buttons = buttons;
-    cmd.slot = this.wantSlot;
+    cmd.slot = now < this.throwOut && s.throwables > 0 ? SLOT_THROWABLE : this.wantSlot;
     cmd.yaw = this.yaw;
     cmd.pitch = this.pitch;
   }

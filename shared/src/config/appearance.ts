@@ -315,7 +315,7 @@ export interface Appearance extends GunSkinFields {
   mask: string;
   carry: string;
   waistChain: string;
-  /** The blank face (its color and a mark on it), a studded belt, a graphic on the pants. */
+  /** `face`: the color of the old blank face (no longer drawn; kept so saved looks read back); a face tattoo, a studded belt, a graphic on the pants. */
   face: string;
   faceMark: string;
   belt: string;
@@ -372,12 +372,12 @@ export const HEAD_SIZES = [opt('average', 'Average'), opt('small', 'Small'), opt
 export const MASKS = [opt('none', 'None'), opt('facemask', 'Black Face Mask'), opt('bandanamask', 'Bandana Mask')];
 export const CARRY = [opt('none', 'Nothing'), opt('phone', 'Smartphone')];
 export const WAIST_CHAINS = [opt('none', 'None'), opt('silver', 'Silver Pants Chain')];
-/** The blank face: its color (`skin` = the character's own skin tone). */
+/** The color of the blank face from the faceless days (not drawn any more: the face is skin; kept for the wire code). */
 export const FACES = [
   opt('gray', 'Gray', { color: '#b4b6bb' }), opt('white', 'Bone White', { color: '#ecebe6' }), opt('black', 'Black', { color: '#202024' }),
   opt('skin', 'Skin Tone', { color: '#8a5a3c' }), opt('red', 'Red', { color: '#b7262b' }), opt('blue', 'Blue', { color: '#2c5fd0' }),
 ];
-/** A small mark on the forehead or cheek of the blank face. */
+/** A small face tattoo on the forehead or cheek. */
 export const FACE_MARKS = [opt('none', 'None'), opt('star', 'Star'), opt('cross', 'Cross'), opt('tears', 'Teardrops'), opt('bolt', 'Lightning Bolt')];
 /** A studded belt on the pants (with the boxers' waistband showing above it). */
 export const BELTS = [

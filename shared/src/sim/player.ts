@@ -693,7 +693,9 @@ export function stepPlayer(
   else if (s.crouching && phys.canStandAt(s.x, s.y, s.z)) s.crouching = 0;
 
   let weapon = weaponInSlot(s, s.slot);
-  s.aiming = !rolling && (btn & BTN.AIM) !== 0 && weapon !== null && weapon.magSize > 0 ? 1 : 0;
+  // (lining up a throw counts as aiming: slower feet, the camera in over the shoulder)
+  const holdingThrowable = s.slot === SLOT_THROWABLE && s.throwables > 0 && s.thr > 0;
+  s.aiming = !rolling && (btn & BTN.AIM) !== 0 && ((weapon !== null && weapon.magSize > 0) || holdingThrowable) ? 1 : 0;
   s.sprinting =
     !rolling && (btn & BTN.SPRINT) !== 0 && mz > 0.5 && Math.abs(mx) < 0.75 && !s.crouching && !s.aiming && !firing ? 1 : 0;
 
@@ -880,16 +882,22 @@ export function stepPlayer(
   }
   if (s.fireCd < 0 && !act.shot) s.fireCd = 0;
 
-  // throwables: dedicated quick-throw button, or FIRE while the throwable slot is out
+  // throwables are held like a weapon: take one out (the throwable slot), AIM to line it up,
+  // FIRE to throw it. (The THROW button only takes it out, on the client: it is never a throw.)
   const throwBtn = (btn & BTN.THROW) !== 0;
-  const throwEdge = (throwBtn && !s.throwHeld) || (s.slot === SLOT_THROWABLE && firing && !s.trig);
+  const throwEdge = s.slot === SLOT_THROWABLE && firing && !s.trig;
   if (throwEdge && s.throwables > 0 && s.thr > 0 && s.throwCd <= 0 && s.swapT <= 0 && !healing) {
     s.throwables -= 1;
     s.throwCd = THROW.cooldown;
     act.threw = true;
-    if (s.slot === SLOT_THROWABLE && s.throwables === 0) {
-      s.slot = SLOT_PRIMARY;
-      s.swapT = weaponInSlot(s, SLOT_PRIMARY)?.swapTime ?? 0.3;
+    if (s.throwables === 0) {
+      // that was the last one: back to the best gun carried
+      const back = [SLOT_PRIMARY, ...(s.pool ? [SLOT_PRIMARY_B] : []), SLOT_SECONDARY].find((k) => {
+        const w = weaponInSlot(s, k);
+        return !!w && w.kind !== 'melee';
+      }) ?? SLOT_PRIMARY;
+      s.slot = back;
+      s.swapT = weaponInSlot(s, back)?.swapTime ?? 0.3;
       act.swapped = true;
     }
   }

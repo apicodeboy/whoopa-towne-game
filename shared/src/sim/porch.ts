@@ -5,6 +5,7 @@ import {
 } from '../config/porch';
 import { AMMO_TYPES, SLOT_PRIMARY, SLOT_PRIMARY_B, SLOT_SECONDARY, THROWABLE_IDS, WEAPONS, WEAPON_IDS } from '../config/weapons';
 import { clamp, type Rng } from '../math';
+import { groundY } from '../map/terrain';
 import { EV, KILL_RIOT, PHASE, type PorchInit } from '../protocol';
 import type { GameSim, SimPlayer } from './game';
 import { Q_PROJECTILE } from './physics';
@@ -203,22 +204,24 @@ export class PorchRules {
         z = nav.cellZ(idx) + rng.range(-0.3, 0.3);
       }
       if (!nav.isWalkable(x, z) || !free(x, z)) continue;
-      place(x, 0, z);
+      place(x, groundY(sim.map, x, z), z);
     }
     // ibuprofen lying around: orange pill bottles on counters, sidewalks, in yards
     for (let n = 0, guard = 0; n < PORCH.ibuprofen.loose && guard < 2000; guard++) {
-      let x: number, z: number, floor = 0;
+      let x: number, z: number, floor = 0, outside = true;
       if (spots.length && rng.chance(0.4)) {
         const sp = rng.pick(spots);
         x = sp.x + rng.range(-1.2, 1.2);
         z = sp.z + rng.range(-1.2, 1.2);
         floor = sp.y;
+        outside = false;
       } else {
         const idx = nav.randomWalkable(rng);
         x = nav.cellX(idx) + rng.range(-0.3, 0.3);
         z = nav.cellZ(idx) + rng.range(-0.3, 0.3);
+        floor = groundY(sim.map, x, z);
       }
-      if ((floor === 0 && !nav.isWalkable(x, z)) || !free(x, z, 9)) continue;
+      if ((outside && !nav.isWalkable(x, z)) || !free(x, z, 9)) continue;
       taken.push({ x, z });
       const hit = sim.phys.raycast(x, floor + 1.2, z, 0, -1, 0, 3, Q_PROJECTILE);
       const y = hit >= 0 ? floor + 1.2 - hit : floor;

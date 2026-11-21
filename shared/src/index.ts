@@ -13,6 +13,7 @@ export * from './map/whoopaTowne';
 export * from './map/greaterTowne';
 export * from './map/capsHouse';
 export * from './map/countryside';
+export * from './map/terrain';
 export * from './map/maps';
 export * from './sim/physics';
 export * from './sim/player';

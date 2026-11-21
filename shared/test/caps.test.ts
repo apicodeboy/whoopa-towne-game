@@ -1,6 +1,6 @@
 import {
-  AIR_GROUND, AIR_SKYDIVE, BTN, CAPS, EV, GameSim, MARK, PLAYER, POOL, Q_BULLET, Q_PROJECTILE, RANCH_FENCE_H, ROUND, TICK_MS,
-  makeInputCmd, mapForMode, type InputCmd, type SimPlayer,
+  AIR_GROUND, AIR_SKYDIVE, BTN, CAPS, EV, GameSim, HILL, MARK, PLAYER, POOL, Q_BULLET, Q_PROJECTILE, RANCH_FENCE_H, ROUND, TICK_MS,
+  groundY, makeInputCmd, mapForMode, type InputCmd, type SimPlayer,
 } from '../src/index';
 import { approx, assert, test } from './harness';
 import { initRapier } from './env';
@@ -57,7 +57,7 @@ test("Cap's House: the battle royale map is round; the classic map is untouched"
   assert(!big.solids.some((s) => s.kind === 'perimeter'), 'the old square edge walls are gone');
   assert(big.districts?.some((d) => d.name === "CAP'S HOUSE") === true, "CAP'S HOUSE is called out from the blimp");
   assert(!big.districts?.some((d) => d.name === 'WHOOPA TOWNE'), 'the classic town is not in the battle royale map');
-  assert(big.doors?.some((d) => Math.abs(d.x) < 26 && d.z > -19 && d.z < 9) === true, 'the barndominium has working doors');
+  assert(big.doors?.some((d) => d.x > -18 && d.x < 4 && d.z > -37 && d.z < -19 && d.y > HILL.height - 0.01) === true, 'the cabin up on the hill has working doors');
   // the classic map: still the classic town, with its spawns and capture zones
   for (const mode of ['tdm', 'turf'] as const) {
     const m = mapForMode(mode);
@@ -95,21 +95,54 @@ test("Cap's House: the rim stops you at the edge, and skydivers stay over the la
 
 test("Cap's House: drop into the pool, wade to the steps and climb out", async () => {
   const { sim, me } = await porchSim();
-  // the deck between the back of the house and the pool, facing the water (north)
-  land(me, 0, -22, 0);
+  const pz = (POOL.z0 + POOL.z1) / 2;
+  // the deck on the hill side of the pool, facing the water (south)
+  land(me, -2, POOL.z0 - 2.5, Math.PI);
   wait(sim, me, 0.2);
   approx(me.state.y, 0, 0.05, 'standing on the deck');
   wait(sim, me, 1.5, { mz: 1 });
-  assert(me.state.z < POOL.z1 - 0.5 && me.state.y < POOL.floor + 0.1 && me.state.grounded === 1, `in the pool, on the bottom (y = ${me.state.y.toFixed(2)})`);
+  assert(me.state.z > POOL.z0 + 0.5 && me.state.y < POOL.floor + 0.1 && me.state.grounded === 1, `in the pool, on the bottom (y = ${me.state.y.toFixed(2)})`);
   // the walls are too high to just walk out
-  wait(sim, me, 1.0, { yaw: Math.PI, mz: 1 });
+  wait(sim, me, 1.0, { yaw: 0, mz: 1 });
   assert(me.state.y < POOL.floor + 0.1, 'the side of the pool stops you');
   // up the steps at the east end and out onto the deck
-  assert(walkTo(sim, me, 6.5, -32), 'to the foot of the steps');
-  assert(walkTo(sim, me, 11.5, -32, 0.5), `up the steps (stuck at ${me.state.x.toFixed(2)}, y ${me.state.y.toFixed(2)})`);
+  assert(walkTo(sim, me, POOL.x1 - 3.2, pz), 'to the foot of the steps');
+  assert(walkTo(sim, me, POOL.x1 + 2.5, pz, 0.5), `up the steps (stuck at ${me.state.x.toFixed(2)}, y ${me.state.y.toFixed(2)})`);
   approx(me.state.y, 0, 0.06, 'out on the deck');
   // the water is only something to look at: bullets cross it like air
-  assert(sim.phys.raycast(-8.5, -0.5, -32, 1, 0, 0, 16, Q_BULLET) < 0, 'nothing solid in the water');
+  assert(sim.phys.raycast(POOL.x0 + 0.5, -0.5, pz, 1, 0, 0, 14, Q_BULLET) < 0, 'nothing solid in the water');
+  sim.dispose();
+});
+
+test("Cap's House: run up the hill from any side to the cabin; bots find their way up too", async () => {
+  const { sim, me } = await porchSim();
+  const H = HILL.height, T = HILL.top;
+  const onTop = () => me.state.y > H - 0.05 && me.state.x > T.x0 && me.state.x < T.x1 && me.state.z > T.z0 && me.state.z < T.z1;
+  // from the foot of each side, running (sprinting) straight up
+  const sides: Array<[string, number, number, number]> = [
+    ['west', T.x0 - HILL.run.w - 2, -20, -Math.PI / 2],
+    ['east', T.x1 + HILL.run.e + 1, -20, Math.PI / 2],
+    ['north', 2, T.z0 - HILL.run.n - 0.5, Math.PI],
+    ['the drive', 18, HILL.drive!.zFoot + 2, 0],
+  ];
+  for (const [name, x, z, yaw] of sides) {
+    land(me, x, z, yaw);
+    wait(sim, me, 0.2);
+    let t = 0;
+    for (; t < 12 && !onTop(); t += 0.25) wait(sim, me, 0.25, { yaw, mz: 1, buttons: BTN.SPRINT });
+    assert(onTop(), `${name}: up on top (stopped at ${me.state.x.toFixed(1)}, ${me.state.y.toFixed(2)}, ${me.state.z.toFixed(1)})`);
+    assert(t < 9, `${name}: a run, not a climb (${t.toFixed(1)} s)`);
+  }
+  // the ground under you is the hill (not a box floating over it)
+  approx(groundY(sim.map, 0, -12), H, 1e-6, 'flat on top');
+  const ray = sim.phys.raycast(-25, 20, -20, 0, -1, 0, 30, Q_PROJECTILE);
+  approx(20 - ray, groundY(sim.map, -25, -20), 0.05, 'the collision follows the slope');
+  // the cabin's front door, the garage and its four rides are up there
+  const ride = sim.map.props.filter((p) => ['wedgetruck', 'hypercar', 'liftedtruck', 'highvan'].includes(p.type));
+  assert(ride.length === 4 && ride.every((p) => Math.abs(p.y - H) < 1e-6), 'four vehicles in the garage on the hilltop');
+  // bots: paths up from every side
+  const out: number[] = [];
+  for (const [, x, z] of sides) assert(sim.nav.findPath(x, z, -6, -15, out) > 0, `a bot path up from (${x}, ${z})`);
   sim.dispose();
 });
 
@@ -142,10 +175,10 @@ test('marking danger: it goes where you look, your squad sees it, nobody else do
   sim.start();
   sim.tick();
   sim.drainEvents();
-  // standing in the yard in front of the barndominium, looking at its front wall (north)
-  land(me, 0, 20, 0);
-  land(mate, 3, 20, 0);
-  land(other, -3, 22, 0);
+  // standing in the yard at the foot of the hill, looking up it (north)
+  land(me, -18, 26, 0);
+  land(mate, -21, 26, 0);
+  land(other, -24, 28, 0);
   const press = (buttons: number, pitch = 0) => {
     const c = makeInputCmd();
     c.seq = ++seq;
@@ -161,9 +194,9 @@ test('marking danger: it goes where you look, your squad sees it, nobody else do
   const ev = press(BTN.MARK);
   const mark = ev.find((e) => e[0] === EV.MARK);
   assert(!!mark && mark[1] === me.idx, 'a MARK event');
-  // the porch and the front wall of the house are about 12 m ahead (z = 8 and the porch posts in front)
-  const mz = mark![4] / 100;
-  assert(mz > 3 && mz < 9, `marked on the house front (z = ${mz.toFixed(2)})`);
+  // the slope of the hill, where it rises to eye height (about 20 m ahead)
+  const mz = mark![4] / 100, my = mark![3] / 100;
+  assert(mz > 1 && mz < 9 && my > 1, `marked on the hillside (z = ${mz.toFixed(2)}, y = ${my.toFixed(2)})`);
   // holding the button does not mark again; pressing again within the cooldown does not either
   assert(!press(BTN.MARK).some((e) => e[0] === EV.MARK), 'held: one mark');
   press(0);

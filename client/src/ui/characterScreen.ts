@@ -1,13 +1,15 @@
 import {
-  BELTS, BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BUILDS, CARRY, DEFAULT_APPEARANCE, EARRINGS, FACES, FACE_MARKS, FACE_SHAPES, GLASSES,
-  HAIRSTYLES, HAIR_COLORS, HATS, HEAD_SHAPES, HEAD_SIZES, HEIGHTS, LEG_PRINTS, MASKS, MOUTH_PROPS, NECKLACES, SHOES, SHOE_COLORS, SHOULDERS,
-  SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TOPS, TOP_COLORS, WAIST_CHAINS, WRIST, LOOK_PRESETS, cloneAppearance, isPremiumOption,
-  randomAppearance, sameAppearance, type Appearance, type LookField, type LookOption,
+  BELTS, BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BROWS, BUILDS, CARRY, DEFAULT_APPEARANCE, EARRINGS, EARS, EXPRESSIONS, EYE_COLORS,
+  EYE_SHAPES, FACE_ACCESSORIES, FACE_MARKS, FACE_SHAPES, FACIAL_HAIR, GLASSES, HAIRSTYLES, HAIR_COLORS, HATS, HEAD_SHAPES, HEAD_SIZES, LEG_PRINTS,
+  LIPS, MASKS, MOUTH_ACCESSORIES, MOUTH_PROPS, NECKLACES, NOSES, SHOES, SHOE_COLORS, SHOULDERS, SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TEETH,
+  TOPS, TOP_COLORS, WAIST_CHAINS, WRIST, LOOK_PRESETS, cloneAppearance, isPremiumOption, randomAppearance, sameAppearance,
+  type Appearance, type LookField, type LookOption,
 } from '@shared/config/appearance';
 import type { Profile } from '../core/profile';
 import { CharacterPreview, PREVIEW_FRAMES, type PreviewFrame } from '../game/characters/characterPreview';
 import type { CharacterVisual } from '../game/characters/characterTypes';
 import { button, clear, el } from './dom';
+import { ED, SHORT, tool } from './editorKit';
 
 /**
  * WHOOPA-TOWNE Character Creator.
@@ -42,7 +44,7 @@ interface Category {
 const ic = (body: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 const ICONS = {
   body: ic('<circle cx="12" cy="4.5" r="2.5"/><path d="M8 9.5h8l-1 6h-1.6l-.6 6.5h-1.6l-.6-6.5H9z"/>'),
-  face: ic('<ellipse cx="12" cy="12" rx="6.6" ry="8.6" fill="none" stroke-width="1.8"/><path d="M10 15.6h4" stroke-width="1.4"/>'),
+  face: ic('<ellipse cx="12" cy="12" rx="7" ry="8.5" fill="none" stroke-width="1.8"/><circle cx="9.3" cy="11" r="1.1"/><circle cx="14.7" cy="11" r="1.1"/><path d="M10.2 15.5h3.6" stroke-width="1.6"/>'),
   hair: ic('<path d="M4.5 14c0-6 3.5-9.5 7.5-9.5S19.5 8 19.5 14c-1.3-2.4-3-3.6-4.4-4-1 1.6-3.4 2.4-6.2 2.4-1.6 0-3 .6-4.4 1.6z"/><path d="M6 15v4M18 15v4" stroke-width="1.6"/>'),
   top: ic('<path d="M8 3.5l-5 3 2 4 2.2-1.2V20h9.6V9.3L19 10.5l2-4-5-3c-.6 1.6-2.1 2.6-4 2.6S8.6 5.1 8 3.5z"/>'),
   pants: ic('<path d="M6.5 3h11l1 18h-4.2L12 9.5 9.7 21H5.5z"/>'),
@@ -72,19 +74,27 @@ export const CATEGORIES: Category[] = [
     id: 'body', name: 'Body', icon: ICONS.body, subs: [
       sub('bodyType', 'Body Type', 'bodyType', 'cards', BODY_TYPES, 'full', 'Body types are looks only: every outfit and accessory fits all of them.'),
       sub('build', 'Body Build', 'build', 'cards', BUILDS, 'full'),
-      sub('height', 'Height', 'height', 'cards', HEIGHTS, 'full', 'Height is visual only: everyone has the same hitbox.'),
       sub('shoulders', 'Shoulder Width', 'shoulders', 'cards', SHOULDERS, 'full'),
       sub('skin', 'Skin Tone', 'skin', 'swatches', SKIN_TONES, 'upper'),
       sub('headSize', 'Head Size', 'headSize', 'cards', HEAD_SIZES, 'upper'),
     ],
   },
   {
-    // the character is faceless: the face is one blank color, with a mark on it if you like
     id: 'head', name: 'Head & Face', icon: ICONS.face, subs: [
-      sub('face', 'Face', 'face', 'swatches', FACES, 'face', 'The face is blank: pick its color.'),
-      sub('faceMark', 'Face Mark', 'faceMark', 'cards', FACE_MARKS, 'face'),
       sub('headShape', 'Head Shape', 'headShape', 'cards', HEAD_SHAPES, 'face'),
-      sub('faceShape', 'Jaw', 'faceShape', 'cards', FACE_SHAPES, 'face'),
+      sub('faceShape', 'Face Shape', 'faceShape', 'cards', FACE_SHAPES, 'face'),
+      sub('eyes', 'Eyes', 'eyes', 'cards', EYE_SHAPES, 'face'),
+      sub('eyeColor', 'Eye Color', 'eyeColor', 'swatches', EYE_COLORS, 'face'),
+      sub('brows', 'Eyebrows', 'brows', 'cards', BROWS, 'face'),
+      sub('nose', 'Nose', 'nose', 'cards', NOSES, 'face'),
+      sub('lips', 'Mouth', 'lips', 'cards', LIPS, 'face'),
+      sub('teeth', 'Teeth', 'teeth', 'cards', TEETH, 'face', 'Teeth show when you smile (try Expression) or wear a grill.'),
+      sub('ears', 'Ears', 'ears', 'cards', EARS, 'face'),
+      sub('facialHair', 'Facial Hair', 'facialHair', 'cards', FACIAL_HAIR, 'face'),
+      sub('facialHairColor', 'Facial Hair Color', 'facialHairColor', 'swatches', HAIR_COLORS, 'face', 'Eyebrows use this color too.'),
+      sub('details', 'Freckles & Marks', undefined, 'details', BODY_DETAILS, 'face', 'Pick any combination.'),
+      sub('faceMark', 'Face Tattoo', 'faceMark', 'cards', FACE_MARKS, 'face'),
+      sub('expression', 'Expression', undefined, 'expression', EXPRESSIONS, 'face', 'Preview only: your character goes back to a relaxed face.'),
     ],
   },
   {
@@ -119,6 +129,8 @@ export const CATEGORIES: Category[] = [
       sub('hat', 'Hats & Headwear', 'hat', 'cards', HATS, 'face', 'Hats tuck your hair in so nothing pokes through.'),
       sub('glasses', 'Glasses', 'glasses', 'cards', GLASSES, 'face'),
       sub('mask', 'Masks', 'mask', 'cards', MASKS, 'face'),
+      sub('mouthAcc', 'Grills & Lip Piercings', 'mouthAcc', 'cards', MOUTH_ACCESSORIES, 'face'),
+      sub('faceAcc', 'Face Piercings', 'faceAcc', 'cards', FACE_ACCESSORIES, 'face'),
       sub('mouthProp', 'In Mouth', 'mouthProp', 'cards', MOUTH_PROPS, 'face'),
     ],
   },
@@ -176,52 +188,84 @@ export class CharacterScreen {
   private headerBack: HTMLButtonElement;
   private dirtyMark: HTMLElement;
   private modal: HTMLElement;
+  /** The editor look: the color row, the front view's measured box, the view (split or not). */
+  private colorRow: HTMLElement;
+  private colorTool: HTMLElement;
+  private frontBox: HTMLElement;
+  private view: HTMLElement;
+  private spinBtn!: HTMLButtonElement;
+  private splitWanted = true;
+  private onResize = () => this.applySplit();
   private onKey = (e: KeyboardEvent) => this.key(e);
 
   constructor(parent: HTMLElement, deps: CharacterScreenDeps) {
     this.deps = deps;
     this.draft = cloneAppearance(deps.profile.look);
 
-    // ---- header
-    this.headerBack = button('', 'btn small ghost cc-exit', () => this.requestClose());
-    this.headerBack.innerHTML = `${UI.left}<span>BACK</span>`;
+    // ================================================================ top left: back, the name
+    this.headerBack = tool(ED.back, 'Back', () => this.requestClose(), 'solo');
     this.headerBack.dataset.back = '1';
-    this.dirtyMark = el('span', 'cc-dirty hidden', 'UNSAVED CHANGES');
-    const header = el('div', 'cc-head', [
-      this.headerBack,
-      el('div', 'cc-title', [el('b', '', 'CHARACTER'), el('span', '', ' CREATOR')]),
-      this.dirtyMark,
-      ...(deps.openTrap ? [(() => {
-        const b = button('TRAP', 'btn small cc-trap', () => deps.openTrap!());
-        b.title = 'Your TRAP: everything you own from AJ\'s';
-        return b;
-      })()] : []),
-    ]);
+    this.dirtyMark = el('span', 'cc-dirty hidden', 'Unsaved changes');
+    const titleBtn = button('', 'ed-title', () => this.selectCategory(CATEGORIES[0]));
+    titleBtn.innerHTML = `<b>${(deps.profile.name || 'Character').replace(/[<>&"]/g, '')}</b><span class="ed-chev">${ED.chevron}</span>`;
+    titleBtn.title = 'Starter looks';
+    const topLeft = el('div', 'ed-tl', [this.headerBack, el('div', 'ed-name', [titleBtn, this.dirtyMark])]);
 
-    // ---- left: categories
-    this.catList = el('nav', 'cc-cats');
-    this.catList.setAttribute('aria-label', 'Customization categories');
-    for (const c of CATEGORIES) {
-      const b = button('', 'cc-cat', () => this.selectCategory(c));
-      b.innerHTML = `<i>${c.icon}</i><span>${c.name}</span>`;
-      b.title = c.name;
-      this.catButtons.set(c.id, b);
-      this.catList.append(b);
-    }
-
-    // ---- center: preview + view / rotate / zoom
-    const views = el('div', 'segmented small cc-views');
+    // ================================================================ top middle: the framings, zoom
+    const views = el('div', 'ed-pill');
     for (const f of PREVIEW_FRAMES) {
-      const b = button(f === 'full' ? 'BODY' : f === 'upper' ? 'UPPER' : 'FACE', 'seg', () => this.setView(f));
-      b.title = `${f === 'full' ? 'Full body' : f === 'upper' ? 'Upper body' : 'Face close-up'} (${PREVIEW_FRAMES.indexOf(f) + 1})`;
+      const [label, icon] = f === 'full' ? ['Body', ED.full] : f === 'upper' ? ['Upper', ED.upper] : ['Face', ED.faceView];
+      const b = tool(icon, label, () => this.setView(f));
+      b.title = `${label} (${PREVIEW_FRAMES.indexOf(f) + 1})`;
       this.viewButtons.set(f, b);
       views.append(b);
     }
-    const hold = (icon: string, title: string, dir: number) => {
-      const b = button('', 'btn small ghost cc-round', () => undefined);
-      b.innerHTML = icon;
-      b.title = title;
-      b.setAttribute('aria-label', title);
+    const zoom = el('div', 'ed-pill', [
+      tool(ED.zoomOut, 'Zoom out', () => this.preview.zoomBy(-1)),
+      tool(ED.zoomIn, 'Zoom in', () => this.preview.zoomBy(1)),
+    ]);
+    const topMid = el('div', 'ed-tm', [views, zoom]);
+
+    // ================================================================ top right: TRAP, randomize / reset, keep
+    const topRight = el('div', 'ed-tr', [
+      ...(deps.openTrap ? [tool(ED.trap, 'TRAP', () => deps.openTrap!(), 'solo')] : []),
+      el('div', 'ed-pill', [tool(ED.dice, 'Randomize', () => this.randomize()), tool(ED.reset, 'Reset', () => this.reset())]),
+      tool(ED.keep, 'Keep', () => this.confirmKeep(), 'solo primary cc-keep'),
+    ]);
+
+    // ================================================================ the views: front (measured) | 3D
+    this.frontBox = el('div', 'ed-box hidden');
+    this.frontBox.innerHTML = `<i class="h tl"></i><i class="h tm"></i><i class="h tr"></i><i class="h ml"></i><i class="h mr"></i><i class="h bl"></i><i class="h bm"></i><i class="h br"></i>
+<span class="ed-rot">${ED.rotate}</span><span class="ed-dim w"></span><span class="ed-dim hgt"></span>`;
+    const divider = button('', 'ed-divider', () => {
+      this.splitWanted = !this.splitWanted;
+      this.applySplit();
+    });
+    divider.innerHTML = ED.split;
+    divider.title = 'Front view on / off';
+    divider.setAttribute('aria-label', 'Front view on or off');
+    const cube = button('', 'ed-cube', () => this.preview.faceFront());
+    cube.innerHTML = `<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3l15 8.5v17L20 37 5 28.5v-17z" fill="#3a3a3e"/><path d="M20 3l15 8.5L20 20 5 11.5z" fill="#55555a"/><path d="M20 20l15-8.5v17L20 37z" fill="#2a2a2d"/></svg><span>Front</span>`;
+    cube.title = 'Turn to the front';
+    this.view = el('div', 'ed-view', [
+      this.preview.canvas, this.frontBox, divider, cube,
+      el('div', 'cc-hint', 'Drag to turn · scroll or pinch to zoom'),
+    ]);
+    this.preview.onUserTurn = () => this.view.classList.add('touched');
+    this.preview.onFrontBox = (b) => this.placeFrontBox(b);
+
+    // ================================================================ the inspector (the category's items, their options)
+    this.panelBack = button('', 'ed-pback', () => this.closeOptions());
+    this.panelBack.innerHTML = ED.back;
+    this.panelBack.setAttribute('aria-label', 'Back');
+    this.panelTitle = el('div', 'cc-ptitle');
+    this.panelBody = el('div', 'cc-pbody');
+    this.panelNote = el('div', 'cc-pnote');
+    const panel = el('section', 'cc-panel ed-panel', [el('div', 'cc-phead', [this.panelBack, this.panelTitle]), this.panelBody, this.panelNote]);
+
+    // ================================================================ bottom: turn | categories | color | spin, wave
+    const turn = (icon: string, label: string, dir: number) => {
+      const b = tool(icon, label, () => undefined);
       const stop = () => this.preview.turn(0);
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -236,49 +280,89 @@ export class CharacterScreen {
       });
       return b;
     };
-    const zoomBtn = (label: string, title: string, steps: number) => {
-      const b = button(label, 'btn small ghost cc-round', () => this.preview.zoomBy(steps));
-      b.title = title;
-      b.setAttribute('aria-label', title);
-      return b;
-    };
-    const stage = el('div', 'cc-stage', [
-      this.preview.canvas,
-      el('div', 'cc-hint', 'Drag to turn · scroll or pinch to zoom'),
-    ]);
-    this.preview.onUserTurn = () => stage.classList.add('touched');
-
-    // ---- right: items / options
-    this.panelBack = button('', 'btn small ghost cc-pback', () => this.closeOptions());
-    this.panelBack.innerHTML = UI.left;
-    this.panelBack.setAttribute('aria-label', 'Back');
-    this.panelTitle = el('div', 'cc-ptitle');
-    this.panelBody = el('div', 'cc-pbody');
-    this.panelNote = el('div', 'cc-pnote');
-    const panel = el('section', 'cc-panel', [el('div', 'cc-phead', [this.panelBack, this.panelTitle]), this.panelBody, this.panelNote]);
-
-    // ---- bottom bar
-    const keep = button('KEEP CHARACTER', 'btn primary big cc-keep', () => this.confirmKeep());
-    const bar = el('div', 'cc-bar', [
-      el('div', 'cc-group', [hold(UI.turnL, 'Turn left (Q)', -1), hold(UI.turnR, 'Turn right (E)', 1)]),
-      el('div', 'cc-group', [zoomBtn('−', 'Zoom out (Z)', -1), zoomBtn('+', 'Zoom in (X)', 1)]),
-      views,
-      el('div', 'cc-group cc-tools', [
-        button('RANDOMIZE', 'btn small', () => this.randomize()),
-        button('RESET', 'btn small', () => this.reset()),
-      ]),
-      keep,
-    ]);
+    const bottomLeft = el('div', 'ed-pill ed-bl', [turn(ED.turnL, 'Turn left', -1), turn(ED.turnR, 'Turn right', 1)]);
+    this.catList = el('nav', 'ed-cats');
+    this.catList.setAttribute('aria-label', 'Customization categories');
+    const pill = el('div', 'ed-pill');
+    for (const c of CATEGORIES) {
+      const [label, icon] = SHORT[c.id] ?? [c.name, ED.starter];
+      const b = tool(icon, label, () => this.selectCategory(c), c.id === 'presets' ? 'solo' : '');
+      b.title = c.name;
+      this.catButtons.set(c.id, b);
+      if (c.id === 'presets') this.catList.append(b);
+      else pill.append(b);
+    }
+    this.catList.append(pill);
+    this.colorRow = el('div', 'ed-pill ed-colors');
+    this.colorTool = el('div', 'ed-colortool', [this.colorRow, el('span', 'ed-cl', 'Color')]);
+    this.spinBtn = tool(ED.play, 'Spin', () => {
+      this.preview.setSpin(!this.preview.spinning);
+      this.spinBtn.classList.toggle('on', this.preview.spinning);
+    });
+    const bottomRight = el('div', 'ed-pill ed-br', [this.spinBtn, tool(ED.wave, 'Wave', () => this.preview.character?.wave?.())]);
+    const bottom = el('div', 'ed-bottom', [bottomLeft, el('div', 'ed-bmid', [this.catList, this.colorTool]), bottomRight]);
 
     this.modal = el('div', 'cc-modal hidden');
-    this.root = el('div', 'screen overlay creator hidden', [
-      el('div', 'cc-shell', [header, el('div', 'cc-main', [this.catList, stage, panel]), bar]),
+    this.root = el('div', 'screen overlay creator ed hidden', [
+      el('div', 'ed-shell', [this.view, panel, topLeft, topMid, topRight, bottom]),
       this.modal,
     ]);
     this.root.setAttribute('role', 'dialog');
     this.root.setAttribute('aria-label', 'Character Creator');
     parent.append(this.root);
     this.selectCategory(CATEGORIES[0]);
+  }
+
+  // ------------------------------------------------------------------ the editor look
+  /** Front view beside the 3D view where there is room for both (and the player wants it). */
+  private applySplit(): void {
+    const roomy = window.innerWidth >= 1000 && window.innerHeight >= 560;
+    const on = this.splitWanted && roomy;
+    this.preview.setSplit(on);
+    this.view.classList.toggle('split', on);
+    this.root.classList.toggle('roomy', roomy);
+  }
+
+  /** The dashed box round the character in the front view, with its real size on it. */
+  private placeFrontBox(b: { x: number; y: number; w: number; h: number; widthM: number; heightM: number } | null): void {
+    this.frontBox.classList.toggle('hidden', !b);
+    if (!b) return;
+    const pad = 10;
+    Object.assign(this.frontBox.style, { left: `${b.x - pad}px`, top: `${b.y - pad}px`, width: `${b.w + pad * 2}px`, height: `${b.h + pad * 2}px` });
+    const cm = (m: number) => `${Math.round(m * 100)}<small>CM</small>`;
+    this.frontBox.querySelector('.ed-dim.w')!.innerHTML = cm(b.widthM);
+    this.frontBox.querySelector('.ed-dim.hgt')!.innerHTML = cm(b.heightM);
+  }
+
+  /** The color row: the swatches of what you are editing (its first color pick). */
+  private renderColors(): void {
+    clear(this.colorRow);
+    const s = (this.open && this.open.kind === 'swatches' ? this.open : null) ?? this.category.subs.find((x) => x.kind === 'swatches') ?? null;
+    this.colorTool.classList.toggle('none', !s);
+    if (!s || !s.field) return;
+    const cur = this.draft[s.field];
+    const ok = s.options.filter((o) => o.available !== false);
+    let shown = ok.slice(0, 4);
+    const sel = ok.find((o) => o.id === cur);
+    if (sel && !shown.includes(sel)) shown = [...shown.slice(0, 3), sel];
+    for (const o of shown) {
+      const premium = this.lockedPremium(s, o);
+      const b = button('', `ed-sw${o.id === cur ? ' on' : ''}${premium ? ' aj' : ''}`, () => {
+        if (premium) return this.deps.openStore?.();
+        this.choose(s, o);
+        this.renderColors();
+      });
+      b.style.setProperty('--sw', o.color ?? '#888');
+      b.title = premium ? `${o.name} · sold at AJ's` : o.name;
+      b.setAttribute('aria-label', `${s.name}: ${o.name}`);
+      b.setAttribute('aria-pressed', String(o.id === cur));
+      this.colorRow.append(b);
+    }
+    const more = button('', 'ed-sw more', () => this.openOptions(s));
+    more.innerHTML = ED.more;
+    more.title = `All ${s.name.toLowerCase()}s`;
+    more.setAttribute('aria-label', `All ${s.name}`);
+    this.colorRow.append(more);
   }
 
   // ------------------------------------------------------------------ navigation
@@ -295,6 +379,7 @@ export class CharacterScreen {
       this.renderPanel();
       this.setView(c.subs[0].frame);
     }
+    this.renderColors();
   }
 
   private openOptions(s: Sub): void {
@@ -491,6 +576,7 @@ export class CharacterScreen {
   private changed(): void {
     this.dirtyMark.classList.toggle('hidden', sameAppearance(this.draft, this.deps.profile.look));
     this.queueRebuild();
+    this.renderColors();
   }
 
   /** Rebuilds the preview once per frame at most (quick arrow clicks stay smooth). */
@@ -618,12 +704,15 @@ export class CharacterScreen {
       this.selectCategory(this.category);
     }
     this.root.classList.toggle('hidden', !v);
+    if (v) this.applySplit();
     this.preview.setActive(v);
     if (v) {
       window.addEventListener('keydown', this.onKey);
+      window.addEventListener('resize', this.onResize);
       this.refreshCharacter(false);
     } else {
       window.removeEventListener('keydown', this.onKey);
+      window.removeEventListener('resize', this.onResize);
     }
   }
 

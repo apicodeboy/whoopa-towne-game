@@ -1,6 +1,7 @@
 import type { Rng } from '../math';
 import { construct } from './architect';
 import type { MapBuilder, Side } from './builder';
+import { terrainHeight, type HillDef, type TerrainDef } from './terrain';
 import type { AnimalKind } from './types';
 
 /**
@@ -8,15 +9,19 @@ import type { AnimalKind } from './types';
  * Team Deathmatch and Turf War, which still play on the classic map, untouched).
  *
  *   z: -51.5  +---- Porch St -----------------------------------------------+
- *             | barn  silos |        the pool deck         |   cornfield    |
- *             |  horses     |   [  the pool  ]  cabana     |                |
- *             |  chickens   | +--------------------------+ |  pigs | goats  |
- *             |             | |  CAP'S HOUSE (barndo)    | |               |
- *             |  cows,      | +--------------------------+ |  orchard  pole |
- *             |  the pond,  |   the yard, the fountain     |           barn |
- *             |  windmill   |   the drive, the ranch gate  |                |
+ *             | barn  silos |    /  the hill (8 m up)   \    |  cornfield   |
+ *             |  horses     |   | CABIN (4 floors) GARAGE |   |              |
+ *             |  chickens   |   |  deck, yard     apron   |   | pigs | goats |
+ *             |             |    \   slopes     drive ↓  /    |              |
+ *             |  cows,      |      the pool   cabana  |       | orchard  pole|
+ *             |  the pond,  |      the yard           |       |          barn|
+ *             |  windmill   |            the ranch gate      |              |
  *   z: 50.5   +---- (the strip, then Ocean Drive) -------------------------+
  *          x: -81.5                                                       81.5
+ *
+ * The cabin and its four-car garage stand on top of a steep hill you can run up (about 30° on
+ * the sides, a little under 45° at the steepest); a drive climbs the south side on an
+ * embankment. The hill is real ground (see terrain.ts): collision, bots and loot all follow it.
  *
  * Everything here is ordinary map data (collision boxes, doors, windows, loot spots), so the
  * server and every client build the same farm. The animals are scenery the client draws
@@ -24,9 +29,28 @@ import type { AnimalKind } from './types';
  */
 
 export const CAPS = { x0: -81.5, x1: 81.5, z0: -51.5, z1: 50.5 } as const;
-/** The pool behind the house: a real hole in the ground (1.4 m deep), steps at the east end. */
-export const POOL = { x0: -9, x1: 9, z0: -38, z1: -26, floor: -1.4, water: -0.2 } as const;
-const DECK = { x0: -16, x1: 18, z0: -47, z1: -18 } as const;
+/** The hill the cabin stands on: its flat top, 8 m up. */
+export const HILL: HillDef = {
+  top: { x0: -18, x1: 24, z0: -38, z1: -6 },
+  height: 8,
+  run: { n: 13, s: 16, e: 12, w: 13 },
+  rough: 0.25,
+  seed: 29,
+  drive: { x0: 15, x1: 21, zFoot: 22, zTop: -6 },
+};
+/** The ground round Cap's House (sampled every meter). */
+export const CAPS_TERRAIN: TerrainDef = {
+  x0: -33, x1: 38, z0: -53, z1: 24, step: 1,
+  hills: [HILL],
+  paint: [
+    { kind: 'gravel', x0: 15, x1: 21, z0: -6, z1: 22 }, // the drive
+    { kind: 'gravel', x0: 4, x1: 22, z0: -25, z1: -6 }, // the apron in front of the garage
+    { kind: 'stone', x0: -10, x1: -4, z0: -14, z1: -8 }, // round the fire pit
+  ],
+};
+/** The pool in the front yard: a real hole in the ground (1.4 m deep), steps at the east end. */
+export const POOL = { x0: -10, x1: 6, z0: 20, z1: 30, floor: -1.4, water: -0.2 } as const;
+const DECK = { x0: -13, x1: 10, z0: 16.5, z1: 37.5 } as const;
 
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 
@@ -110,54 +134,86 @@ function poleBarn(b: MapBuilder, r: Rect, h: number): void {
 
 /** The farm in the middle of the map. */
 export function capsHouse(b: MapBuilder, rng: Rng): void {
-  // ---- the ground: grass all over, the pool deck behind the house, the drive in front
+  const H = HILL.height;
+  const T = HILL.top;
+  b.terrain = CAPS_TERRAIN;
+  const at = (x: number, z: number) => terrainHeight(CAPS_TERRAIN, x, z);
+  // ---- the ground: grass all over, the pool deck in the front yard
   areaAround(b, 'grass', CAPS, DECK, 1);
   areaAround(b, 'plaza', DECK, POOL, 2);
-  b.area('gravel', -25, -10.5, 8, 15, 2); // the apron in front of the shop
-  const loop: Array<{ x: number; z: number }> = [];
-  for (let i = 0; i <= 24; i++) {
-    const a = (i / 24) * Math.PI * 2 + Math.PI / 2;
-    loop.push({ x: Math.cos(a) * 9, z: 24 + Math.sin(a) * 9 });
-  }
-  b.road('trail', loop, 4.5, false);
-  b.road('trail', [{ x: 3.5, z: 61 }, { x: 3.5, z: 32.4 }], 5, false);
-  b.road('trail', [{ x: -9, z: 24 }, { x: -17.5, z: 15 }], 4, false);
-  b.box('fountain', -2, 2, 22, 26, 0, 0.8);
+  // the drive in from Ocean Drive; it climbs the hill from z = 22 (drawn on the hill itself)
+  b.road('trail', [{ x: 18, z: 61 }, { x: 18, z: 22 }], 6, false);
   // the ranch gate where the drive leaves Ocean Drive
-  b.box('post', -0.75, -0.15, 48.7, 49.3, 0, 5.4, { color: 0x5a3f2a });
-  b.box('post', 7.15, 7.75, 48.7, 49.3, 0, 5.4, { color: 0x5a3f2a });
-  b.box('post', -1.1, 8.1, 48.8, 49.2, 4.75, 5.15, { color: 0x5a3f2a });
-  b.sign({ text: "CAP'S HOUSE", x: 3.5, y: 4.15, z: 49.24, yaw: Math.PI, width: 6.4, height: 0.9, style: 'store', color: '#f5c518', bg: '#1b1c1f' });
-  b.sign({ text: "CAP'S HOUSE", x: 3.5, y: 4.15, z: 48.76, yaw: 0, width: 6.4, height: 0.9, style: 'store', color: '#f5c518', bg: '#1b1c1f' });
-  for (const z of [34, 42]) {
-    b.prop('tree', -2.5, z, rng.range(0, 6), rng.int(3));
-    b.prop('tree', 9.5, z, rng.range(0, 6), rng.int(3));
+  b.box('post', 14.0, 14.6, 48.7, 49.3, 0, 5.4, { color: 0x5a3f2a });
+  b.box('post', 21.4, 22.0, 48.7, 49.3, 0, 5.4, { color: 0x5a3f2a });
+  b.box('post', 13.7, 22.3, 48.8, 49.2, 4.75, 5.15, { color: 0x5a3f2a });
+  b.sign({ text: "CAP'S HOUSE", x: 18, y: 4.15, z: 49.24, yaw: Math.PI, width: 6.4, height: 0.9, style: 'store', color: '#f5c518', bg: '#1b1c1f' });
+  b.sign({ text: "CAP'S HOUSE", x: 18, y: 4.15, z: 48.76, yaw: 0, width: 6.4, height: 0.9, style: 'store', color: '#f5c518', bg: '#1b1c1f' });
+  for (const z of [30, 38, 46]) {
+    b.prop('tree', 12.2, z, rng.range(0, 6), rng.int(3));
+    b.prop('tree', 23.8, z, rng.range(0, 6), rng.int(3));
   }
 
-  // ---- the house
-  construct(b, { id: 'caps', type: 'barndo', x0: -25, x1: 25, z0: -18, z1: 8, facing: 's' });
+  // ================================================================ up on the hill
+  // the cabin, its front to the lake, and the garage beside it
+  construct(b, { id: 'caps', type: 'cabin', x0: -17, x1: 3, z0: -36, z1: -20, facing: 's', base: H });
+  construct(b, { id: 'capsgarage', type: 'garage4', x0: 5, x1: 21, z0: -34, z1: -25, facing: 's', base: H });
+  // in the garage, backed in (fronts to the doors): the high-roof van, the lifted truck, the hypercar, the wedge truck
+  const bay = (16 - 0.5) / 4;
+  const rides: Array<['highvan' | 'liftedtruck' | 'hypercar' | 'wedgetruck', number]> = [['highvan', 0], ['liftedtruck', 0], ['hypercar', 0], ['wedgetruck', 0]];
+  rides.forEach(([type, variant], i) => b.prop(type, 5 + 0.25 + bay * (i + 0.5), -25 - 4.4, 0, variant, H));
+  // the yard on top: a fire pit with benches, looking out over the lake
+  b.rbox('firepit', -7, -11, 1.8, 1.8, H, 0.45, 0);
+  for (const [x, z, ry] of [[-7, -13.6, Math.PI / 2], [-9.6, -11, 0], [-4.4, -11, 0]] as const) b.prop('bench', x, z, ry, 0, H);
+  b.loot(-7, -9.2, H);
+  b.loot(12, -9, H);
+  b.loot(T.x1 - 1.5, T.z0 + 1.5, H);
+  b.hotspot(2, -12);
+  b.hotspot(13, -15);
+  // pines on the slopes, boulders half sunk into them
+  const slope = (x: number, z: number) => {
+    const y = at(x, z);
+    return y > 0.6 && y < H - 0.6;
+  };
+  let trees = 0;
+  for (let k = 0; k < 400 && trees < 22; k++) {
+    const x = rng.range(-31, 36), z = rng.range(-51, 10);
+    if (!slope(x, z) || (x > 10 && x < 26 && z > -7)) continue;
+    b.prop('tree', x, z, rng.range(0, 6), rng.int(3), at(x, z));
+    trees++;
+  }
+  let rocks = 0;
+  for (let k = 0; k < 400 && rocks < 10; k++) {
+    const x = rng.range(-31, 36), z = rng.range(-51, 10);
+    if (!slope(x, z) || (x > 10 && x < 26 && z > -7)) continue;
+    const big = rng.chance(0.4);
+    b.prop(big ? 'boulder' : 'rock', x, z, rng.range(0, 6), rng.int(3), at(x, z) - (big ? 0.7 : 0.3));
+    rocks++;
+  }
+  b.loot(-25, -20, at(-25, -20));
 
-  // ---- the pool: coping round the edge (a step up), steps down at the east end, a diving board
-  const C = 0.45;
+  // ================================================================ the front yard: the pool
+  // coping round the edge (a step up), steps down at the east end, a diving board at the west
+  const C = 0.45, PZ = (POOL.z0 + POOL.z1) / 2;
   b.box('coping', POOL.x0 - C, POOL.x1 + C, POOL.z0 - C, POOL.z0, 0, 0.3);
   b.box('coping', POOL.x0 - C, POOL.x1 + C, POOL.z1, POOL.z1 + C, 0, 0.3);
   b.box('coping', POOL.x0 - C, POOL.x0, POOL.z0, POOL.z1, 0, 0.3);
   b.box('coping', POOL.x1, POOL.x1 + C, POOL.z0, POOL.z1, 0, 0.3);
   b.box('poolfloor', POOL.x0, POOL.x1, POOL.z0, POOL.z1, -2.6, POOL.floor);
-  for (let i = 0; i < 4; i++) b.box('poolstep', POOL.x1 - 2 + 0.5 * i, POOL.x1, -34, -30, POOL.floor, POOL.floor + 0.35 * (i + 1));
+  // five steps of 0.28 m (an easy step up), the last one level with the deck
+  for (let i = 0; i < 5; i++) b.box('poolstep', POOL.x1 - 2.25 + 0.45 * i, POOL.x1, PZ - 2, PZ + 2, POOL.floor, POOL.floor + (-POOL.floor / 5) * (i + 1));
   b.box('poolwater', POOL.x0, POOL.x1, POOL.z0, POOL.z1, POOL.floor, POOL.water, { col: 'none' });
-  b.box('lowwall', -12.4, -11.0, -32.7, -31.3, 0, 0.5, { color: 0xd9d6cf });
-  b.box('board', -11.6, -8.0, -32.35, -31.65, 0.5, 0.6);
-  for (const x of [-7, -4.6, 3.2, 5.6]) b.rbox('furn', x, -42, 0.7, 1.9, 0, 0.42, 0, { meta: { t: 'lounger' } });
-  b.prop('umbrella', -5.8, -43.4, 0, 1);
-  b.prop('umbrella', 4.4, -43.4, 0, 2);
+  b.box('lowwall', POOL.x0 - 3.4, POOL.x0 - 2.0, PZ - 0.7, PZ + 0.7, 0, 0.5, { color: 0xd9d6cf });
+  b.box('board', POOL.x0 - 2.6, POOL.x0 + 1.0, PZ - 0.35, PZ + 0.35, 0.5, 0.6);
+  for (const x of [-7, -4.6, -1.6, 0.8]) b.rbox('furn', x, 34, 0.7, 1.9, 0, 0.42, Math.PI, { meta: { t: 'lounger' } });
+  b.prop('umbrella', -5.8, 35.4, 0, 1);
+  b.prop('umbrella', -0.4, 35.4, 0, 2);
   // the cabana: a bar and a fridge, towels
-  b.shell({ id: 'cabana', x0: 11, x1: 17, z0: -46.5, z1: -40.5, h: 3.0, style: 'wood', color: 0x8a6440, openings: [{ side: 's', at: 14, w: 3.2, top: 2.5 }, { side: 'w', at: -43.5, w: 1.4, sill: 1.0, top: 2.2 }] });
-  b.box('counter', 11.6, 16.4, -46.0, -45.3, 0, 1.05);
-  b.loot(14, -43.2);
-  b.loot(-12, -36);
-  b.loot(0, -44.5);
-  b.hotspot(0, -44);
+  b.shell({ id: 'cabana', x0: 3.5, x1: 9.5, z0: 32, z1: 37, h: 3.0, style: 'wood', color: 0x8a6440, openings: [{ side: 'n', at: 6.5, w: 3.2, top: 2.5 }, { side: 'w', at: 34.5, w: 1.4, sill: 1.0, top: 2.2 }] });
+  b.box('counter', 4.1, 8.9, 36.3, 36.95, 0, 1.05);
+  b.loot(6.5, 34);
+  b.loot(-12, 18.5);
+  b.hotspot(-2, 32);
 
   // ================================================================ west: barn, horses, cows
   construct(b, { id: 'capsbarn', type: 'barn', x0: -77, x1: -61, z0: -49, z1: -31, facing: 'e' });
@@ -232,8 +288,5 @@ export function capsHouse(b: MapBuilder, rng: Rng): void {
   b.hotspot(58, 0);
   b.hotspot(60, 30);
 
-  // trees along Porch St behind the pool, the north fence
-  for (let x = -28; x <= 28; x += 8) if (Math.abs(x) > 4) b.prop('tree', x, -49.5, rng.range(0, 6), rng.int(3));
-  b.hotspot(0, 30);
-  b.label("CAP'S HOUSE", 0, 30);
+  b.label("CAP'S HOUSE", 2, -14);
 }

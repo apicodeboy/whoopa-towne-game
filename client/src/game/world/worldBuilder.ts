@@ -11,6 +11,8 @@ import { BoxBatch, type BoxOptions } from './boxBatch';
 import { crops, disposeFarmShapes, farmSolid, FARM_AREAS, orchardTree, tractor, type Draw } from './farm';
 import { FarmAnimals } from './farmAnimals';
 import { GeoBatch, trs } from './geoBatch';
+import { drawTerrain } from './terrainVisual';
+import { highVan, hypercar, liftedTruck, wedgeTruck } from './vehicles';
 import { SignAtlas } from './signAtlas';
 import { glowTexture, makeSignCanvas, makeTextures, svgTexture } from './textures';
 
@@ -310,6 +312,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     }
   }
   if (map.id === 'whoopa-towne') paintStreetMarkings();
+  // hills (the ground under the cabin at Cap's House)
+  if (map.terrain) drawTerrain(map.terrain, geo);
 
   // ================================================================== solids
   let solidIndex = 0;
@@ -396,7 +400,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
           box('smooth').add(spec, { color: s.color ?? 0x2f7a5a });
           break;
         }
-        // standing-seam metal (the barns, Cap's barndominium)
+        // standing-seam metal (the barns, Cap's cabin)
         if (s.style === 'metal' || s.style === 'panel') {
           box(s.style).add(spec, { color: s.color ?? 0x3a3d42, tile: 1.2 });
           break;
@@ -626,6 +630,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     faceted: std({ roughness: 0.95, flatShading: true }),
     smooth: std({ roughness: 0.7 }),
     glassDark: std({ roughness: 0.25, metalness: 0.5 }),
+    // vehicles: glossy paint, polished metal
+    carpaint: std({ roughness: 0.32, metalness: 0.35 }),
+    chrome: std({ roughness: 0.18, metalness: 0.85 }),
     lit: new THREE.MeshBasicMaterial({ vertexColors: true }),
     chain: std({ map: tex.chain, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.4 }),
     bars: std({ map: tex.bars, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.4 }),
@@ -2185,6 +2192,18 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       }
       case 'tractor':
         tractor(draw, p);
+        break;
+      case 'wedgetruck':
+        wedgeTruck(draw, p);
+        break;
+      case 'hypercar':
+        hypercar(draw, p);
+        break;
+      case 'liftedtruck':
+        liftedTruck(draw, p);
+        break;
+      case 'highvan':
+        highVan(draw, p);
         break;
       case 'tree': {
         if (p.variant >= 3) {

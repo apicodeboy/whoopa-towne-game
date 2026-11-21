@@ -498,7 +498,11 @@ const HEAD_MATS: Record<string, { brows: string; eyes: string; dark?: string }> 
   punk: { brows: 'Hair_Brown', eyes: 'Brown' },
 };
 const ASSET_HAIR: Record<string, [string, string]> = { spiky: ['hoodie', 'Hair'], ponytail: ['casual', 'Hair'], mohawk: ['punk', 'Pink'] };
-const HEIGHT_SCALE: Record<string, number> = { short: 0.95, average: 1, tall: 1.05 };
+/**
+ * Everyone stands the same height. (Looks saved with a height still carry it, but it no longer
+ * changes the character; the option stays in the look's wire code so old codes still decode.)
+ */
+const HEIGHT_SCALE: Record<string, number> = {};
 
 /** Fields that change the geometry (colors are painted per character and stay out of the key). */
 const COLOR_FIELDS = new Set(['skin', 'eyeColor', 'hairColor', 'facialHairColor', 'topColor', 'bottomColor', 'shoeColor', 'teeth', 'mouthProp', 'height']);
@@ -519,7 +523,7 @@ export function geometryKey(look: Readonly<Appearance>, expression = 'neutral'):
   return LOOK_FIELD_KEYS.filter((k) => !COLOR_FIELDS.has(k)).map((k) => look[k]).join('|') + `|${look.details.join(',')}|${expression}`
     + `|${look.backpack ?? 'none'}|${finishes(look).filter((x) => x !== undefined).join(',')}`
     // (the belt's color is paint: only whether there is one changes the mesh)
-    + `|${look.shoulders}|${look.headSize}|${look.mask}|${look.waistChain}|${look.faceMark}${look.face === 'black' ? 'd' : ''}|${look.belt === 'none' ? 0 : 1}|${look.legPrint}`;
+    + `|${look.shoulders}|${look.headSize}|${look.mask}|${look.waistChain}|${look.faceMark}|${look.belt === 'none' ? 0 : 1}|${look.legPrint}`;
 }
 
 export class LookBuilder {
@@ -550,8 +554,6 @@ export class LookBuilder {
   build(look: Readonly<Appearance>, expression = 'neutral'): Assembled | null {
     const lib = this.library();
     if (!lib?.ready) return null;
-    // the faceless head has no expressions
-    if (lib.rigFor(look.bodyType)?.id === 'ink') expression = 'neutral';
     const key = geometryKey(look, expression);
     const hit = this.cache.get(key);
     if (hit) {
@@ -570,7 +572,8 @@ export class LookBuilder {
     }
     this.cache.set(key, made);
     // geometry is small but there is no need to keep every look ever seen
-    while (this.cache.size > 40) {
+    // (room for a full battle royale lobby's looks, so nobody's body is rebuilt mid-match)
+    while (this.cache.size > 96) {
       const oldest = this.cache.keys().next().value!;
       this.cache.delete(oldest);
       // characters still using it keep their own references; GPU buffers go when they do
@@ -608,20 +611,25 @@ export class LookBuilder {
     const srcHead = this.sourceHead(lib, src);
     const skinP = lib.piece(src, 'Head', 'Skin')!;
     // (the older CC0 heads carry soft masks: lips, and darker skin in the nostrils and ears)
+    // (the Urban Ink head too: lips, nostrils and inner ears)
     const skinMask = skinP.mask;
     const skin = fromPiece(skinP, rig, 'head', skinMask
       ? (i) => (skinMask[i * 2 + 1] > skinMask[i * 2] ? { slot: SLOT.SKIN, slotB: SLOT.SKIN_DARK, mix: skinMask[i * 2 + 1] } : { slot: SLOT.SKIN, slotB: SLOT.LIPS, mix: skinMask[i * 2] })
       : { slot: SLOT.SKIN });
     const headParts: Work[] = [skin];
-    // the faceless head: a blank plate over the front of it, in its own color
-    const plateP = ink ? lib.piece('ink', 'Head', 'Face') : null;
-    if (plateP) headParts.push(fromPiece(plateP, rig, 'faceplate', { slot: SLOT.FACE }));
     const darkP = mats.dark ? lib.piece(src, 'Head', mats.dark) : null;
     if (darkP) headParts.push(fromPiece(darkP, rig, 'head-dark', { slot: SLOT.SKIN_DARK }));
-    const eyes = fromPiece(lib.piece(src, 'Head', mats.eyes)!, rig, 'eyes', { slot: SLOT.IRIS });
+    let eyes = fromPiece(lib.piece(src, 'Head', mats.eyes)!, rig, 'eyes', { slot: SLOT.IRIS });
     const irisCount = eyes.pos.length / 3;
-    // (on the faceless head the eye and brow pieces are never drawn: they only mark where the
-    // eye line is, so hair, hats and glasses can be fitted)
+    if (ink) {
+      // whole eyeballs: the iris first (the head is measured on it), then the white and the pupil
+      const sclera = lib.piece('ink', 'Head', 'Sclera'), pupil = lib.piece('ink', 'Head', 'Pupil');
+      const parts = [eyes];
+      if (sclera) parts.push(fromPiece(sclera, rig, 'eyes', { slot: SLOT.FIXED, color: lin(0xf2eee6) }));
+      if (pupil) parts.push(fromPiece(pupil, rig, 'eyes', { slot: SLOT.FIXED, color: lin(0x070707) }));
+      eyes = concatWorks('eyes', parts);
+      setPbr(eyes, 0.05, 0.25);
+    }
     const brows = fromPiece(lib.piece(src, 'Head', mats.brows)!, rig, 'brows', { slot: SLOT.BROW });
 
     if (srcHead) {
@@ -635,7 +643,7 @@ export class LookBuilder {
         }
       }
       const moved = (q: V3) => shapeHead(q.clone(), 1, f, look.headShape, look.faceShape);
-      if (!ink) tweakFeatures(look, srcHead, moved, headParts, eyes, brows);
+      tweakFeatures(look, srcHead, moved, headParts, eyes, brows);
       const hs = HEAD_SCALE[look.headSize];
       if (hs) {
         // about the base of the skull, so the neck stays put and the head grows up and out
@@ -653,13 +661,10 @@ export class LookBuilder {
     mark('head pieces + shape');
     // measured on the neutral face, so every expression builds exactly the same pieces
     const h = new HeadRig(surfaceOf(headParts, rig), eyes.pos.subarray(0, irisCount * 3), brows.pos);
-    if (ink) blankLandmarks(h);
+    if (ink) inkChin(h, headParts);
     mark('head measure');
-    if (ink) works.push(...headParts);
-    else {
-      applyExpression(expr, h, eyes, brows);
-      works.push(...headParts, eyes, brows);
-    }
+    applyExpression(expr, h, eyes, brows);
+    works.push(...headParts, eyes, brows);
 
     // an open skull (the punk model's hair covered it): close it with skin
     const cap = new ProcMesh({ bone: 'Head' });
@@ -694,22 +699,22 @@ export class LookBuilder {
     mark('hair + hat');
     // ---------------- face pieces
     const bits = new ProcMesh({ bone: 'Head' });
-    if (ink) {
-      // a blank face: nothing on it but a faint line for the mouth and, if picked, a mark
+    const grill = look.mouthAcc.endsWith('grill') ? look.mouthAcc.replace('grill', '') : 'none';
+    const mouth = new ProcMesh({ bone: 'Head' });
+    // Urban Ink heads have sculpted lips: the procedural mouth is only for grills
+    if (!ink || grill !== 'none') buildMouth(h, mouth, look.lips, expr, grill);
+    pushProc(works, mouth, rig, 'mouth', []);
+    const beard = new ProcMesh({ nearest: true, fallback: 'Head' });
+    buildFacialHair(look.facialHair, h, beard, look.lips);
+    pushProc(works, beard, rig, 'beard', headParts);
+    buildLipPiercing(look.mouthAcc, h, bits, look.lips);
+    buildFacePiercing(look.faceAcc, h, bits);
+    buildDetails(look.details, h, bits);
+    // a face tattoo, if picked (a star or cross on the forehead, teardrops, a lightning bolt)
+    if (look.faceMark !== 'none') {
       const marks = new ProcMesh({ bone: 'Head' });
-      buildFaceMarks(look.faceMark, h, marks, look.face === 'black');
+      buildFaceMarks(look.faceMark, h, marks);
       pushProc(works, marks, rig, 'facemark', []);
-    } else {
-      const grill = look.mouthAcc.endsWith('grill') ? look.mouthAcc.replace('grill', '') : 'none';
-      const mouth = new ProcMesh({ bone: 'Head' });
-      buildMouth(h, mouth, look.lips, expr, grill);
-      pushProc(works, mouth, rig, 'mouth', []);
-      const beard = new ProcMesh({ nearest: true, fallback: 'Head' });
-      buildFacialHair(look.facialHair, h, beard, look.lips);
-      pushProc(works, beard, rig, 'beard', headParts);
-      buildLipPiercing(look.mouthAcc, h, bits, look.lips);
-      buildFacePiercing(look.faceAcc, h, bits);
-      buildDetails(look.details, h, bits);
     }
     buildEarrings(look.earrings, h, bits);
     buildGlasses(look.glasses, h, bits);
@@ -971,7 +976,7 @@ function paintGloves(body: Work[], rig: Rig, fingerless = false): void {
 
 /** Ink line width per working piece (1 = the full outline). */
 const INK_WIDTH: Record<string, number> = {
-  fine: 0.12, head: 0.75, faceplate: 0.55, facemark: 0, eyes: 0, brows: 0, mouth: 0.15, face: 0.15, beard: 0.3, skullcap: 0.2,
+  fine: 0.12, head: 0.45, facemark: 0, eyes: 0, brows: 0, mouth: 0.15, face: 0.15, beard: 0.3, skullcap: 0.2,
   hair: 0.7, 'hand-skin': 0.45, 'top-trim': 0.25, laces: 0.25, jewelry: 0.3, mask: 0.4, print: 0, belt: 0.45, studs: 0.12, waistband: 0.4,
 };
 
@@ -1085,17 +1090,20 @@ const TOP_HEM: Record<string, number> = { tee: 0.875, oversized: 0.875, tank: 0.
 const LONG_PANTS = new Set(['baggyjeans', 'jeans', 'slimjeans', 'cargo']);
 
 /**
- * Landmarks on the faceless head. It has no nose, lips or chin crease to find, so they are
- * placed by proportion from the eye line (scaled with the head, whatever its shape and size).
+ * The chin on a smooth Urban Ink head: HeadRig finds it by a sudden step in the face profile,
+ * which a sculpted (blended) chin does not have. Here: the lowest point down the middle of the
+ * face that still stands out in front, near the lips' depth.
  */
-function blankLandmarks(h: HeadRig): void {
-  const eyeY = h.eyeY, cx = h.center.x;
-  const k = Math.max(0.6, (h.crownY - eyeY) / 0.116);
-  const front = (y: number): V3 => h.project(v3(cx, y, h.center.z + 0.2));
-  h.chinY = eyeY - 0.12 * k;
-  h.noseBaseY = eyeY - 0.046 * k;
-  h.noseTip = front(eyeY - 0.03 * k);
-  h.mouth = front(eyeY - 0.074 * k);
+function inkChin(h: HeadRig, skins: Work[]): void {
+  const cx = h.mouth.x, zMin = h.mouth.z - 0.032;
+  let low = h.chinY;
+  for (const w of skins) {
+    for (let i = 0; i < w.pos.length / 3; i++) {
+      const x = w.pos[i * 3], y = w.pos[i * 3 + 1], z = w.pos[i * 3 + 2];
+      if (Math.abs(x - cx) < 0.014 && z > zMin && y < h.mouth.y && y < low) low = y;
+    }
+  }
+  h.chinY = Math.min(h.chinY, low + 0.004);
 }
 
 /**

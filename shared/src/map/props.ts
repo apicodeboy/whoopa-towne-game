@@ -85,6 +85,11 @@ export const PROP_BOXES: Record<PropType, LocalBox[]> = {
   umbrella: [lb(0, 0, 0, 0.12, 2.4, 0.12, 'pole')],
   boat: [lb(0, 0, 0, 2.2, 1.0, 5.6, 'hull')],
   tractor: [lb(0, 0, 0, 2.1, 1.6, 3.7, 'body'), lb(0, 1.6, -0.55, 1.3, 1.15, 1.4, 'cab')],
+  // the garage at Cap's House
+  wedgetruck: [lb(0, 0, 0, 2.2, 1.85, 5.7, 'body')],
+  hypercar: [lb(0, 0, 0, 2.05, 1.15, 4.55, 'body')],
+  liftedtruck: [lb(0, 0, 0, 2.25, 2.55, 6.0, 'body')],
+  highvan: [lb(0, 0, 0, 2.02, 2.75, 6.0, 'body')],
 };
 
 /** Expands a prop into world-space collision solids. */
