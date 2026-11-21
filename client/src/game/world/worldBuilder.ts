@@ -6,7 +6,7 @@ import type { ScoreGame, ScoresMsg } from '@shared/protocol';
 import { solidQuat } from '@shared/map/types';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { StaticModelBatch, type Assets } from '../assets';
-import { LIGHTING } from '../lighting';
+import { DAY, LIGHTING, NIGHT, lightUniforms, live as liveLight } from '../lighting';
 import { BoxBatch, type BoxOptions } from './boxBatch';
 import { crops, disposeFarmShapes, farmSolid, FARM_AREAS, orchardTree, tractor, type Draw } from './farm';
 import { FarmAnimals } from './farmAnimals';
@@ -40,7 +40,30 @@ export interface WorldVisual {
   setScores(msg: ScoresMsg | null): void;
   /** `camera` lets the sky follow the viewer. */
   update(dt: number, time: number, camera?: THREE.Vector3): void;
+  /**
+   * Time of day (0 day .. 1 night, from `live.night`): the sky, sun and moon, stars, clouds,
+   * lamp glow and lit windows follow it. Cheap; only does work when the value changed.
+   */
+  setNight(k: number): void;
   dispose(): void;
+}
+
+/**
+ * A material that glows after dark: by day it is its own color (glass, a grey lamp head); as
+ * night falls its vertex color (the warm light of a window, a lamp) comes up as emitted light,
+ * following the shared night uniform. No recompiles, no per-window work.
+ */
+function nightGlow<M extends THREE.MeshStandardMaterial>(m: M): M {
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uNight = lightUniforms.night;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uNight;')
+      // the vertex color is the night light, not a tint of the day color
+      .replace('#include <color_fragment>', '')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += vColor.rgb * uNight * 1.15;');
+  };
+  m.customProgramCacheKey = () => 'night-glow';
+  return m;
 }
 
 /** Billboard ads for the local spots: [title, line under it, background top, bottom, title color]. */
@@ -634,13 +657,16 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     carpaint: std({ roughness: 0.32, metalness: 0.35 }),
     chrome: std({ roughness: 0.18, metalness: 0.85 }),
     lit: new THREE.MeshBasicMaterial({ vertexColors: true }),
+    // windows and lamp heads that light up after dark: glass / grey by day, glowing at night
+    nightlit: nightGlow(std({ roughness: 0.25, metalness: 0.5, color: DAY.windowGlass, vertexColors: true })),
+    nightlamp: nightGlow(std({ roughness: 0.8, color: DAY.lampHead, vertexColors: true })),
     chain: std({ map: tex.chain, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.4 }),
     bars: std({ map: tex.bars, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.4 }),
     glass: std({ transparent: true, opacity: 0.3, roughness: 0.1, metalness: 0.2, depthWrite: false }),
   };
   for (const m of Object.values(materials)) disposables.push(m);
 
-  const noShadowCast = new Set(['asphalt', 'paint', 'lit', 'chain', 'bars', 'glass', 'glassDark', 'poolwater']);
+  const noShadowCast = new Set(['asphalt', 'paint', 'lit', 'chain', 'bars', 'glass', 'glassDark', 'poolwater', 'nightlit', 'nightlamp']);
   /** Interior chunks: drawn only within INTERIOR_RANGE of the camera. */
   const chunks = new Map<string, { group: THREE.Group; x: number; z: number }>();
   const addMesh = (g: THREE.BufferGeometry, fullKey: string): void => {
@@ -702,13 +728,15 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     group.add(mesh);
     disposables.push(mesh.geometry);
   }
-  if (glows.length > 0 && LIGHTING.poolOpacity <= 0) for (const part of glows) part.dispose();
-  else if (glows.length > 0) {
+  // the lamps' light pools and cones are always built (the time of day fades them in and out)
+  let poolMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> | null = null;
+  let coneMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> | null = null;
+  if (glows.length > 0) {
     const g = mergeGeometries(glows, false);
     for (const part of glows) part.dispose();
     const t = glowTexture();
     const mat = new THREE.MeshBasicMaterial({
-      map: t, transparent: true, opacity: LIGHTING.poolOpacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      map: t, transparent: true, opacity: liveLight.poolOpacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
     });
     const mesh = new THREE.Mesh(g, mat);
@@ -716,10 +744,10 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     mesh.matrixAutoUpdate = false;
     group.add(mesh);
     disposables.push(g, t, mat);
+    poolMesh = mesh;
   }
 
-  if (cones.length > 0 && LIGHTING.coneOpacity <= 0) for (const part of cones) part.dispose();
-  else if (cones.length > 0) {
+  if (cones.length > 0) {
     const g = mergeGeometries(cones, false);
     for (const part of cones) part.dispose();
     // additive, so black (the bottom of each cone) adds nothing: the light fades toward the ground
@@ -729,10 +757,12 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     mesh.matrixAutoUpdate = false;
     group.add(mesh);
     disposables.push(g, mat);
+    coneMesh = mesh;
   }
 
   // ================================================================== sky (+ the sea, where there is one)
-  const sky = makeSky();
+  const skyDome = makeSky();
+  const sky = skyDome.mesh;
   group.add(sky);
 
   // ================================================================== the farm animals (and the windmill turning)
@@ -771,7 +801,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     };
   });
 
-  return {
+  const visual: WorldVisual = {
     group,
     zones,
     lights,
@@ -780,6 +810,18 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       live.down = msg === null;
       if (msg) live.games = msg.games;
       live.page = -1; // redraw on the next frame
+    },
+    setNight(k: number) {
+      skyDome.setNight(k);
+      // (the window and lamp-head glow follows the shared uniform by itself)
+      if (poolMesh) {
+        poolMesh.material.opacity = NIGHT.poolOpacity * k;
+        poolMesh.visible = k > 0.002;
+      }
+      if (coneMesh) {
+        coneMesh.material.color.setScalar(k);
+        coneMesh.visible = k > 0.002;
+      }
     },
     update(dt: number, time: number, camera?: THREE.Vector3) {
       if (camera) sky.position.copy(camera);
@@ -807,6 +849,9 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       group.removeFromParent();
     },
   };
+  // (start at whatever time of day it is now)
+  visual.setNight(liveLight.night);
+  return visual;
 
   // =====================================================================================
   // helpers (hoisted function declarations)
@@ -1462,7 +1507,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
           continue;
         }
         if (r < 0.12) continue; // a bare stretch of wall here and there
-        const lit = r > 1 - LIGHTING.litWindows;
+        // (the windows that light up after dark: glass by day)
+        const lit = r > 1 - NIGHT.litWindows;
         const boarded = !lit && r < 0.2;
         pane(f, a, base + fy + wh / 2, ww, wh, boarded ? 0x6b5a45 : lit ? 0xffd592 : LIGHTING.windowGlass, lit, 0xd2cec4);
       }
@@ -1483,7 +1529,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const inner = f.ax === 'z'
       ? { x: along, y, z: at2, sx: w, sy: h, sz: 0.02 }
       : { x: at2, y, z: along, sx: 0.02, sy: h, sz: w };
-    box(lit ? 'lit' : 'glassDark').add(inner, { color });
+    box(lit ? 'nightlit' : 'glassDark').add(inner, { color });
   }
 
   function awning(groupId: string, color: number, side: 'n' | 's' | 'e' | 'w'): void {
@@ -1520,8 +1566,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     const glass = s.style === 'glass';
     for (let y = 1.2, fl = 0; y + 1.6 < h - 0.8; y += 3.4, fl++) {
       const bh = glass ? 2.5 : 1.5;
-      const lit = hash(seed * 13 + fl) > 1 - LIGHTING.litWindows * 0.6;
-      const key = lit ? 'lit' : 'glassDark';
+      const lit = hash(seed * 13 + fl) > 1 - NIGHT.litWindows * 0.6;
+      const key = lit ? 'nightlit' : 'glassDark';
       const color = lit ? 0xffd592 : glass ? 0x3d5a73 : LIGHTING.windowGlass;
       const yc = base + y + bh / 2;
       const inset = 0.5;
@@ -1781,41 +1827,48 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       const w = 10 + hash(i + 130) * 14, d = 10 + hash(i + 170) * 14;
       const h = 16 + hash(i + 210) * 34;
       box('flat').add({ x, y: h / 2, z, sx: w, sy: h, sz: d }, { color: [0x4b5362, 0x565c68, 0x434a57, 0x5e6470][i % 4], skipBottom: true });
-      // a scatter of lit windows on the side facing the map (none by day)
+      // a scatter of windows on the side facing the map (lit after dark)
       const fx = Math.abs(x) > Math.abs(z);
-      for (let k = 0; k < (LIGHTING.skylineWindows > 0 ? 9 : 0); k++) {
+      for (let k = 0; k < 9; k++) {
         if (hash(i * 13 + k) < 0.45) continue;
         const u = (hash(i * 29 + k) - 0.5) * (fx ? d : w) * 0.8;
         const y = 4 + hash(i * 41 + k) * (h - 7);
         const spec = fx
           ? { x: x - Math.sign(x) * (w / 2 + 0.05), y, z: z + u, sx: 0.05, sy: 1.3, sz: 1.1 }
           : { x: x + u, y, z: z - Math.sign(z) * (d / 2 + 0.05), sx: 1.1, sy: 1.3, sz: 0.05 };
-        box('lit').add(spec, { color: shade(0xffd592, LIGHTING.skylineWindows) });
+        box('nightlit').add(spec, { color: shade(0xffd592, NIGHT.skylineWindows) });
       }
     }
   }
 
   /**
-   * Sky that follows the camera: a gradient dome with a haze low on the horizon, and the sun
-   * by day or stars and the moon by night. Everything here is drawn first and without depth,
-   * so the town simply paints over it.
+   * Sky that follows the camera: a gradient dome with a haze low on the horizon, the sun and
+   * clouds by day, stars and the moon by night. Everything here is drawn first and without
+   * depth, so the town simply paints over it. `setNight` moves it between day and night: the
+   * gradient blends, the sun sinks and fades while the moon rises, the stars come out and the
+   * clouds thin away.
    */
-  function makeSky(): THREE.Mesh {
+  function makeSky(): { mesh: THREE.Mesh; setNight(k: number): void } {
     const g = new THREE.SphereGeometry(100, 48, 24);
-    const top = new THREE.Color(LIGHTING.sky.top), mid = new THREE.Color(LIGHTING.sky.mid), low = new THREE.Color(LIGHTING.sky.horizon);
-    const glow = new THREE.Color(LIGHTING.cityGlow);
-    const colors: number[] = [];
     const p = g.attributes.position;
-    const c = new THREE.Color();
-    for (let i = 0; i < p.count; i++) {
-      const t = Math.max(0, p.getY(i) / 100);
-      if (t < 0.22) c.copy(low).lerp(mid, t / 0.22);
-      else c.copy(mid).lerp(top, Math.min(1, (t - 0.22) / 0.6));
-      // haze (city lights at night): a warm band hugging the horizon
-      c.lerp(glow, Math.max(0, 1 - t / 0.38) ** 1.6 * LIGHTING.cityGlowAmount);
-      colors.push(c.r, c.g, c.b);
-    }
-    g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const gradient = (preset: typeof DAY): Float32Array => {
+      const top = new THREE.Color(preset.sky.top), mid = new THREE.Color(preset.sky.mid), low = new THREE.Color(preset.sky.horizon);
+      const glow = new THREE.Color(preset.cityGlow);
+      const out = new Float32Array(p.count * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < p.count; i++) {
+        const t = Math.max(0, p.getY(i) / 100);
+        if (t < 0.22) c.copy(low).lerp(mid, t / 0.22);
+        else c.copy(mid).lerp(top, Math.min(1, (t - 0.22) / 0.6));
+        // haze (city lights at night): a warm band hugging the horizon
+        c.lerp(glow, Math.max(0, 1 - t / 0.38) ** 1.6 * preset.cityGlowAmount);
+        out.set([c.r, c.g, c.b], i * 3);
+      }
+      return out;
+    };
+    const dayCols = gradient(DAY), nightCols = gradient(NIGHT);
+    const colors = new THREE.Float32BufferAttribute(new Float32Array(p.count * 3), 3);
+    g.setAttribute('color', colors);
     const m = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false });
     const mesh = new THREE.Mesh(g, m);
     mesh.renderOrder = -100;
@@ -1823,85 +1876,105 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     disposables.push(g, m);
 
     // stars: tiny additive points above the city glow (opaque pass, so buildings draw over them)
-    if (LIGHTING.stars > 0) {
-      const pos: number[] = [];
-      const col: number[] = [];
-      for (let i = 0; i < LIGHTING.stars; i++) {
-        const y = 0.1 + 0.9 * Math.sqrt(hash(i * 3 + 1));
-        const a = hash(i * 3 + 2) * Math.PI * 2;
-        const r = Math.sqrt(1 - y * y);
-        pos.push(Math.cos(a) * r * 95, y * 95, Math.sin(a) * r * 95);
-        // fainter near the horizon, a few bright ones, a hint of color
-        const b = (0.25 + 0.75 * hash(i * 3 + 3) ** 3) * Math.min(1, (y - 0.1) / 0.25);
-        const warm = hash(i * 7 + 5);
-        col.push(b * (0.85 + warm * 0.15), b * 0.9, b * (1 - warm * 0.15));
-      }
-      const sg = new THREE.BufferGeometry();
-      sg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      sg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-      const sm = new THREE.PointsMaterial({
-        size: 1.8, sizeAttenuation: false, vertexColors: true, fog: false,
-        depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
-      });
-      const stars = new THREE.Points(sg, sm);
-      stars.renderOrder = -99;
-      stars.frustumCulled = false;
-      mesh.add(stars);
-      disposables.push(sg, sm);
+    const pos: number[] = [];
+    const col: number[] = [];
+    for (let i = 0; i < NIGHT.stars; i++) {
+      const y = 0.1 + 0.9 * Math.sqrt(hash(i * 3 + 1));
+      const a = hash(i * 3 + 2) * Math.PI * 2;
+      const r = Math.sqrt(1 - y * y);
+      pos.push(Math.cos(a) * r * 95, y * 95, Math.sin(a) * r * 95);
+      // fainter near the horizon, a few bright ones, a hint of color
+      const b = (0.25 + 0.75 * hash(i * 3 + 3) ** 3) * Math.min(1, (y - 0.1) / 0.25);
+      const warm = hash(i * 7 + 5);
+      col.push(b * (0.85 + warm * 0.15), b * 0.9, b * (1 - warm * 0.15));
     }
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    sg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const sm = new THREE.PointsMaterial({
+      size: 1.8, sizeAttenuation: false, vertexColors: true, fog: false,
+      depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const stars = new THREE.Points(sg, sm);
+    stars.renderOrder = -99;
+    stars.frustumCulled = false;
+    mesh.add(stars);
+    disposables.push(sg, sm);
 
-    // the sun or moon, where the shadow-casting light comes from. The light itself is high
+    // the sun and the moon, where the shadow-casting light comes from. The light itself is high
     // (short shadows, readable streets); the disc is drawn lower in the same direction so you
     // actually see it in the sky from the third-person camera.
     // (all of it is drawn in the opaque pass, before the town, so buildings always cover it:
-    // the halo adds light, the sun disc and the clouds are cut-outs)
-    const day = LIGHTING.sun.body === 'sun';
-    const [mx, , mz] = LIGHTING.sun.dir;
-    const az = Math.atan2(mx, mz);
-    const elev = day ? 0.36 : 0.5; // radians above the horizon
-    const at = new THREE.Vector3(Math.sin(az) * Math.cos(elev) * 90, Math.sin(elev) * 90, Math.cos(az) * Math.cos(elev) * 90);
+    // the halo and the moon add light; the sun disc and the clouds blend over the sky, which
+    // lets them fade, without leaving the opaque pass)
+    const over = { blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor } as const;
     const skySprite = (map: THREE.Texture, size: number, order: number, additive: boolean) => {
       const m = new THREE.SpriteMaterial({
         map, fog: false, depthTest: false, depthWrite: false, transparent: false,
-        blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, alphaTest: additive ? 0 : 0.5,
+        ...(additive ? { blending: THREE.AdditiveBlending } : over), alphaTest: additive ? 0 : 0.02,
       });
       const sp = new THREE.Sprite(m);
-      sp.position.copy(at);
       sp.scale.setScalar(size);
       sp.renderOrder = order;
       sp.frustumCulled = false;
       mesh.add(sp);
       disposables.push(map, m);
+      return sp;
     };
-    if (day) {
-      skySprite(sunHaloTexture(), 46, -99, true);
-      skySprite(sunTexture(), 26, -98, false);
-    } else {
-      skySprite(moonTexture(), 16, -98, true);
-    }
+    const halo = skySprite(sunHaloTexture(), 46, -99, true);
+    const sun = skySprite(sunTexture(), 26, -98, false);
+    const moon = skySprite(moonTexture(), 16, -98, true);
+    const place = (sp: THREE.Sprite, dir: readonly number[], elev: number) => {
+      const az = Math.atan2(dir[0], dir[2]);
+      sp.position.set(Math.sin(az) * Math.cos(elev) * 90, Math.sin(elev) * 90, Math.cos(az) * Math.cos(elev) * 90);
+    };
 
     // puffy cartoon clouds around the horizon (in front of the sun, behind the town)
-    if (day) {
-      const clouds = new THREE.Group();
-      clouds.name = 'clouds';
-      const texes = [0, 1, 2, 3].map((v) => cloudTexture(v));
-      const mats = texes.map((t) => new THREE.SpriteMaterial({ map: t, fog: false, depthTest: false, depthWrite: false, transparent: false, alphaTest: 0.5 }));
-      disposables.push(...texes, ...mats);
-      for (let i = 0; i < 26; i++) {
-        const a = (i / 26) * Math.PI * 2 + hash(i * 5 + 11) * 0.22;
-        const e = 0.07 + hash(i * 5 + 12) ** 1.6 * 0.42;
-        const r = 88;
-        const sp = new THREE.Sprite(mats[i % mats.length]);
-        sp.position.set(Math.sin(a) * Math.cos(e) * r, Math.sin(e) * r, Math.cos(a) * Math.cos(e) * r);
-        const w = 20 + hash(i * 5 + 13) * 22;
-        sp.scale.set(w, w * 0.42, 1);
-        sp.renderOrder = -97;
-        sp.frustumCulled = false;
-        clouds.add(sp);
-      }
-      mesh.add(clouds);
+    const clouds = new THREE.Group();
+    clouds.name = 'clouds';
+    const texes = [0, 1, 2, 3].map((v) => cloudTexture(v));
+    const cloudMats = texes.map((t) => new THREE.SpriteMaterial({ map: t, fog: false, depthTest: false, depthWrite: false, transparent: false, alphaTest: 0.02, ...over }));
+    disposables.push(...texes, ...cloudMats);
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2 + hash(i * 5 + 11) * 0.22;
+      const e = 0.07 + hash(i * 5 + 12) ** 1.6 * 0.42;
+      const r = 88;
+      const sp = new THREE.Sprite(cloudMats[i % cloudMats.length]);
+      sp.position.set(Math.sin(a) * Math.cos(e) * r, Math.sin(e) * r, Math.cos(a) * Math.cos(e) * r);
+      const w = 20 + hash(i * 5 + 13) * 22;
+      sp.scale.set(w, w * 0.42, 1);
+      sp.renderOrder = -97;
+      sp.frustumCulled = false;
+      clouds.add(sp);
     }
-    return mesh;
+    mesh.add(clouds);
+
+    let shown = -1;
+    const setNight = (k: number) => {
+      if (k === shown) return;
+      shown = k;
+      const arr = colors.array as Float32Array;
+      for (let i = 0; i < arr.length; i++) arr[i] = dayCols[i] + (nightCols[i] - dayCols[i]) * k;
+      colors.needsUpdate = true;
+      // the sun sinks toward the horizon as it fades; the moon climbs as it brightens
+      const sunK = 1 - Math.min(1, k * 1.15);
+      place(halo, DAY.sun.dir, 0.36 - 0.3 * k);
+      place(sun, DAY.sun.dir, 0.36 - 0.3 * k);
+      halo.material.opacity = sunK;
+      sun.material.opacity = sunK;
+      halo.visible = sun.visible = sunK > 0.002;
+      place(moon, NIGHT.sun.dir, 0.24 + 0.26 * k);
+      const moonK = Math.max(0, (k - 0.25) / 0.75);
+      moon.material.opacity = moonK;
+      moon.visible = moonK > 0.002;
+      sm.color.setScalar(Math.max(0, (k - 0.35) / 0.65));
+      stars.visible = k > 0.35;
+      const cloudK = 1 - Math.min(1, k * 1.4);
+      for (const cm of cloudMats) cm.opacity = cloudK;
+      clouds.visible = cloudK > 0.002;
+    };
+    setNight(liveLight.night);
+    return { mesh, setNight };
   }
 
   /** A puffy cartoon cloud: white lumps on a flat bottom, a soft grey belly, a thin ink rim. */
@@ -1958,10 +2031,10 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     g.deleteAttribute('normal');
     const pos = g.attributes.position;
     const col = new Float32Array(pos.count * 3);
-    const c = new THREE.Color(LIGHTING.street.color);
+    const c = new THREE.Color(NIGHT.street.color);
     for (let i = 0; i < pos.count; i++) {
       const t = (pos.getY(i) - groundY - 0.1) / h; // 0 at the ground, 1 at the lamp
-      const k = LIGHTING.coneOpacity * t ** 1.7;
+      const k = NIGHT.coneOpacity * t ** 1.7;
       col[i * 3] = c.r * k;
       col[i * 3 + 1] = c.g * k;
       col[i * 3 + 2] = c.b * k;
@@ -2230,7 +2303,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
         // the arm reaches toward the middle of the map
         const dir = p.x > 0 ? -1 : 1;
         box('flat').add({ x: p.x + dir * 0.75, y: p.y + 6.1, z: p.z, sx: 1.6, sy: 0.08, sz: 0.08 }, { color: 0x2e3238 });
-        box(LIGHTING.street.intensity > 0 ? 'lit' : 'flat').add({ x: p.x + dir * 1.35, y: p.y + 6.0, z: p.z, sx: 0.6, sy: 0.1, sz: 0.3 }, { color: LIGHTING.lampHead });
+        box('nightlamp').add({ x: p.x + dir * 1.35, y: p.y + 6.0, z: p.z, sx: 0.6, sy: 0.1, sz: 0.3 }, { color: NIGHT.lampHead });
         box('flat').add({ x: p.x + dir * 1.35, y: p.y + 6.08, z: p.z, sx: 0.7, sy: 0.08, sz: 0.36 }, { color: 0x2e3238 });
         const glow = new THREE.PlaneGeometry(11, 11);
         glow.rotateX(-Math.PI / 2);

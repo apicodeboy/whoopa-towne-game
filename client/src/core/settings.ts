@@ -37,6 +37,12 @@ export interface Settings {
   showFps: boolean;
   /** Controller vibration on hits. */
   vibration: boolean;
+  /** The minimap turns with you (your view always points up) instead of keeping north up. */
+  minimapRotate: boolean;
+  /** Bloom, color grading and the rest of the finishing passes (Medium and High quality). */
+  postFx: boolean;
+  /** Screen-space ambient occlusion (High quality only; it costs a second pass over the scene). */
+  ambientOcclusion: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -59,6 +65,9 @@ export const DEFAULT_SETTINGS: Settings = {
   rightShoulder: true,
   showFps: false,
   vibration: true,
+  minimapRotate: false,
+  postFx: true,
+  ambientOcclusion: false,
 };
 
 const RANGES: Partial<Record<keyof Settings, [number, number]>> = {

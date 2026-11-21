@@ -389,6 +389,8 @@ export class App {
   // ------------------------------------------------------------------ state
   private setState(state: AppState): void {
     this.state = state;
+    // (the menu backdrop gets a gentle depth of field; a match never does)
+    this.stage?.gfx.setMenuMode(state !== 'playing');
     this.menu.show(state === 'menu');
     this.lobbyScreen.show(state === 'lobby');
     if (state !== 'playing') {

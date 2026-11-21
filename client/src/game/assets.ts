@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { crewColorHex, type TeamId } from '@shared/config/crews';
-import { LIGHTING } from './lighting';
+import { lightUniforms } from './lighting';
 
 /** A run of vertices: [first vertex, count]. */
 export type VertexRange = [number, number];
@@ -107,10 +107,11 @@ const FLAT_MATERIAL = new THREE.MeshStandardMaterial({ name: 'flat', vertexColor
 const CHARACTER_MATERIAL = new THREE.MeshStandardMaterial({ name: 'character', vertexColors: true, roughness: 0.8, metalness: 0.05 });
 // a touch of self-light (proportional to each part's own color) so players read in the dark
 CHARACTER_MATERIAL.onBeforeCompile = (shader) => {
-  shader.fragmentShader = shader.fragmentShader.replace(
-    '#include <emissivemap_fragment>',
-    `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * ${LIGHTING.characterGlow.toFixed(3)};`,
-  );
+  // (how much follows the time of day: a shared uniform)
+  shader.uniforms.uCharGlow = lightUniforms.charGlow;
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uCharGlow;')
+    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * uCharGlow;');
 };
 /** One material per shared texture atlas (see ModelSpec.atlas). */
 const atlasMaterials = new Map<string, THREE.Material>();

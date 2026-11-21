@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BOTTOM_COLORS, DEFAULT_APPEARANCE, LOOK_FIELD_KEYS, SHOE_COLORS, TOP_COLORS, type Appearance, type LookOption } from '@shared/config/appearance';
 import type { CharacterTemplate } from '../../assets';
-import { LIGHTING } from '../../lighting';
+import { lightUniforms } from '../../lighting';
 import { buildDetails, buildEarrings, buildFaceMarks, buildFacePiercing, buildFacialHair, buildGlasses, buildLipPiercing, buildMouth } from './face';
 import { buildHair, transferHair, tuckHair } from './hair';
 import { HeadRig, shapeHead, type HeadSurface } from './headRig';
@@ -69,8 +69,10 @@ LOOK_MATERIAL.onBeforeCompile = (shader) => {
     .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvPbr = pbr;\n\tvAo = ao;\n\tvPrintUv = printUv;');
   // prints (the graphic on a pant leg) are laid over the cloth's own color from one shared atlas
   shader.uniforms.printMap = { value: printAtlas() };
+  // (the self-light follows the time of day: a shared uniform)
+  shader.uniforms.uCharGlow = lightUniforms.charGlow;
   let f = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying vec2 vPbr;\nvarying float vAo;\nvarying vec2 vPrintUv;\nuniform sampler2D printMap;')
+    .replace('#include <common>', '#include <common>\nvarying vec2 vPbr;\nvarying float vAo;\nvarying vec2 vPrintUv;\nuniform sampler2D printMap;\nuniform float uCharGlow;')
     .replace(
       '#include <color_fragment>',
       `#include <color_fragment>
@@ -122,7 +124,7 @@ LOOK_MATERIAL.onBeforeCompile = (shader) => {
     '#include <emissivemap_fragment>',
     // a touch of self-light keeps players readable in the dark; metals get a little extra
     // so they read as shiny without an environment map
-    `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * (${LIGHTING.characterGlow.toFixed(3)} + vPbr.x * 0.22);`,
+    `#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * (uCharGlow + vPbr.x * 0.22);`,
   );
 };
 

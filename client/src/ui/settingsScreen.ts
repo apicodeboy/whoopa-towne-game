@@ -211,7 +211,10 @@ export class SettingsScreen {
         quality(),
         toggle('Performance mode', 'performanceMode', 'for low-end phones: lower resolution, no shadows'),
         toggle('Dynamic resolution', 'dynamicRes', 'drops resolution a little when needed to hold the frame rate'),
+        toggle('Post effects', 'postFx', 'bloom on lights and color grading (Medium and High)'),
+        toggle('Ambient occlusion', 'ambientOcclusion', 'soft contact shadows, High only (heavier)'),
         toggle('Show FPS and ping', 'showFps'),
+        toggle('Minimap turns with you', 'minimapRotate', 'off = north always up'),
       ]),
       group('AUDIO', [
         slider('Master volume', 'volume', 0, 1, 0.01, pct),

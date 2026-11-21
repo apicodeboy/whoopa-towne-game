@@ -71,6 +71,8 @@ export interface HudState {
   /** Dynamic resolution scale, 1 = full. */
   resScale: number;
   showFps: boolean;
+  /** The minimap turns with your view (else north up). */
+  minimapRotate?: boolean;
   /** What is in hand (name), whether it is a gun / melee (else a throwable). */
   weaponName?: string;
   /** Id of what is in hand for its picture (weapon or throwable id; '' = nothing / fists). */

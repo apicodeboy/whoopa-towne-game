@@ -69,6 +69,22 @@ interface Step {
   phase: number;
 }
 
+/**
+ * How dark it is (0 = full day, 1 = full night), `ms` after the match went live. Day for the
+ * first period, then night, alternating; each change eases in over the fade time. Before
+ * takeoff (or with no match) it is day.
+ */
+export function porchNight(ms: number): number {
+  if (!(ms > 0) || !Number.isFinite(ms)) return 0;
+  const { period, fade } = PORCH.dayNight;
+  const t = ms / 1000;
+  const i = Math.floor(t / period);
+  if (i === 0) return 0;
+  const k = Math.min(1, (t - i * period) / fade);
+  const s = k * k * (3 - 2 * k);
+  return i % 2 === 1 ? s : 1 - s;
+}
+
 /** Transport position along its route at sim time `t` (also used by clients to draw it). */
 export function transportAt(route: readonly number[], speed: number, takeoff: number, t: number, out: { x: number; z: number }): { x: number; z: number } {
   const [x0, z0, x1, z1] = route;

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { clamp } from '@shared/math';
 import { isLikelyMobile, type GraphicsQuality, type SettingsStore } from '../core/settings';
-import { LIGHTING } from './lighting';
+import { LIGHTING, NIGHT, live, type LightingPreset } from './lighting';
+import { PostFx, type PostFxOptions } from './postfx';
 import { ResolutionGovernor } from './resolutionGovernor';
 import type { LightSpot } from './world/worldBuilder';
 
@@ -15,26 +16,37 @@ interface QualityProfile {
   fogFar: number;
   /** How many lamps cast real light at once, and how far from the view they fade out. */
   lamps: { lights: number; fade: number };
+  /** The finishing passes (null = draw straight to the screen). */
+  post: PostFxOptions | null;
 }
 
-function profileFor(q: GraphicsQuality, performanceMode: boolean): QualityProfile {
+function profileFor(
+  q: GraphicsQuality, performanceMode: boolean, budget: LightingPreset['budget'] = LIGHTING.budget,
+  fx: { post: boolean; ao: boolean } = { post: true, ao: false },
+): QualityProfile {
   const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
   if (performanceMode) {
-    // roughly one rendered pixel per CSS pixel on phones: sharp enough, light on the GPU
-    return { pixelRatio: Math.min(dpr, 1.25) * 0.8, shadows: false, shadowSize: 0, antialias: false, far: 170, fogNear: 45, fogFar: 160, lamps: LIGHTING.budget.performance };
+    // roughly one rendered pixel per CSS pixel on phones: sharp enough, light on the GPU (no post)
+    return { pixelRatio: Math.min(dpr, 1.25) * 0.8, shadows: false, shadowSize: 0, antialias: false, far: 170, fogNear: 45, fogFar: 160, lamps: budget.performance, post: null };
   }
   switch (q) {
     case 'low':
-      return { pixelRatio: Math.min(dpr, 1.25), shadows: false, shadowSize: 0, antialias: false, far: 220, fogNear: 60, fogFar: 210, lamps: LIGHTING.budget.low };
+      return { pixelRatio: Math.min(dpr, 1.25), shadows: false, shadowSize: 0, antialias: false, far: 220, fogNear: 60, fogFar: 210, lamps: budget.low, post: null };
     case 'medium':
-      return { pixelRatio: Math.min(dpr, 1.5), shadows: true, shadowSize: 1024, antialias: true, far: 320, fogNear: 80, fogFar: 300, lamps: LIGHTING.budget.medium };
+      return {
+        pixelRatio: Math.min(dpr, 1.5), shadows: true, shadowSize: 1024, antialias: true, far: 320, fogNear: 80, fogFar: 300, lamps: budget.medium,
+        post: fx.post ? { multisampling: 2, bloomScale: 0.4, ao: false } : null,
+      };
     default:
-      return { pixelRatio: Math.min(dpr, 2), shadows: true, shadowSize: 2048, antialias: true, far: 420, fogNear: 90, fogFar: 380, lamps: LIGHTING.budget.high };
+      return {
+        pixelRatio: Math.min(dpr, 2), shadows: true, shadowSize: 2048, antialias: true, far: 420, fogNear: 90, fogFar: 380, lamps: budget.high,
+        post: fx.post ? { multisampling: 4, bloomScale: 0.5, ao: fx.ao } : null,
+      };
   }
 }
 
 /** Horizon haze: fog and the bottom of the sky dome share this so distant geometry melts into the sky. */
-const SKY = LIGHTING.sky.horizon;
+const SKY = live.sky.horizon;
 const SHADOW_RANGE = 42;
 /** A lamp starts dimming this many meters before a nearer lamp would take its light slot. */
 const HANDOFF_BAND = 6;
@@ -59,7 +71,7 @@ export class GameRenderer {
   private settings: SettingsStore;
   private unsub: () => void;
   /** Sun (or moon) direction: the only shadow-casting light. */
-  private sunDir = new THREE.Vector3(...LIGHTING.sun.dir).normalize();
+  private sunDir = new THREE.Vector3(...live.sun.dir).normalize();
   /** Light sources in the world, and the small pool of real lights handed to the nearest ones. */
   private spots: LightSpot[] = [];
   private spotDist = new Float32Array(0);
@@ -70,27 +82,35 @@ export class GameRenderer {
   private lastRenderAt = 0;
   /** Called after the canvas is recreated (quality change). */
   onCanvasChange: ((canvas: HTMLCanvasElement) => void) | null = null;
+  /** A day/night cycle is running (lamps sized for the night all match long, so nothing recompiles at dusk). */
+  private dayNight = false;
+  /** The `live.night` the lights were last set for. */
+  private appliedNight = -1;
+  /** The finishing passes (Medium / High with Post effects on), else null. */
+  private post: PostFx | null = null;
+  private postCamera = new THREE.PerspectiveCamera();
+  private menuMode = true; // (the app opens on the menu)
 
   constructor(container: HTMLElement, settings: SettingsStore) {
     this.container = container;
     this.settings = settings;
-    this.profile = profileFor(settings.values.quality, settings.values.performanceMode);
+    this.profile = this.makeProfile();
 
     this.scene.background = new THREE.Color(SKY);
     this.scene.fog = new THREE.Fog(SKY, this.profile.fogNear, this.profile.fogFar);
 
     // sky fill (day: bright blue sky bounce; night: a dim blue that keeps the streets readable
     // between lamps) plus the sun or moon, which casts the shadows
-    this.hemi = new THREE.HemisphereLight(LIGHTING.ambient.sky, LIGHTING.ambient.ground, LIGHTING.ambient.intensity);
+    this.hemi = new THREE.HemisphereLight(live.ambient.sky, live.ambient.ground, live.ambient.intensity);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(LIGHTING.sun.color, LIGHTING.sun.intensity);
+    this.sun = new THREE.DirectionalLight(live.sun.color, live.sun.intensity);
     this.sun.position.copy(this.sunDir).multiplyScalar(80);
     this.scene.add(this.sun, this.sun.target);
 
     this.createRenderer();
     this.buildLightPool();
     this.unsub = settings.onChange((_v, key) => {
-      if (key === null || key === 'quality' || key === 'performanceMode') this.applyQuality();
+      if (key === null || key === 'quality' || key === 'performanceMode' || key === 'postFx' || key === 'ambientOcclusion') this.applyQuality();
     });
   }
 
@@ -107,7 +127,7 @@ export class GameRenderer {
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = LIGHTING.exposure;
+    renderer.toneMappingExposure = live.exposure;
     renderer.shadowMap.enabled = p.shadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setPixelRatio(p.pixelRatio * this.governor.scale);
@@ -116,7 +136,44 @@ export class GameRenderer {
     this.container.appendChild(renderer.domElement);
     this.renderer = renderer;
     this.configureShadows();
+    this.buildPost();
     this.resize();
+  }
+
+  /**
+   * (Re)builds the finishing passes for the profile. With them on, tone mapping moves into the
+   * last pass (the same ACES curve), so the scene is drawn untouched into the HDR buffer.
+   */
+  private buildPost(): void {
+    this.post?.dispose();
+    this.post = null;
+    const p = this.profile.post;
+    if (p) {
+      try {
+        this.post = new PostFx(this.renderer, this.scene, this.postCamera, p);
+        this.post.setMenu(this.menuMode);
+      } catch (err) {
+        console.warn('post effects unavailable, drawing without them', err);
+        this.post = null;
+      }
+    }
+    this.renderer.toneMapping = this.post ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+  }
+
+  /** Menus get a gentle depth of field (never in a match). */
+  setMenuMode(on: boolean): void {
+    this.menuMode = on;
+    this.post?.setMenu(on);
+  }
+
+  /** Cinematic moments (0..1): eases a vignette in. */
+  setCinematic(k: number): void {
+    this.post?.setCinematic(k);
+  }
+
+  /** Whether the finishing passes are on (for tests and the FPS readout). */
+  get postFx(): boolean {
+    return this.post !== null;
   }
 
   private configureShadows(): void {
@@ -143,12 +200,47 @@ export class GameRenderer {
   }
 
   /** Re-reads settings. Antialiasing needs a fresh context, so the canvas is rebuilt when that flips. */
+  private makeProfile(): QualityProfile {
+    const v = this.settings.values;
+    return profileFor(v.quality, v.performanceMode, this.dayNight ? NIGHT.budget : LIGHTING.budget, { post: v.postFx, ao: v.ambientOcclusion });
+  }
+
+  /**
+   * Turns the day/night cycle's light budget on or off (at the start and end of a JUMP OFF THE
+   * PORCH match). The number of lamp lights changes, so shaders recompile once, here, rather
+   * than at dusk mid-match.
+   */
+  setDayNight(on: boolean): void {
+    if (on === this.dayNight) return;
+    this.dayNight = on;
+    this.profile = { ...this.profile, lamps: this.makeProfile().lamps };
+    this.buildLightPool();
+  }
+
+  /** Sun or moon, sky light, fog, sky color and exposure from the live lighting (only when it changed). */
+  private applyLighting(): void {
+    if (live.night === this.appliedNight) return;
+    this.appliedNight = live.night;
+    this.hemi.color.setHex(live.ambient.sky);
+    this.hemi.groundColor.setHex(live.ambient.ground);
+    this.hemi.intensity = live.ambient.intensity;
+    this.sun.color.setHex(live.sun.color);
+    this.sun.intensity = live.sun.intensity;
+    this.sunDir.set(live.sun.dir[0], live.sun.dir[1], live.sun.dir[2]).normalize();
+    // (without shadows followShadow never moves it: aim it here)
+    this.sun.position.copy(this.sun.target.position).addScaledVector(this.sunDir, 90);
+    (this.scene.background as THREE.Color).setHex(live.sky.horizon);
+    (this.scene.fog as THREE.Fog).color.setHex(live.sky.horizon);
+    this.renderer.toneMappingExposure = live.exposure;
+  }
+
   applyQuality(): void {
-    const next = profileFor(this.settings.values.quality, this.settings.values.performanceMode);
+    const next = this.makeProfile();
     const rebuild = next.antialias !== this.profile.antialias;
     this.profile = next;
     this.governor.reset();
     this.buildLightPool();
+    if (!rebuild) this.buildPost();
     if (rebuild) {
       const old = this.renderer;
       old.domElement.remove();
@@ -173,6 +265,7 @@ export class GameRenderer {
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
     this.renderer.setSize(width, height, false);
+    this.post?.setSize(width, height);
     return { width, height };
   }
 
@@ -192,9 +285,8 @@ export class GameRenderer {
     return this.governor.scale;
   }
 
-  /** The world's light sources (street lamps, shop lights). Kinds switched off in the preset are skipped. */
+  /** The world's light sources (street lamps, shop lights, rooms). Kinds that are off right now get no light. */
   setLights(spots: LightSpot[]): void {
-    spots = spots.filter((s) => LIGHTING[s.kind].intensity > 0);
     this.spots = spots;
     this.spotDist = new Float32Array(spots.length);
     this.order = spots.map((_s, i) => i);
@@ -215,7 +307,7 @@ export class GameRenderer {
     }
     while (this.pool.length < n) {
       // a wide downward cone: lamps and ceiling lights light what is below them, not above
-      const l = new THREE.SpotLight(0xffffff, 0, 10, LIGHTING.street.angle, 0.55, 2);
+      const l = new THREE.SpotLight(0xffffff, 0, 10, NIGHT.street.angle, 0.55, 2);
       this.scene.add(l, l.target);
       this.pool.push(l);
     }
@@ -230,7 +322,8 @@ export class GameRenderer {
     const h = Math.hypot(_dir.x, _dir.z) || 1;
     const rx = _cam.x + (_dir.x / h) * 10, rz = _cam.z + (_dir.z / h) * 10;
     const d = this.spotDist, order = this.order;
-    for (let i = 0; i < spots.length; i++) d[i] = Math.hypot(spots[i].x - rx, spots[i].z - rz);
+    // (kinds that are switched off right now, like street lamps by day, never take a light)
+    for (let i = 0; i < spots.length; i++) d[i] = live[spots[i].kind].intensity > 0.01 ? Math.hypot(spots[i].x - rx, spots[i].z - rz) : Infinity;
     order.sort((a, b) => d[a] - d[b]);
     const fade = this.profile.lamps.fade;
     // the first lamp that does not get a light: lamps fade out as they near its distance, so
@@ -238,14 +331,14 @@ export class GameRenderer {
     const dNext = order.length > pool.length ? d[order[pool.length]] : Infinity;
     for (let k = 0; k < pool.length; k++) {
       const light = pool[k];
-      if (k >= order.length) {
+      if (k >= order.length || !Number.isFinite(d[order[k]])) {
         light.intensity = 0;
         continue;
       }
       const s = spots[order[k]];
       const dist = d[order[k]];
       const w = (1 - smoothstep(fade * 0.55, fade, dist)) * clamp((dNext - dist) / HANDOFF_BAND, 0, 1);
-      const cfg = LIGHTING[s.kind];
+      const cfg = live[s.kind];
       light.position.set(s.x, s.y, s.z);
       light.target.position.set(s.x, s.y - 10, s.z);
       light.target.updateMatrixWorld();
@@ -257,6 +350,7 @@ export class GameRenderer {
   }
 
   render(camera: THREE.Camera): void {
+    this.applyLighting();
     this.updateLights(camera);
     // up in the air (the blimp, a skydive) the haze pushes out, so the land past the town shows
     // instead of a white wall of fog
@@ -284,7 +378,11 @@ export class GameRenderer {
       this.governor.reset();
       this.applyResolution();
     }
-    this.renderer.render(this.scene, camera);
+    if (this.post) {
+      this.post.setCamera(camera);
+      this.post.update(dt, live.night, live.exposure);
+      this.post.render(dt);
+    } else this.renderer.render(this.scene, camera);
   }
 
   /**
@@ -295,8 +393,13 @@ export class GameRenderer {
     const canvas = this.renderer.domElement;
     camera.aspect = canvas.width / Math.max(1, canvas.height);
     camera.updateProjectionMatrix();
+    this.applyLighting();
     this.updateLights(camera);
-    this.renderer.render(this.scene, camera);
+    if (this.post) {
+      this.post.setCamera(camera);
+      this.post.update(0, live.night, live.exposure);
+      this.post.render(0);
+    } else this.renderer.render(this.scene, camera);
     const out = document.createElement('canvas');
     out.width = w;
     out.height = h;
@@ -319,6 +422,7 @@ export class GameRenderer {
 
   dispose(): void {
     this.unsub();
+    this.post?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

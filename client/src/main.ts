@@ -1,4 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
+import { live as liveLight } from './game/lighting';
 import './styles/base.css';
 import './styles/hud.css';
 import './styles/menu.css';
@@ -88,6 +89,8 @@ async function boot(): Promise<void> {
     get lobby() {
       return app.lobby;
     },
+    /** The live lighting (time of day), for tests. */
+    lighting: liveLight,
   };
   (window as unknown as Record<string, unknown>).__whoopa = handle;
   if (q.get('auto') === 'practice') {

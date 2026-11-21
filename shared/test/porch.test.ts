@@ -1,6 +1,6 @@
 import {
   AIR_BALLOON, AIR_GROUND, AIR_RIDING, AIR_SKYDIVE, BTN, DISTRICT_FENCE_H, HEAL_KINDS, KILL_RIOT, WEAPONS, WEAPON_IDS, Q_BULLET, Q_PROJECTILE, EV, GameSim, ITEM, PHASE, PLAYER, PORCH, STAGE_RIOT, TICK_MS,
-  copyPlayerState, makeInputCmd, makePlayerState, makeStepActions, stepPlayer, weaponInSlot, DEFAULT_LOADOUT,
+  copyPlayerState, makeInputCmd, makePlayerState, makeStepActions, porchNight, stepPlayer, weaponInSlot, DEFAULT_LOADOUT,
   type InputCmd, type SimPlayer, type SquadMode,
 } from '../src/index';
 import { approx, assert, test } from './harness';
@@ -494,4 +494,27 @@ test('porch: the districts are fenced off: you walk into the railing, and jump i
   // bullets go straight through it (it is a fence, not a wall)
   assert(sim.phys.raycast(-88, 0.6, -30, 1, 0, 0, 4, Q_BULLET) < 0, 'not a wall to bullets');
   sim.dispose();
+});
+
+test('porch: day and night alternate every 3 minutes from takeoff, fading over 10 s', () => {
+  const { period, fade } = PORCH.dayNight;
+  assert(period === 180 && fade === 10, 'three minutes each, ten second fades');
+  const at = (s: number) => porchNight(s * 1000);
+  // before takeoff, at takeoff and all through the first three minutes: day
+  assert(porchNight(-5000) === 0 && porchNight(NaN) === 0 && porchNight(Infinity) === 0, 'no match: day');
+  for (const s of [0, 1, 60, 179.9]) assert(at(s) === 0, `day at ${s}s`);
+  // 3:00 night falls over ten seconds, smoothly, and stays until 6:00
+  assert(at(180) === 0, 'night starts falling at 3:00');
+  approx(at(185), 0.5, 1e-9, 'halfway at 3:05');
+  assert(at(181) > 0 && at(181) < at(183) && at(183) < at(188), 'gets darker steadily');
+  for (const s of [190, 250, 359.9]) assert(at(s) === 1, `night at ${s}s`);
+  // 6:00 day comes back, 9:00 night again, 12:00 day ...
+  approx(at(365), 0.5, 1e-9, 'halfway back at 6:05');
+  for (const s of [370, 500, 539.9]) assert(at(s) === 0, `day at ${s}s`);
+  for (const s of [550, 700]) assert(at(s) === 1, `night at ${s}s`);
+  for (const s of [730, 899]) assert(at(s) === 0, `day at ${s}s`);
+  // no jumps anywhere: a late joiner computes the same value from the same server clock
+  let worst = 0;
+  for (let ms = 0; ms < 1000 * 1000; ms += 50) worst = Math.max(worst, Math.abs(porchNight(ms + 50) - porchNight(ms)));
+  assert(worst < 0.02, `no sudden change between frames (${worst.toFixed(4)} in 50 ms)`);
 });

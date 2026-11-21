@@ -24,6 +24,15 @@ export const PORCH = {
   name: 'JUMP OFF THE PORCH',
   tagline: 'Everybody gotta jump off the porch someday. Only one makes it out.',
 
+  // ---- time of day ---------------------------------------------------------------
+  /**
+   * Day and night alternate from the moment the match goes live (the transport takes off):
+   * `period` seconds of daylight, then `period` of night, and so on. Each change fades over
+   * `fade` seconds. Every client works it out from the server's takeoff time and clock, so
+   * everyone (late joiners too) sees the same sky.
+   */
+  dayNight: { period: 180, fade: 10 },
+
   // ---- lobby -----------------------------------------------------------------
   /** Players per match (humans first, bots fill the rest). The sim supports up to `maxPlayers`. */
   lobbySize: 60,

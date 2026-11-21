@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LIGHTING } from '../lighting';
+import { live as liveLight } from '../lighting';
 import { SMOKE } from '@shared/config/game';
 
 const TRACER_CAP = 96;
@@ -162,8 +162,9 @@ class ParticlePool {
 }
 
 /** Smoke and dust are unlit sprites: dimmed to match the scene's light (see lighting.ts). */
-const DIM = LIGHTING.unlitEffects;
-const SMOKE_COLOR = new THREE.Color(0xb9bcc2).multiplyScalar(Math.min(1, LIGHTING.unlitEffects * 1.3)).getHex();
+/** Smoke and dust do not react to lights: they are dimmed to sit in the scene (less at night). Read when each one is made. */
+const dimNow = (): number => liveLight.unlitEffects;
+const smokeColor = (): number => new THREE.Color(0xb9bcc2).multiplyScalar(Math.min(1, liveLight.unlitEffects * 1.3)).getHex();
 
 /**
  * All transient combat visuals: bullet tracers, muzzle flashes, impact sparks/dust,
@@ -325,7 +326,7 @@ export class Effects {
     const n = Math.max(4, Math.round(10 * this.density));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
-      this.dust.emit(pos.x, pos.y, pos.z, Math.cos(a) * 2.4, -0.6 + Math.random() * 0.4, Math.sin(a) * 2.4, 0.3 + Math.random() * 0.15, 0.95 * DIM, 0.95 * DIM, 0.95 * DIM);
+      this.dust.emit(pos.x, pos.y, pos.z, Math.cos(a) * 2.4, -0.6 + Math.random() * 0.4, Math.sin(a) * 2.4, 0.3 + Math.random() * 0.15, 0.95 * dimNow(), 0.95 * dimNow(), 0.95 * dimNow());
     }
   }
 
@@ -345,7 +346,7 @@ export class Effects {
       this.dust.emit(
         pos.x + normal.x * 0.05, pos.y + normal.y * 0.05, pos.z + normal.z * 0.05,
         normal.x * 1.2 + (Math.random() - 0.5), normal.y * 1.2 + Math.random() * 0.6, normal.z * 1.2 + (Math.random() - 0.5),
-        0.35 + Math.random() * 0.3, 0.62 * DIM, 0.6 * DIM, 0.56 * DIM,
+        0.35 + Math.random() * 0.3, 0.62 * dimNow(), 0.6 * dimNow(), 0.56 * dimNow(),
       );
     }
     // decal
@@ -416,7 +417,7 @@ export class Effects {
       this.dust.emit(
         pos.x, pos.y + 0.4, pos.z,
         Math.cos(a) * sp, 1 + Math.random() * 3.5, Math.sin(a) * sp,
-        0.9 + Math.random() * 1.2, 0.34 * DIM, 0.32 * DIM, 0.3 * DIM,
+        0.9 + Math.random() * 1.2, 0.34 * dimNow(), 0.32 * dimNow(), 0.3 * dimNow(),
       );
     }
   }
@@ -428,7 +429,7 @@ export class Effects {
     const count = Math.max(7, Math.round(22 * this.density));
     const sprites: THREE.Sprite[] = [];
     for (let i = 0; i < count; i++) {
-      const mat = new THREE.SpriteMaterial({ map: this.smokeTex, color: SMOKE_COLOR, transparent: true, opacity: 0, depthWrite: false });
+      const mat = new THREE.SpriteMaterial({ map: this.smokeTex, color: smokeColor(), transparent: true, opacity: 0, depthWrite: false });
       const s = new THREE.Sprite(mat);
       const a = Math.random() * Math.PI * 2;
       const r = Math.sqrt(Math.random()) * SMOKE.radius * 0.8;

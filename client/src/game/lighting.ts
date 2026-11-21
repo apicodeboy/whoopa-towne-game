@@ -1,8 +1,12 @@
+import { Color } from 'three';
+
 /**
  * LIGHTING — the look of the town. Two presets live here: DAY (the default) and NIGHT.
- * Switch with TIME_OF_DAY below, or tweak a preset: how bright the streets are (ambient +
- * sun / moon), the street lights, the windows and the sky. Colors are 0xRRGGBB,
- * intensities are three.js light units.
+ * TIME_OF_DAY below picks the one the menus and the classic modes use; JUMP OFF THE PORCH
+ * moves between them during a match (day and night every three minutes), blending every value
+ * through `setNight`. Tweak a preset for how bright the streets are (ambient + sun / moon),
+ * the street lights, the windows and the sky. Colors are 0xRRGGBB, intensities are three.js
+ * light units.
  */
 
 export interface LightingPreset {
@@ -118,7 +122,84 @@ export const NIGHT: LightingPreset = {
   characterGlow: 0.07,
 };
 
-/** Which preset the game uses. */
+/** Which preset the game uses outside JUMP OFF THE PORCH's day/night cycle. */
 export const TIME_OF_DAY: 'day' | 'night' = 'day';
 
+/** The base preset (what the world is built for, and what the menus and classic modes show). */
 export const LIGHTING: LightingPreset = TIME_OF_DAY === 'day' ? DAY : NIGHT;
+/** How dark the base preset is (0 day, 1 night). */
+export const BASE_NIGHT = TIME_OF_DAY === 'day' ? 0 : 1;
+
+// ---------------------------------------------------------------- the live lighting
+const clonePreset = (p: LightingPreset): LightingPreset => ({
+  ...p,
+  sky: { ...p.sky },
+  sun: { ...p.sun, dir: [...p.sun.dir] as [number, number, number] },
+  ambient: { ...p.ambient },
+  street: { ...p.street },
+  interior: { ...p.interior },
+  shop: { ...p.shop },
+  budget: { ...p.budget },
+});
+
+/**
+ * The lighting right now: DAY blended toward NIGHT by `night` (0..1). The renderer reads it
+ * every frame; the world's sky, lamps and windows follow it through `setNight`.
+ */
+export const live: LightingPreset & { night: number } = Object.assign(clonePreset(LIGHTING), { night: BASE_NIGHT });
+
+/**
+ * Uniforms shared by every material that changes with the time of day (one object each, so
+ * setting `.value` reaches them all without recompiling anything).
+ */
+export const lightUniforms = {
+  /** 0 day .. 1 night: night windows and lamp heads glow by this much. */
+  night: { value: BASE_NIGHT },
+  /** The self-light on characters (more at night so players stay readable). */
+  charGlow: { value: LIGHTING.characterGlow },
+};
+
+const _a = new Color(), _b = new Color();
+const mixHex = (a: number, b: number, k: number): number => _a.setHex(a).lerp(_b.setHex(b), k).getHex();
+const mix = (a: number, b: number, k: number): number => a + (b - a) * k;
+
+/** Blends DAY toward NIGHT into `live` and the shared uniforms. Cheap; call it when `night` changes. */
+export function setNight(k: number): void {
+  k = Math.max(0, Math.min(1, k));
+  live.night = k;
+  const d = DAY, n = NIGHT, o = live;
+  o.sky.top = mixHex(d.sky.top, n.sky.top, k);
+  o.sky.mid = mixHex(d.sky.mid, n.sky.mid, k);
+  o.sky.horizon = mixHex(d.sky.horizon, n.sky.horizon, k);
+  o.cityGlow = mixHex(d.cityGlow, n.cityGlow, k);
+  o.cityGlowAmount = mix(d.cityGlowAmount, n.cityGlowAmount, k);
+  o.stars = n.stars;
+  // the sun goes down and the (dimmer, bluer) moon takes over as the shadow caster
+  o.sun.color = mixHex(d.sun.color, n.sun.color, k);
+  o.sun.intensity = mix(d.sun.intensity, n.sun.intensity, k);
+  const dx = mix(d.sun.dir[0], n.sun.dir[0], k), dy = mix(d.sun.dir[1], n.sun.dir[1], k), dz = mix(d.sun.dir[2], n.sun.dir[2], k);
+  const len = Math.hypot(dx, dy, dz) || 1;
+  o.sun.dir = [dx / len, dy / len, dz / len];
+  o.sun.body = k < 0.5 ? 'sun' : 'moon';
+  o.ambient.sky = mixHex(d.ambient.sky, n.ambient.sky, k);
+  o.ambient.ground = mixHex(d.ambient.ground, n.ambient.ground, k);
+  o.ambient.intensity = mix(d.ambient.intensity, n.ambient.intensity, k);
+  o.exposure = mix(d.exposure, n.exposure, k);
+  for (const kind of ['street', 'interior', 'shop'] as const) {
+    o[kind].color = mixHex(d[kind].color, n[kind].color, k);
+    // lamps come on as it gets dark (and are fully on a little before full night)
+    o[kind].intensity = mix(d[kind].intensity, n[kind].intensity, Math.min(1, k * 1.25));
+    o[kind].distance = mix(d[kind].distance, n[kind].distance, k);
+  }
+  o.lampHead = mixHex(d.lampHead, n.lampHead, k);
+  o.coneOpacity = n.coneOpacity * k;
+  o.poolOpacity = n.poolOpacity * k;
+  o.litWindows = n.litWindows;
+  o.windowGlass = mixHex(d.windowGlass, n.windowGlass, k);
+  o.skylineWindows = n.skylineWindows * k;
+  o.unlitEffects = mix(d.unlitEffects, n.unlitEffects, k);
+  o.characterGlow = mix(d.characterGlow, n.characterGlow, k);
+  lightUniforms.night.value = k;
+  lightUniforms.charGlow.value = o.characterGlow;
+}
+setNight(BASE_NIGHT);

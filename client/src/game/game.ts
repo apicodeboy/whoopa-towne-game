@@ -10,7 +10,7 @@ import {
   EV, PF, PHASE, quantizeInput, type MatchEndMsg, type RosterEntry, type SnapPlayer, type Snapshot,
 } from '@shared/protocol';
 import { WIN_BROKEN, WIN_OPEN, type UseTarget } from '@shared/sim/buildings';
-import { STAGE_RIOT, transportAt } from '@shared/sim/porch';
+import { STAGE_RIOT, porchNight, transportAt } from '@shared/sim/porch';
 import {
   HIT_PLAYER, HIT_WORLD, makeShotResult, shotSeed, spreadDirection, traceShot, type ShotTarget,
 } from '@shared/sim/combat';
@@ -31,6 +31,7 @@ import { CameraRig } from './camera';
 import { makePose, type CharacterPose, type CharacterVisual } from './characters/characterTypes';
 import { ProceduralCharacter } from './characters/proceduralCharacter';
 import { Effects } from './fx/effects';
+import { BASE_NIGHT, live as liveLight, setNight } from './lighting';
 import { ThrowArc } from './fx/throwArc';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
@@ -319,6 +320,9 @@ export class Game {
     this.wheel = new WeaponWheel(this.hud.root);
 
     if (this.session.mode === 'porch' && this.session.porch) {
+      // day and night alternate every three minutes in JUMP OFF THE PORCH: size the lamp lights
+      // for the night now (one shader compile while loading, never at dusk)
+      this.gfx.setDayNight(true);
       this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
       this.gfx.scene.add(this.porchWorld.group);
       this.crowd = new RiotCrowd(this.phys, this.map);
@@ -949,6 +953,7 @@ export class Game {
     }
     this.effects.update(dt);
     this.updateZoneMarkers();
+    this.updateTimeOfDay(snap);
     this.stage.world.update(dt, this.time, camPos);
     this.stage.bldVisual.update(dt);
     this.updateUsePrompt(st);
@@ -1379,6 +1384,7 @@ export class Game {
     h.fps = this.stats.fps;
     h.resScale = this.gfx.resScale;
     h.showFps = settings.showFps;
+    h.minimapRotate = settings.minimapRotate;
 
     // what is under the reticle, and is our muzzle blocked by nearby cover?
     h.blocked = false;
@@ -1659,8 +1665,26 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
     this.onTalkToAj?.();
   }
 
+  /**
+   * JUMP OFF THE PORCH: how dark it is, from the server's clock and the moment the match went
+   * live (in every snapshot), so every player sees the same sky, late joiners included. Other
+   * modes keep their usual lighting.
+   */
+  private updateTimeOfDay(snap: Snapshot | null): void {
+    let k = BASE_NIGHT;
+    if (this.porchWorld) {
+      // (-1: not live yet)
+      const takeoff = snap?.porch?.takeoff ?? -1;
+      k = takeoff !== -1 ? porchNight(this.session.serverTime() - takeoff) : 0;
+    }
+    if (k !== liveLight.night) applyTimeOfDay(this.stage, k);
+  }
+
   dispose(): void {
     this.scoreFeed?.stop();
+    // back to the usual lighting for the menus
+    if (this.porchWorld) this.gfx.setDayNight(false);
+    applyTimeOfDay(this.stage, BASE_NIGHT);
     this.stop();
     this.aj?.dispose();
     this.dmgNums.dispose();
@@ -1693,4 +1717,10 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
     this.localChar.dispose();
     for (const z of this.stage.world.zones) z.group.visible = false;
   }
+}
+
+/** Sets the time of day everywhere at once: the live lighting (renderer, characters) and the world (sky, lamps, windows). */
+export function applyTimeOfDay(stage: Stage, k: number): void {
+  setNight(k);
+  stage.world.setNight(liveLight.night);
 }
