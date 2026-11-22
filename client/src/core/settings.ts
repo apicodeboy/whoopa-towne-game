@@ -37,7 +37,7 @@ export interface Settings {
   vibration: boolean;
   /** The minimap turns with you (your view always points up) instead of keeping north up. */
   minimapRotate: boolean;
-  /** Bloom, color grading and the rest of the finishing passes (Medium and High quality). */
+  /** Bloom and color grading (High quality only; off by default: it roughly doubles the frame cost). */
   postFx: boolean;
   /** Screen-space ambient occlusion (High quality only; it costs a second pass over the scene). */
   ambientOcclusion: boolean;
@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   vibration: true,
   minimapRotate: false,
-  postFx: true,
+  postFx: false,
   ambientOcclusion: false,
 };
 
@@ -80,6 +80,8 @@ const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
 };
 
 const STORAGE_KEY = 'whoopa.settings.v1';
+/** Marks that the one-time post-effects reset has run. */
+const FX_RESET_KEY = 'whoopa.settings.fxreset';
 
 type Listener = (settings: Settings, changed: keyof Settings | null) => void;
 
@@ -107,6 +109,18 @@ export class SettingsStore {
       }
     } catch {
       /* corrupted or unavailable storage: fall back to defaults */
+    }
+    // Post effects were on by default for a few days and made the game slow: settings saved
+    // then are put back to off once (a choice made after this sticks)
+    try {
+      if (localStorage.getItem(FX_RESET_KEY) !== '1') {
+        this.values.postFx = false;
+        this.values.ambientOcclusion = false;
+        localStorage.setItem(FX_RESET_KEY, '1');
+        if (hadSaved) localStorage.setItem(STORAGE_KEY, JSON.stringify(this.values));
+      }
+    } catch {
+      /* storage blocked: defaults (off) apply anyway */
     }
     if (!hadSaved && isLikelyMobile()) {
       // sensible first-run defaults for phones

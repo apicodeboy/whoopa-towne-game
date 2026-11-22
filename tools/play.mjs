@@ -36,6 +36,8 @@ function launchBrowser() {
       '--autoplay-policy=no-user-gesture-required',
       '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
       `--window-size=${width},${height}`,
+      // --uncapped: no vsync / frame cap, so frame times show the real cost (not 16.7 ms)
+      ...(opt.uncapped ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : []),
     ],
   });
 }
@@ -45,7 +47,8 @@ if (opt.mobile) {
   await page.setViewport({ width, height, deviceScaleFactor: 2, isMobile: true, hasTouch: true, isLandscape: width > height });
   await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1');
 } else {
-  await page.setViewport({ width, height, deviceScaleFactor: 1 });
+  // --dpr=2: a Retina screen (twice the pixels each way)
+  await page.setViewport({ width, height, deviceScaleFactor: Number(opt.dpr ?? 1) });
 }
 const errors = [];
 page.on('console', (m) => {

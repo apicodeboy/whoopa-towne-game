@@ -35,8 +35,8 @@ and a corner-store strip in the middle.
 - **Minimap** (top left): the riot's edge animated and pulsing when it closes in, the next safe
   area drawn on with a distance line to it, numbered squad markers, a view cone, north and a
   scale bar; north up or turning with you.
-- **Post effects** on Medium and High: bloom on lights, a light color grade, depth of field on
-  the menu backdrop, optional ambient occlusion (pmndrs/postprocessing).
+- **Post effects** (optional, High only, off by default): bloom on lights, a light color grade,
+  optional ambient occlusion (pmndrs/postprocessing). They roughly double the frame cost.
 - **Particles** (three.quarks): muzzle sparks and smoke per weapon class, shell casings,
   impacts by surface (dust and clods on dirt, sparks and grey dust on walls), grenade
   fireballs and debris, dust kicked up running on loose ground, splashes in the surf.
@@ -167,8 +167,8 @@ Mouse, stick and touch sensitivity (plus a separate aiming multiplier), invert Y
 view, graphics quality (low / medium / high), performance mode for low-end phones, dynamic
 resolution, master and ambience volume, aim assist on/off, stick deadzones,
 crouch toggle, default camera shoulder, vibration, an FPS / ping readout, the minimap turning
-with you, post effects (bloom and grading, Medium / High) and ambient occlusion (High; off by
-default). The DEV MODE button is at the bottom of Settings.
+with you, post effects (bloom and grading; High only, off by default) and ambient occlusion
+(needs post effects; off by default). The DEV MODE button is at the bottom of Settings.
 
 ---
 

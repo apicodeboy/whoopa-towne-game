@@ -47,8 +47,8 @@ export const BOARDS: Record<string, BoardConfig> = {
 
 const W = 512, H = 256;
 /** How far away a board keeps animating (m), and how often it redraws (per second). */
-const ANIMATE_RANGE = 75;
-const FPS = 20;
+const ANIMATE_RANGE = 55;
+const FPS = 12;
 
 // ------------------------------------------------------------------ motion helpers
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));

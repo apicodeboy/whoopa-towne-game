@@ -223,14 +223,14 @@ export class Minimap {
   }
 
   draw(st: HudState): void {
-    // ~30 fps: smooth enough for the motion below, cheap enough for phones
+    // ~20 fps: smooth enough for the eased motion below, cheap enough for phones
     const now = performance.now();
     const dt = Math.min(0.25, (now - this.lastT) / 1000);
     this.timer += now - this.lastT;
     this.lastT = now;
     this.clock += dt;
     this.animate(st, dt);
-    if (this.timer < 33) return;
+    if (this.timer < 50) return;
     this.timer = 0;
 
     const g = this.ctx;

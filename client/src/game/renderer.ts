@@ -35,12 +35,13 @@ function profileFor(
     case 'medium':
       return {
         pixelRatio: Math.min(dpr, 1.5), shadows: true, shadowSize: 1024, antialias: true, far: 320, fogNear: 80, fogFar: 300, lamps: budget.medium,
-        post: fx.post ? { multisampling: 2, bloomScale: 0.4, ao: false } : null,
+        post: null,
       };
     default:
       return {
         pixelRatio: Math.min(dpr, 2), shadows: true, shadowSize: 2048, antialias: true, far: 420, fogNear: 90, fogFar: 380, lamps: budget.high,
-        post: fx.post ? { multisampling: 4, bloomScale: 0.5, ao: fx.ao } : null,
+        // (2x MSAA, a small bloom: the post buffer is full resolution, so every sample is costly)
+        post: fx.post ? { multisampling: 2, bloomScale: 0.3, ao: fx.ao } : null,
       };
   }
 }
@@ -89,7 +90,6 @@ export class GameRenderer {
   /** The finishing passes (Medium / High with Post effects on), else null. */
   private post: PostFx | null = null;
   private postCamera = new THREE.PerspectiveCamera();
-  private menuMode = true; // (the app opens on the menu)
 
   constructor(container: HTMLElement, settings: SettingsStore) {
     this.container = container;
@@ -151,19 +151,14 @@ export class GameRenderer {
     if (p) {
       try {
         this.post = new PostFx(this.renderer, this.scene, this.postCamera, p);
-        this.post.setMenu(this.menuMode);
       } catch (err) {
         console.warn('post effects unavailable, drawing without them', err);
         this.post = null;
       }
     }
     this.renderer.toneMapping = this.post ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
-  }
-
-  /** Menus get a gentle depth of field (never in a match). */
-  setMenuMode(on: boolean): void {
-    this.menuMode = on;
-    this.post?.setMenu(on);
+    // (several passes a frame: count them all, reset once a frame in render())
+    this.renderer.info.autoReset = !this.post;
   }
 
   /** Cinematic moments (0..1): eases a vignette in. */
@@ -379,6 +374,7 @@ export class GameRenderer {
       this.applyResolution();
     }
     if (this.post) {
+      this.renderer.info.reset();
       this.post.setCamera(camera);
       this.post.update(dt, live.night, live.exposure);
       this.post.render(dt);

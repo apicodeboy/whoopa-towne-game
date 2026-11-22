@@ -8,7 +8,7 @@ What was built, from which sources, how it was checked, and what is still open.
 | --- | --- | --- |
 | JOTP day / night | Day for 3:00 from takeoff (nights: grey moonlight bright enough to see by, plus 71 extra street lights along the roads), then night, alternating; each change eases over 10 s (sky gradient, sun sinking / moon rising, stars, clouds, sun and sky light, fog, exposure, street lamps, shop and room lights, lamp pools and cones, lamp heads, lit windows, character self-light, smoke). Same sky for everyone: worked out from the server's takeoff time (in every snapshot) and the synced server clock. Other modes keep their lighting. | `shared/src/sim/porch.ts` (`porchNight`), `shared/src/config/porch.ts` (`dayNight`), `client/src/game/lighting.ts` (`live`, `setNight`), `renderer.ts`, `world/worldBuilder.ts` (`setNight`, `nightGlow`), `game.ts` (`updateTimeOfDay`) |
 | Minimap | ~30 fps with eased motion; the riot's edge (inward-marching hatch, pulsing when it closes in or you are outside), the next safe area drawn on, a distance line to it and an edge arrow when it is off view, numbered squad markers, view cone, upright labels, north marker, scale bar, "turns with you" option, glass box, larger text on phones | `client/src/ui/minimap.ts` |
-| Post effects | HDR scene buffer + MSAA, NaN/Inf sanitize, bloom (bright things only by day; lamps, windows and signs at night), ACES (same curve as before) + light grade in perceptual space, cinematic vignette hook, depth of field on the menu backdrop only, optional SSAO | `client/src/game/postfx.ts`, `renderer.ts` |
+| Post effects | HDR scene buffer + MSAA, NaN/Inf sanitize, bloom (bright things only by day; lamps, windows and signs at night), ACES (same curve as before) + light grade in perceptual space, cinematic vignette hook, optional SSAO (the menu depth of field was removed: too costly) | `client/src/game/postfx.ts`, `renderer.ts` |
 | Particles | Muzzle sparks / smoke per weapon class (suppressed guns: none), casings (brass, red shotgun hulls), impacts by surface (sparks + grey dust; clods + brown dust; water spray), grenade fireball / smoke / debris / dust ring, running dust, surf splashes | `client/src/game/fx/quarksFx.ts`, `fx/effects.ts`, `game.ts` |
 | Billboards | Per-board playlists (code-drawn motion graphics, images, looping video, sprite-sheet sequences, the original painted ad as fallback), timed rotation, brightness, distance / facing limits (videos pause). Seven motion designs. The ESPN live boards are untouched. | `client/src/game/world/billboards.ts`, `worldBuilder.ts` (`billboard`) |
 | Cinematic UI | JOTP intro (stripes, letter slam, countdown on the game's own clock, skippable), stamped eliminations, SQUAD WIPED, banner / toast / end-screen motion, NIGHT FALLS / SUNRISE, menu entrance motion; reduced-motion respected | `client/src/ui/cinematics.ts`, `styles/cinematic.css`, `porchHud.ts`, `hud.ts` |
@@ -17,9 +17,19 @@ What was built, from which sources, how it was checked, and what is still open.
 
 ## Settings
 
-Graphics (Settings -> VIDEO): **Post effects** (on; Medium and High only), **Ambient occlusion**
-(off; High only), **Minimap turns with you** (off). Low quality and performance mode never use
-the post passes. DEV MODE is at the bottom of Settings.
+Graphics (Settings -> VIDEO): **Post effects** (off by default; High only), **Ambient occlusion**
+(off; needs post effects), **Minimap turns with you** (off). Post effects were on by default
+for the first days of this branch and made the game slow (see Performance below); settings
+saved then are reset to off once.
+
+## Performance (measured 2026-11-22, uncapped)
+
+Measured with `tools/scenarios/lag.mjs` (`--uncapped --dpr=2`, 1440x900 on a Retina-class
+screen, this Mac's GPU, JOTP practice with 60 players): High, day 10 ms a frame (100 fps),
+night 14 ms (73 fps), menu 7 ms; Medium 10 ms; Low 5.5 ms. With post effects on (High): night
+23 ms (43 fps). Before the fix, with post effects on by default and depth of field on the menu,
+the same test ran 46-64 ms (16-22 fps). The earlier "16.6 ms" figures in this document were
+capped at 60 Hz and hid that cost.
 
 ## Source repositories, and how each was used
 
@@ -72,9 +82,7 @@ character's face (sculpted in `tools/characters`). To pick this up:
   (rifle into a wall, into dirt, a grenade); every animated board and a live ESPN board; the
   intro; DEV MODE (wrong passcode refused, 0081 accepted, pickup works, N skips to night); the
   pistol reload and the weapon draw.
-- Frame time on this Mac (Apple GPU, headless Chrome): 16.5-16.8 ms per frame with and without
-  post effects, ambient occlusion and particles in the scenes tested, i.e. held at the 60 Hz
-  vsync cap; the cost under the cap could not be measured here. Nothing was measured on a phone.
+- Frame time: see Performance above (uncapped measurements). Nothing was measured on a phone.
 
 ## Known gaps
 

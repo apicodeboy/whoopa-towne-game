@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  BlendFunction, BloomEffect, DepthOfFieldEffect, Effect, EffectComposer, EffectPass, NormalPass, RenderPass, SSAOEffect, ShaderPass,
+  BlendFunction, BloomEffect, Effect, EffectComposer, EffectPass, NormalPass, RenderPass, SSAOEffect, ShaderPass,
 } from 'postprocessing';
 
 /**
@@ -13,7 +13,8 @@ import {
  *    tones stay put), then a light color grade: warmer and a touch livelier by day, cool
  *    shadows at night
  *  - vignette (part of the grade): off in play, eased in for cinematic moments only
- *  - depth of field: the menu backdrop only (never in a match)
+ *  (Depth of field on the menu backdrop was tried and removed: it cost ~50 ms a frame on a
+ *  Retina screen.)
  *  - ambient occlusion: optional (High quality + the setting), it re-draws the scene's normals
  *
  * Low quality and performance mode do not use any of this: the renderer draws straight to the
@@ -89,16 +90,11 @@ export class PostFx {
   private renderPass: RenderPass;
   private sanitize: ShaderPass;
   private gamePass: EffectPass;
-  private menuPass: EffectPass;
   private bloom: BloomEffect;
-  private menuBloom: BloomEffect;
   private grade: GradeEffect;
-  private menuGrade: GradeEffect;
-  private dof: DepthOfFieldEffect;
   private normalPass: NormalPass | null = null;
   private ssao: SSAOEffect | null = null;
   private camera: THREE.Camera;
-  private menu = false;
   /** 0..1: cinematic moments ease the vignette in. */
   private cinematic = 0;
   private cinematicWant = 0;
@@ -139,35 +135,14 @@ export class PostFx {
     }
     gameEffects.push(this.grade);
     this.gamePass = new EffectPass(camera, ...gameEffects);
-    // the menu backdrop: the same, plus a gentle depth of field (focus a little way out)
-    this.menuBloom = new BloomEffect(bloomOpts);
-    this.menuGrade = new GradeEffect();
-    this.dof = new DepthOfFieldEffect(camera, { worldFocusDistance: 70, worldFocusRange: 60, bokehScale: 1.6, resolutionScale: 0.5 });
-    this.menuPass = new EffectPass(camera, this.menuBloom, this.dof, this.menuGrade);
+    this.gamePass.renderToScreen = true;
     this.composer.addPass(this.gamePass);
-    this.composer.addPass(this.menuPass);
-    this.applyMenu();
-  }
-
-  /** One of the two last passes is on, and that one draws to the screen. */
-  private applyMenu(): void {
-    this.menuPass.enabled = this.menu;
-    this.gamePass.enabled = !this.menu;
-    this.menuPass.renderToScreen = this.menu;
-    this.gamePass.renderToScreen = !this.menu;
   }
 
   setCamera(camera: THREE.Camera): void {
     if (camera === this.camera) return;
     this.camera = camera;
     this.composer.setMainCamera(camera);
-  }
-
-  /** Menus (depth of field on) or a match (off). */
-  setMenu(on: boolean): void {
-    if (on === this.menu) return;
-    this.menu = on;
-    this.applyMenu();
   }
 
   /** Eases the cinematic vignette toward `k` (0 = none, 1 = full). */
@@ -182,7 +157,7 @@ export class PostFx {
   /** Grade and bloom for the time of day (`night` 0..1) and the exposure in use. */
   update(dt: number, night: number, exposure: number): void {
     const mix = (a: number, b: number) => a + (b - a) * night;
-    for (const grade of [this.grade, this.menuGrade]) {
+    for (const grade of [this.grade]) {
       const u = grade.uniforms;
       u.get('exposure')!.value = exposure;
       u.get('saturation')!.value = mix(DAY_GRADE.saturation, NIGHT_GRADE.saturation);
@@ -194,7 +169,7 @@ export class PostFx {
         mix(DAY_GRADE.high[0], NIGHT_GRADE.high[0]), mix(DAY_GRADE.high[1], NIGHT_GRADE.high[1]), mix(DAY_GRADE.high[2], NIGHT_GRADE.high[2]),
       );
     }
-    for (const b of [this.bloom, this.menuBloom]) {
+    for (const b of [this.bloom]) {
       b.intensity = mix(DAY_GRADE.bloom, NIGHT_GRADE.bloom);
       b.luminanceMaterial.threshold = mix(DAY_GRADE.threshold, NIGHT_GRADE.threshold);
     }
