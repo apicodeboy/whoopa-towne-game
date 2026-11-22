@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { makeGunModel } from '../gunKit';
 import { BAGS, ITEM } from '@shared/config/porch';
 import { WEAPONS, WEAPON_IDS } from '@shared/config/weapons';
@@ -195,6 +196,58 @@ export function swayBalloon(b: THREE.Group, t: number, dt = 0): void {
   // ease out with a little overshoot
   const s = g >= 1 ? 1 : 1 + 2.2 * (g - 1) ** 3 + 1.2 * (g - 1) ** 2;
   pivot.scale.setScalar(Math.max(0.05, s));
+}
+
+/**
+ * A bulletproof vest (plate carrier) standing up, a little bigger than life like the rest of the
+ * loot: vest-shaped front and back panels (armholes, a neck scoop, narrow shoulders), straps over
+ * the shoulders, a band round the sides, three magazine pouches across the front and a patch on
+ * the chest. Olive drab with black webbing, so it reads on any ground.
+ */
+function bulletproofVest(own: (m: THREE.Mesh) => THREE.Mesh): THREE.Group {
+  const v = new THREE.Group();
+  const olive = 0x5d6845, oliveDark = 0x47512f, web = 0x1d1f1c;
+  const part = (geo: THREE.BufferGeometry, color: number, x: number, y: number, z: number, opts: Record<string, unknown> = {}) => {
+    const m = own(new THREE.Mesh(geo, mat(color, { roughness: 0.9, ...opts })));
+    m.position.set(x, y, z);
+    v.add(m);
+    return m;
+  };
+  // the panel outline: wide at the waist, in at the armholes, narrow straps at the top, a neck scoop
+  const panel = (neck: number): THREE.ExtrudeGeometry => {
+    const s = new THREE.Shape();
+    s.moveTo(-0.23, -0.26);
+    s.lineTo(0.23, -0.26);
+    s.lineTo(0.23, 0.06);
+    s.quadraticCurveTo(0.15, 0.1, 0.14, 0.27);
+    s.lineTo(0.075, 0.27);
+    s.quadraticCurveTo(0.06, 0.27 - neck, 0, 0.27 - neck);
+    s.quadraticCurveTo(-0.06, 0.27 - neck, -0.075, 0.27);
+    s.lineTo(-0.14, 0.27);
+    s.quadraticCurveTo(-0.15, 0.1, -0.23, 0.06);
+    s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.014, bevelSize: 0.012, bevelSegments: 2, curveSegments: 8 });
+    g.translate(0, 0, -0.02);
+    return g;
+  };
+  const gap = 0.15;
+  part(panel(0.11), olive, 0, 0, gap / 2); // front (deeper neck)
+  part(panel(0.05), olive, 0, 0, -gap / 2); // back
+  // straps over the shoulders, joining front and back
+  for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.06, 0.035, gap + 0.06), web, sx * 0.107, 0.28, 0);
+  // the band round the sides (closes the gap below the armholes)
+  for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.035, 0.3, gap + 0.02), oliveDark, sx * 0.225, -0.1, 0);
+  // three magazine pouches across the front, black flaps
+  for (let i = -1; i <= 1; i++) {
+    part(new RoundedBoxGeometry(0.115, 0.15, 0.055, 2, 0.014), oliveDark, i * 0.135, -0.14, gap / 2 + 0.06);
+    part(new THREE.BoxGeometry(0.12, 0.035, 0.06), web, i * 0.135, -0.065, gap / 2 + 0.062);
+  }
+  // horizontal webbing rows above the pouches, and a reflective patch on the chest
+  part(new THREE.BoxGeometry(0.4, 0.018, 0.008), web, 0, -0.03, gap / 2 + 0.037);
+  part(new THREE.BoxGeometry(0.17, 0.055, 0.008), 0xe3e5e8, 0, 0.06, gap / 2 + 0.037, { roughness: 0.35, metalness: 0.2, emissive: 0x30333a, emissiveIntensity: 0.6 });
+  v.rotation.y = 0.5;
+  v.position.y = 0.02;
+  return v;
 }
 
 export class PorchWorld {
@@ -408,7 +461,7 @@ export class PorchWorld {
         own(new THREE.Mesh(new THREE.BoxGeometry(code === 1 ? 0.18 : 0.1, 0.15, 0.06), mat(0xd62f2f)));
       }
     } else if (kind === ITEM.ARMOR) {
-      own(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, 0.14), mat(code >= 100 ? 0x2e3a8c : 0x3a7bd5, { roughness: 0.5 })));
+      g.add(bulletproofVest(own));
     } else if (kind === ITEM.THROWABLE) {
       own(new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), mat(code === 0 ? 0x3c4a2f : 0xa9b0b8)));
     } else if (kind === ITEM.IBUPROFEN) {

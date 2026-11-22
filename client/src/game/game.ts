@@ -126,7 +126,7 @@ function itemName(kind: number, code: number, count: number): string {
   if (kind === ITEM.WEAPON) return (WEAPONS[WEAPON_IDS[code]]?.name ?? 'Weapon').toUpperCase();
   if (kind === ITEM.AMMO) return `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`.toUpperCase();
   if (kind === ITEM.HEAL) return `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`.toUpperCase();
-  if (kind === ITEM.ARMOR) return `ARMOR (${code})`;
+  if (kind === ITEM.ARMOR) return 'BULLETPROOF VEST';
   if (kind === ITEM.IBUPROFEN) return `${count}× ${PORCH.heals.ibuprofen.name}`.toUpperCase();
   if (kind === ITEM.THROWABLE) return `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`.toUpperCase();
   return 'ITEM';
@@ -268,7 +268,6 @@ export class Game {
   private onResize = () => this.resize();
   private unsubSettings: () => void;
   private unsubDevice: () => void;
-  private autoFireT = 0;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -799,13 +798,6 @@ export class Game {
     input.ctx.assistScale = this.aimAssistScale();
     const f = input.update(dt);
     if (f.pause) this.onPause?.();
-    // touch auto-fire: shoot once the reticle has rested on an enemy for a moment
-    if (settings.values.autoFire && input.device === 'touch' && this.alive && this.hudState.onTarget && phase === PHASE.PLAYING) {
-      this.autoFireT += dt;
-      if (this.autoFireT > 0.07) f.fire = true;
-    } else {
-      this.autoFireT = 0;
-    }
     input.touch?.setCrouchLit(input.wantCrouch);
     input.touch?.setExtras(!!this.porchWorld || !!this.session.roam);
     if (!this.paused) {
@@ -1666,9 +1658,9 @@ export class Game {
       rarity = it.code === 1 ? 'rare' : 'uncommon';
       if (h) rows = [['HEALS', `+${h.amount}`], ['UP TO', String(h.cap)], ['TIME', `${h.time}s`], ['QTY', String(it.count)]];
     } else if (it.kind === ITEM.ARMOR) {
-      name = 'ARMOR';
-      rarity = it.code >= 100 ? 'epic' : 'rare';
-      rows = [['ARMOR', `+${it.code}`]];
+      name = 'BULLETPROOF VEST';
+      rarity = 'rare';
+      rows = [['ARMOR', `+${PORCH.vest.armor}`], ['SLOTS', '1 OF 4']];
     } else if (it.kind === ITEM.IBUPROFEN) {
       name = PORCH.heals.ibuprofen.name.toUpperCase();
       rarity = it.count > 1 ? 'rare' : 'uncommon';

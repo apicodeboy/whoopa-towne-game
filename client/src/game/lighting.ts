@@ -91,16 +91,17 @@ export const DAY: LightingPreset = {
   characterGlow: 0.015,
 };
 
-/** After dark: moonlight, sodium street lamps, lit windows. */
+/** After dark: grey moonlight, sodium street lamps (plenty of them), lit windows. */
 export const NIGHT: LightingPreset = {
   sky: { top: 0x03050b, mid: 0x111829, horizon: 0x2a2a36 },
   cityGlow: 0x5c4434,
   cityGlowAmount: 0.85,
   stars: 650,
 
-  sun: { color: 0xa9bcf2, intensity: 0.5, dir: [-0.55, 0.62, 0.56], body: 'moon' },
-  ambient: { sky: 0x526696, ground: 0x2e2722, intensity: 0.95 },
-  exposure: 1.05,
+  // a greyish moonlight, bright enough to see by between the lamps (still clearly night)
+  sun: { color: 0xc3c7cf, intensity: 1.05, dir: [-0.55, 0.62, 0.56], body: 'moon' },
+  ambient: { sky: 0x6e7584, ground: 0x3d3a37, intensity: 1.4 },
+  exposure: 1.1,
 
   street: { color: 0xffb867, intensity: 90, distance: 22, angle: 1.22 },
   interior: { color: 0xe4ecff, intensity: 60, distance: 15, angle: 1.5 },

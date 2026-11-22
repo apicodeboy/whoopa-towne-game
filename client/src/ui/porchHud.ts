@@ -205,7 +205,7 @@ export class PorchHud {
     if (kind === ITEM.WEAPON) text = WEAPONS[WEAPON_IDS[code]]?.name ?? 'Weapon';
     else if (kind === ITEM.AMMO) text = `${count} ${AMMO_NAMES[AMMO_TYPES[code]] ?? 'Ammo'}`;
     else if (kind === ITEM.HEAL) text = `${count}× ${PORCH.heals[HEAL_KINDS[code]]?.name ?? 'Heal'}`;
-    else if (kind === ITEM.ARMOR) text = `Armor (${code})`;
+    else if (kind === ITEM.ARMOR) text = 'Bulletproof vest (+1 armor slot)';
     else if (kind === ITEM.IBUPROFEN) text = `${count}× ${PORCH.heals.ibuprofen.name}`;
     else if (kind === ITEM.THROWABLE) text = `${count}× ${THROWABLES[THROWABLE_IDS[code]]?.name ?? 'Throwable'}`;
     if (!text || count <= 0) return;

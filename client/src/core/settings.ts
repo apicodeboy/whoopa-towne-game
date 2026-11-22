@@ -28,8 +28,6 @@ export interface Settings {
   /** Stick deadzones 0..0.5. */
   deadzoneLeft: number;
   deadzoneRight: number;
-  /** Touch: fire automatically when the reticle is on an enemy. */
-  autoFire: boolean;
   /** Crouch key toggles instead of hold. */
   crouchToggle: boolean;
   /** Which shoulder the camera starts over. */
@@ -60,7 +58,6 @@ export const DEFAULT_SETTINGS: Settings = {
   aimAssist: true,
   deadzoneLeft: 0.15,
   deadzoneRight: 0.12,
-  autoFire: false,
   crouchToggle: true,
   rightShoulder: true,
   showFps: false,
@@ -115,7 +112,6 @@ export class SettingsStore {
       // sensible first-run defaults for phones
       this.values.quality = 'low';
       this.values.performanceMode = true;
-      this.values.autoFire = true;
     }
   }
 

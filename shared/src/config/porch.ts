@@ -111,8 +111,10 @@ export const PORCH = {
   endedSeconds: 14,
 
   // ---- player ------------------------------------------------------------------------
-  /** Armor on top of health. */
+  /** Armor on top of health (four slots of 25 over the health bar). */
   maxArmor: 100,
+  /** A bulletproof vest picked up: one armor slot (+25, up to the most you can have). */
+  vest: { armor: 25 },
   /**
    * Perc 29 (internally still 'ibuprofen'): orange pill bottles. They go in your pockets when
    * you pick them up; taking one (HEAL, or from the weapon wheel) fills your armor. `loose`:
@@ -167,7 +169,7 @@ export const ITEM = {
   AMMO: 2,
   /** code = heal kind index (HEAL_KINDS), count = how many */
   HEAL: 3,
-  /** code = armor amount (50 or 100), count = 1 */
+  /** A bulletproof vest: code = the armor it adds (one slot, 25), count = 1 */
   ARMOR: 4,
   /** code = throwable index (THROWABLE_IDS), count = how many */
   THROWABLE: 5,

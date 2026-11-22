@@ -501,10 +501,9 @@ export class PorchRules {
         break;
       }
       case ITEM.ARMOR: {
-        if (p.armor >= it.code) return it;
-        // swap: a better vest goes on, the old one (if any) stays behind
-        if (p.armor >= 25) left = { kind: ITEM.ARMOR, code: Math.round(p.armor), count: 1 };
-        p.armor = Math.min(PORCH.maxArmor, it.code);
+        // a vest fills one armor slot on top of what you have (full armor: it stays where it is)
+        if (p.armor >= PORCH.maxArmor) return it;
+        p.armor = Math.min(PORCH.maxArmor, p.armor + PORCH.vest.armor);
         s.armor = Math.round(p.armor);
         break;
       }
@@ -542,7 +541,7 @@ export class PorchRules {
       [
         ...HEAL_KINDS.map((_h, i) => ({ kind: ITEM.HEAL, code: i, count: 5 })),
         { kind: ITEM.IBUPROFEN, code: 0, count: 4 },
-        { kind: ITEM.ARMOR, code: 100, count: 1 },
+        { kind: ITEM.ARMOR, code: PORCH.vest.armor, count: 1 },
         ...THROWABLE_IDS.map((_t, i) => ({ kind: ITEM.THROWABLE, code: i, count: 4 })),
       ],
     ];

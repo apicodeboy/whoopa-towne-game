@@ -117,6 +117,7 @@ export function buildGreaterTowne(): MapDef {
 
   b.backdrop = { n: 'hills', e: 'hills', w: 'desert', s: 'ocean' };
   b.round = { ...ROUND, paved: { x0: GREATER.minX, x1: GREATER.maxX, z0: GREATER.minZ, z1: SHORE } };
+  streetLights(b);
   return b.build('greater-towne', 'Greater Whoopa Towne', { ...GREATER_BOUNDS });
 }
 
@@ -279,6 +280,56 @@ function cliffs(b: MapBuilder, rng: Rng, side: 'n' | 'w' | 'e', a0: number, a1: 
     else if (side === 'w') b.box('cliff', GREATER.minX - 0.5 - depth, GREATER.minX - 0.5, mid - len / 2 - 0.5, mid + len / 2 + 0.5, 0, h);
     else b.box('cliff', GREATER.maxX + 0.5, GREATER.maxX + 0.5 + depth, mid - len / 2 - 0.5, mid + len / 2 + 0.5, 0, h);
     a += len;
+  }
+}
+
+/**
+ * Street lights all along the roads, so the town is lit after dark: walking each road, a lamp
+ * on alternate sides every ~26 m, just off the carriageway (on the sidewalk or verge), wherever
+ * there is room: never in a lane, against a wall or prop, out in the water or past the rim,
+ * and not within 10 m of a lamp already there.
+ */
+function streetLights(b: MapBuilder): void {
+  const lamps = b.props.filter((p) => p.type === 'lamp').map((p) => ({ x: p.x, z: p.z }));
+  const roads = b.roads.filter((r) => r.kind === 'road');
+  const wet = b.areas.filter((a) => a.kind === 'ocean' || a.kind === 'surf' || a.kind === 'oasis');
+  const solids = b.solids.filter((s) => s.kind !== 'ground' && s.kind !== 'perimeter' && s.kind !== 'bound' && (s.col ?? 'solid') !== 'none');
+  const clear = (x: number, z: number): boolean => {
+    if (Math.hypot(x - ROUND.x, z - ROUND.z) > ROUND.r - 5) return false;
+    if (lamps.some((l) => Math.hypot(l.x - x, l.z - z) < 10)) return false;
+    if (roads.some((r) => distToLine(r.points, x, z) < r.width / 2 + 0.35)) return false;
+    if (wet.some((a) => x > a.x0 - 1 && x < a.x1 + 1 && z > a.z0 - 1 && z < a.z1 + 1)) return false;
+    for (const s of solids) {
+      if (s.y - s.sy / 2 > 6.5) continue; // (high up: an awning, a sign; the pole fits under)
+      if (s.ry) {
+        if (Math.hypot(x - s.x, z - s.z) < Math.hypot(s.sx, s.sz) / 2 + 0.7) return false;
+      } else if (Math.abs(x - s.x) < s.sx / 2 + 0.7 && Math.abs(z - s.z) < s.sz / 2 + 0.7) return false;
+    }
+    return !b.props.some((p) => Math.hypot(p.x - x, p.z - z) < 1.8);
+  };
+  for (const r of roads) {
+    let side = 1, since = 13;
+    for (let i = 1; i < r.points.length; i++) {
+      const a = r.points[i - 1], c = r.points[i];
+      const len = Math.hypot(c.x - a.x, c.z - a.z);
+      if (len < 1e-3) continue;
+      const ux = (c.x - a.x) / len, uz = (c.z - a.z) / len;
+      for (let d = 0; d < len; d += 2) {
+        since += 2;
+        if (since < 26) continue;
+        const x0 = a.x + ux * d, z0 = a.z + uz * d;
+        // just off the carriageway on this side (a little further out if that spot is taken)
+        for (const off of [1.1, 1.8, 2.6]) {
+          const x = x0 - uz * side * (r.width / 2 + off), z = z0 + ux * side * (r.width / 2 + off);
+          if (!clear(x, z)) continue;
+          b.prop('lamp', x, z, 0, 0);
+          lamps.push({ x, z });
+          since = 0;
+          side = -side;
+          break;
+        }
+      }
+    }
   }
 }
 

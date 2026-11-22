@@ -161,7 +161,7 @@ the classic modes) and nobody else.
 
 Mouse, stick and touch sensitivity (plus a separate aiming multiplier), invert Y, field of
 view, graphics quality (low / medium / high), performance mode for low-end phones, dynamic
-resolution, master and ambience volume, aim assist on/off, stick deadzones, touch auto-fire,
+resolution, master and ambience volume, aim assist on/off, stick deadzones,
 crouch toggle, default camera shoulder, vibration, an FPS / ping readout, the minimap turning
 with you, post effects (bloom and grading, Medium / High) and ambient occlusion (High; off by
 default). The DEV MODE button is at the bottom of Settings.

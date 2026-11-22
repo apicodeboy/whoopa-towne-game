@@ -207,7 +207,6 @@ export class SettingsScreen {
       ]),
       group('TOUCH', [
         slider('Touch look sensitivity', 'touchSens', 0.1, 4, 0.05, x),
-        toggle('Auto-fire', 'autoFire', 'shoots when the reticle is on an enemy'),
       ]),
       group('VIDEO', [
         slider('Field of view', 'fov', 70, 110, 1, (v) => `${Math.round(v)}°`),

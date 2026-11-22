@@ -553,3 +553,18 @@ test('porch: DEV MODE starts you on foot with one of everything laid out, no rio
   sim.dispose();
   sim2.dispose();
 });
+
+test('porch: a bulletproof vest fills one armor slot (+25), and stays put on full armor', async () => {
+  const { sim, me } = await porchSim();
+  const P = sim.porch!;
+  const vest = { kind: ITEM.ARMOR, code: PORCH.vest.armor, count: 1 };
+  const armor = (): number => me.armor;
+  me.armor = 0;
+  assert(P.give(me, vest) === null && armor() === 25 && me.state.armor === 25, `0 -> 25 (${me.armor})`);
+  assert(P.give(me, vest) === null && armor() === 50, 'another slot: 50');
+  me.armor = 90;
+  assert(P.give(me, vest) === null && armor() === 100, 'never past full');
+  const left = P.give(me, vest);
+  assert(left !== null && left.kind === ITEM.ARMOR && armor() === 100, 'full armor: the vest is left on the ground');
+  sim.dispose();
+});
