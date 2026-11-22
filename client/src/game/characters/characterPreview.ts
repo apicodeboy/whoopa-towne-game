@@ -58,6 +58,11 @@ export class CharacterPreview {
    * character instead of the character turning, so the front view stays a front view.
    */
   private split = false;
+  /**
+   * Standing in a box (the main menu's squad): the whole character, feet just above the bottom
+   * edge, whatever the box's shape (instead of the fixed framings).
+   */
+  private stand = false;
   private frontCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 30);
   /** Pixels the split view keeps free above and below the character (the toolbars). */
   clear = { top: 160, bottom: 150 };
@@ -225,6 +230,11 @@ export class CharacterPreview {
     return this.split;
   }
 
+  /** Frame the whole character standing, feet at the bottom edge (the main menu's squad). */
+  setStand(on: boolean): void {
+    this.stand = on;
+  }
+
   /** The dark studio floor under the character (TRAP), instead of the soft disc. */
   setStudio(on: boolean): void {
     this.floor.visible = !on;
@@ -341,9 +351,24 @@ export class CharacterPreview {
     this.camera.updateProjectionMatrix();
     // the character faces -Z at yaw 0, so the camera looks at it from the -Z side (in the
     // split view the camera goes round it instead: turning it by yaw is seeing it from -yaw)
-    if (this.split) this.camera.position.set(Math.sin(this.yaw) * this.cam.dist, this.cam.y * this.eyeH, -Math.cos(this.yaw) * this.cam.dist);
-    else this.camera.position.set(0, this.cam.y * this.eyeH, -this.cam.dist);
-    this.camera.lookAt(0, this.cam.look * this.eyeH, 0);
+    if (this.stand) {
+      // the view fits the character's height (with a little headroom) and its width, and the
+      // feet sit 3% above the bottom edge
+      const fov = 30;
+      const V = Math.max((this.size.h + 0.06) / 0.94, 0.95 / Math.max(0.2, this.camera.aspect));
+      const dist = V / (2 * Math.tan((fov * Math.PI) / 360));
+      const cy = V / 2 - V * 0.03;
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+      this.camera.position.set(0, cy, -dist);
+      this.camera.lookAt(0, cy, 0);
+    } else if (this.split) {
+      this.camera.position.set(Math.sin(this.yaw) * this.cam.dist, this.cam.y * this.eyeH, -Math.cos(this.yaw) * this.cam.dist);
+      this.camera.lookAt(0, this.cam.look * this.eyeH, 0);
+    } else {
+      this.camera.position.set(0, this.cam.y * this.eyeH, -this.cam.dist);
+      this.camera.lookAt(0, this.cam.look * this.eyeH, 0);
+    }
 
     if (this.visual) {
       this.pose.yaw = this.split ? 0 : this.yaw;

@@ -326,3 +326,10 @@
 body[data-state='playing'] .tour-caption { display: none; }
 @media (max-width: 760px), (max-height: 520px) { .tour-caption { display: none; } }
 @media (prefers-reduced-motion: reduce) { .tour-caption.fresh b { animation: none; } }
+
+/* (narrower screens: the nav takes two rows, so the tour caption sits below them) */
+@media (max-width: 1180px) {
+  .tour-caption {
+    top: calc(168px + env(safe-area-inset-top, 0px));
+  }
+}

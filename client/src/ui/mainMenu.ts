@@ -2,6 +2,8 @@ import { CLASSIC_MODES, GAME_NAME, INVITE_CODE_LENGTH, MODES, NAME_MAX_LENGTH, t
 import { PORCH, SQUAD_MODES, SQUAD_MODE_IDS, type SquadMode } from '@shared/config/porch';
 import type { BotDifficulty } from '@shared/protocol';
 import type { Profile } from '../core/profile';
+import { CharacterPreview } from '../game/characters/characterPreview';
+import type { CharacterVisual } from '../game/characters/characterTypes';
 import type { DeviceKind } from '../input/types';
 import { button, el } from './dom';
 import { gIcon, gramsHtml } from './economyArt';
@@ -24,7 +26,11 @@ export interface MainMenuActions {
 }
 
 /** Small line icons (stroke = currentColor). */
+/** An empty spot in the squad: a person drawn in a dashed outline. */
+const GHOST = '<svg viewBox="0 0 60 150" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.6" stroke-dasharray="6 4" stroke-linejoin="round"><circle cx="30" cy="19" r="13"/><path d="M14 40h32l7 44h-9l-3-26v86H33l-3-48-3 48h-8V58l-3 26h-9z"/></g></svg>';
+
 const ICONS = {
+  pen: '<path d="M4 20l4.2-1 10.6-10.6a2 2 0 0 0 0-2.8l-.4-.4a2 2 0 0 0-2.8 0L5 15.8z"/><path d="M13.5 6.5l4 4"/>',
   arrow: '<path d="M7 17L17 7M9 7h8v8"/>',
   right: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   pad: '<path d="M6.5 8h11c2 0 3.2 1.2 3.5 3.1l.6 4c.3 1.9-1.9 2.9-3.1 1.3L17 14.5H7l-1.5 1.9c-1.2 1.6-3.4.6-3.1-1.3l.6-4C3.3 9.2 4.5 8 6.5 8z"/><path d="M7.5 10.5v3M6 12h3"/><circle cx="16" cy="11" r=".6" fill="currentColor"/><circle cx="17.6" cy="12.6" r=".6" fill="currentColor"/>',
@@ -117,6 +123,13 @@ export class MainMenu {
   private meCap: HTMLElement;
   private signedIn = false;
   private profile: Profile;
+  /** The squad area (right, under Quick play): you, and the spots friends will wait in. */
+  private squadEl: HTMLElement;
+  private preview = new CharacterPreview();
+  private squadName: HTMLElement;
+  private showing = true;
+  /** Phones (the squad steps aside there, see mainmenu.css): the character does not run at all. */
+  private noRoom = typeof matchMedia === 'function' ? matchMedia('(max-width: 760px), (max-height: 520px)') : null;
 
   constructor(parent: HTMLElement, profile: Profile, actions: MainMenuActions) {
     this.profile = profile;
@@ -155,10 +168,28 @@ export class MainMenu {
     const navRight = el('div', 'hm-nav-right', [pad, this.gramsChip, quickTop, more]);
     const nav = el('header', 'hm-nav', [navLeft, notch, navRight]);
 
+    // ---- the squad (right, under Quick play): your character, and spots for friends ----
+    this.preview.setStand(true);
+    this.preview.canvas.classList.add('hm-me-canvas');
+    this.squadName = el('div', 'hm-squad-name');
+    const edit = button('', 'hm-squad-edit', () => actions.openCharacter());
+    edit.innerHTML = `${icon('pen')}<span>Edit</span>`;
+    const meSpot = el('div', 'hm-spot hm-spot-me', [this.preview.canvas, el('div', 'hm-spot-tag', [this.squadName, edit])]);
+    const invite = (side: string) => {
+      const b = button('', `hm-spot hm-spot-open ${side}`, () => actions.createPrivate(profile.mode));
+      b.innerHTML = `<span class="hm-ghost-fig">${GHOST}</span><span class="hm-spot-plus">+</span><span class="hm-spot-cap">Invite</span>`;
+      b.title = 'Invite a friend: makes a private lobby with a code to send them';
+      return b;
+    };
+    this.squadEl = el('section', 'hm-squad', [
+      el('div', 'hm-squad-row', [invite('far'), meSpot, invite('near'), invite('far')]),
+      el('div', 'hm-squad-cap', 'SQUAD · invite friends'),
+    ]);
+
     // ---- the headline ----
     this.headEl = el('h1', 'hm-title');
     this.subEl = el('p', 'hm-sub');
-    const hero = el('section', 'hm-hero', [this.headEl, this.subEl]);
+    const hero = el('section', 'hm-hero', [this.headEl, this.subEl, this.squadEl]);
 
     // ---- bottom left: a stat and your name ----
     this.statEl = el('div', 'hm-stat');
@@ -272,6 +303,7 @@ export class MainMenu {
     this.setDevice('kbm');
     this.applyThumbs();
     this.setAccount(null);
+    this.noRoom?.addEventListener('change', () => this.updatePreview());
   }
 
   /** Signed in: the account name is your name (and the GRAMS balance shows); signed out: free name. */
@@ -324,6 +356,7 @@ export class MainMenu {
   }
 
   private updateAvatar(): void {
+    this.squadName.textContent = this.nameInput.value || this.profile.name;
     const n = (this.nameInput.value || 'P').toUpperCase();
     this.avatarEl.textContent = n[0];
     let h = 0;
@@ -399,5 +432,18 @@ export class MainMenu {
 
   show(v: boolean): void {
     this.root.classList.toggle('hidden', !v);
+    this.showing = v;
+    this.updatePreview();
+  }
+
+  /** Your character in the squad area (the menu owns and disposes it from now on). */
+  setCharacter(visual: CharacterVisual): void {
+    this.preview.setCharacter(visual);
+    this.updatePreview();
+  }
+
+  /** The character animates only while the menu is up and the squad has room to show. */
+  private updatePreview(): void {
+    this.preview.setActive(this.showing && this.preview.character !== null && !this.noRoom?.matches);
   }
 }

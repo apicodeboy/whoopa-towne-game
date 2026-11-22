@@ -244,6 +244,7 @@ export class App {
       // a kept look goes to the lobby right away (it shows from the next match) and to the account
       onKeep: (look) => {
         this.lobby?.setLook(look);
+        this.refreshMenuCharacter();
         if (this.account.signedIn) void this.account.equip(encodeAppearance(look)).catch(() => undefined);
       },
       onClose: () => this.characterScreen.show(false),
@@ -285,7 +286,12 @@ export class App {
     this.account.onChange(() => this.onAccountChange());
     void this.account.init();
     // the preview starts with the stand-in figure if the models are still downloading
-    void this.assetsReady.then(() => this.characterScreen.rebuild());
+    void this.assetsReady.then(() => {
+      this.characterScreen.rebuild();
+      // (the real model now: rebuild even if the look is the same as the stand-in's)
+      this.menuLookKey = '';
+      this.refreshMenuCharacter();
+    });
 
     // ---- controllers + touch ----
     this.nav = new MenuNav(ui);
@@ -396,6 +402,16 @@ export class App {
     this.lobby?.setLook(look);
     this.game?.setMyLook(look);
     this.characterScreen.rebuild();
+    this.refreshMenuCharacter();
+  }
+
+  /** The main menu's squad area shows you as you look now. */
+  private menuLookKey = '';
+  private refreshMenuCharacter(): void {
+    const key = encodeAppearance(this.profile.look);
+    if (key === this.menuLookKey) return;
+    this.menuLookKey = key;
+    this.menu.setCharacter(this.makeCharacter(0, 0, this.profile.look));
   }
 
   private onAccountChange(): void {
