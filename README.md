@@ -12,7 +12,10 @@ and a corner-store strip in the middle.
 - Keyboard + mouse, PS5 / Xbox controllers (PS5 buttons by default, and for any controller the
   browser does not name), and phone touch controls
 - Authoritative server with client-side prediction, interpolation and lag-compensated hits
-- No accounts: pick a display name, Quick Play, or share a 6-character invite code
+- Play as a guest (pick a display name) or sign up for an account (username and password) that
+  keeps your GRAMS, owned AJ'S items and equipped character on the server, on any device.
+  Quick Play, or share a 6-character invite code. (Your loadout and menu choices stay in the
+  browser; there is no password recovery yet.)
 - **Character Creator**: a character with a human face (eyes, brows, nose, lips) and big spiky
   locs, in flat cel shading with a bold outline. Three starter looks (hooded puffer, puffer
   vest, white tee), then change anything: eyes and eye color, brows, nose, mouth, ears, facial

@@ -16,8 +16,9 @@ interface Saved {
 }
 
 /**
- * The player's local identity. There are no accounts: the display name, saved loadout,
- * character look and last-used menu choices live in this browser's localStorage.
+ * The player's local identity, in this browser's localStorage: the display name, saved loadout,
+ * character look and last-used menu choices. A signed-in account (net/account.ts) also keeps
+ * the equipped look on the server: signing in puts that look on here (it replaces this one).
  */
 export class Profile {
   name: string;
