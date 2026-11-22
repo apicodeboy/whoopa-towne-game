@@ -35,6 +35,7 @@ import { BASE_NIGHT, live as liveLight, setNight } from './lighting';
 import { ThrowArc } from './fx/throwArc';
 import { surfaceAt, type Surface } from './fx/quarksFx';
 import { DevPanel } from '../ui/devMode';
+import { MatchIntro } from '../ui/cinematics';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
 import { AirLabels } from './porch/airLabels';
@@ -188,6 +189,11 @@ export class Game {
   private readonly thrower = { x: 0, y: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0, crouching: 0 };
   /** THROW was down last tick (it takes the throwable out on a press). */
   private throwWas = false;
+  /** JUMP OFF THE PORCH: the intro as the transport takes off, and the takeoff it played for. */
+  private intro: MatchIntro | null = null;
+  private introFor = -1;
+  /** The last time-of-day phase announced (0 day, 1 night). */
+  private todSaid = -1;
   /** DEV MODE (a local practice session): its panel and keys. */
   private devPanel: DevPanel | null = null;
   private onDevKey: ((e: KeyboardEvent) => void) | null = null;
@@ -330,6 +336,10 @@ export class Game {
       this.gfx.setDayNight(true);
       this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
       if (this.session instanceof LocalSession && this.session.dev) this.setupDev();
+      else {
+        this.intro = new MatchIntro(deps.uiRoot);
+        this.intro.onCinematic = (k) => this.gfx.setCinematic(k);
+      }
       this.gfx.scene.add(this.porchWorld.group);
       this.crowd = new RiotCrowd(this.phys, this.map);
       this.gfx.scene.add(this.crowd.group);
@@ -595,7 +605,15 @@ export class Game {
           dx = to.x - from.x;
           dz = to.z - from.z;
         }
-        if (killer === myIdx && victim !== myIdx) this.hud.killConfirm(this.nameOf(victim), this.teamOf(victim), e[4] === 1);
+        if (killer === myIdx && victim !== myIdx) {
+          this.hud.killConfirm(this.nameOf(victim), this.teamOf(victim), e[4] === 1);
+          // the last one standing of their squad: you wiped it
+          const squad = this.roster.get(victim)?.squad;
+          if (this.porchWorld && squad !== undefined) {
+            const left = [...this.roster.values()].some((r) => r.squad === squad && r.idx !== victim && (this.remotes.get(r.idx)?.alive ?? false));
+            if (!left) this.hud.squadWiped();
+          }
+        }
         if (victim === myIdx) {
           this.killer = killer >= 0 && killer !== myIdx ? this.nameOf(killer) : '';
           this.localChar.die(dx, dz);
@@ -1549,6 +1567,7 @@ export class Game {
       prompt: !this.alive && snap?.phase === PHASE.WARMUP && this.arena ? 'BACK IN A MOMENT…' : prompt && !card ? `${key} ${escapeHtml(prompt)}` : '',
       card: card ? this.pickupCard(card, device) : null,
       doorsIn: Math.max(0, (doorsAt - this.session.serverTime()) / 1000),
+      // (the intro, below, plays as the transport takes off)
       spectating: spectating ? this.remotes.get(this.spectateIdx)?.name ?? '' : '',
       killer: this.killer,
       squad,
@@ -1557,6 +1576,18 @@ export class Game {
       device,
     };
     hud.update(state, dt);
+    // the JUMP OFF THE PORCH intro: once, counting down to liftoff (or, arriving just after,
+    // to the doors opening); never for someone turning up later
+    const takeoff = snap?.porch?.takeoff ?? -1;
+    const preLift = snap?.porch && takeoff === -1 && snap.porch.stage === 0 && snap.porch.stageLeft > 0 ? snap.porch.stageLeft : -1;
+    const justLeft = takeoff !== -1 && this.session.serverTime() - takeoff < 2500;
+    if (this.intro && this.introFor === -1 && ((preLift > 0 && preLift <= 4.4) || justLeft)) {
+      this.introFor = 1;
+      const squads = { solo: 'SOLO', duos: 'DUOS', squads: 'SQUADS' }[this.session.porch?.squads ?? 'solo'] ?? '';
+      this.intro.play(`${this.roster.size} PLAYERS · ${squads} · LAST SQUAD STANDING`);
+      this.porchHud?.quietDeploy();
+    }
+    this.intro?.update(dt, preLift > 0 ? preLift : takeoff === -1 ? Infinity : state.doorsIn);
     const rows = [...this.roster.values()].map((r) => {
       const me = r.idx === this.session.myIdx;
       const rp = this.remotes.get(r.idx);
@@ -1732,10 +1763,21 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
       k = takeoff !== -1 ? porchNight(this.session.serverTime() - takeoff) : 0;
     }
     if (k !== liveLight.night) applyTimeOfDay(this.stage, k);
+    // the change is announced as it starts
+    // (night: as soon as it starts getting dark; day: as soon as it starts getting light)
+    if (this.porchHud) {
+      if (this.todSaid === -1) this.todSaid = k > 0.5 ? 1 : 0;
+      const phase = this.todSaid === 1 ? (k < 0.98 ? 0 : 1) : k > 0.02 ? 1 : 0;
+      if (phase !== this.todSaid) {
+        this.todSaid = phase;
+        this.porchHud.banner(phase === 1 ? 'NIGHT FALLS' : 'SUNRISE', 'info', 3);
+      }
+    }
   }
 
   dispose(): void {
     this.scoreFeed?.stop();
+    this.intro?.dispose();
     this.devPanel?.dispose();
     if (this.onDevKey) window.removeEventListener('keydown', this.onDevKey);
     // back to the usual lighting for the menus

@@ -1,0 +1,262 @@
+/* ===================================================================== cinematic moments
+   The JUMP OFF THE PORCH intro, and motion for the banners, toasts, eliminations and the
+   end screens. Poster style: slabs, sticker stripes, Paytone lettering. All of it steps aside
+   for prefers-reduced-motion. */
+
+/* ---- the intro (over the game, never over input: pointer events pass through) */
+.ci-intro {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ci-intro.hidden {
+  display: none;
+}
+.ci-stripe {
+  position: absolute;
+  left: -10%;
+  width: 120%;
+  height: 92px;
+  background: repeating-linear-gradient(-55deg, #f0a020 0 26px, #1a1206 26px 52px);
+  opacity: 0.92;
+  transform: skewY(-4deg) translateX(-110%);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.55);
+}
+.ci-stripe.a {
+  top: calc(50% - 128px);
+}
+.ci-stripe.b {
+  top: calc(50% + 58px);
+  transform: skewY(-4deg) translateX(110%);
+}
+.ci-intro.on .ci-stripe.a {
+  animation: ci-wipe-l 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.ci-intro.on .ci-stripe.b {
+  animation: ci-wipe-r 0.55s 0.08s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes ci-wipe-l {
+  to { transform: skewY(-4deg) translateX(0); }
+}
+@keyframes ci-wipe-r {
+  to { transform: skewY(-4deg) translateX(0); }
+}
+.ci-title {
+  position: relative;
+  font: 400 clamp(34px, 7vw, 92px) / 1 'Paytone One', var(--font-display, system-ui), sans-serif;
+  color: #fff;
+  letter-spacing: 0.02em;
+  text-shadow: 5px 5px 0 #1a1206, 0 0 30px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.ci-title span {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(-70px) scale(1.8) rotate(-6deg);
+}
+.ci-intro.on .ci-title span {
+  animation: ci-slam 0.42s calc(0.3s + var(--i) * 0.035s) cubic-bezier(0.3, 1.6, 0.5, 1) forwards;
+}
+@keyframes ci-slam {
+  to { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+}
+.ci-sub {
+  position: relative;
+  padding: 6px 16px;
+  font: 800 clamp(11px, 1.6vw, 16px) / 1.2 var(--font, system-ui);
+  letter-spacing: 0.22em;
+  color: #1a1206;
+  background: #ffd24a;
+  border-radius: 4px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  transform: translateY(12px);
+}
+.ci-intro.on .ci-sub {
+  animation: ci-up 0.4s 1.05s ease-out forwards;
+}
+@keyframes ci-up {
+  to { opacity: 1; transform: none; }
+}
+.ci-count {
+  position: relative;
+  min-height: 1em;
+  font: 400 clamp(48px, 9vw, 120px) / 1 'Paytone One', var(--font-display, system-ui), sans-serif;
+  color: #ffd24a;
+  text-shadow: 5px 5px 0 #1a1206;
+}
+.ci-count.tick {
+  animation: ci-tick 0.9s ease-out;
+}
+@keyframes ci-tick {
+  0% { opacity: 0; transform: scale(2.2); }
+  18% { opacity: 1; transform: scale(0.92); }
+  30% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0.15; transform: scale(0.9); }
+}
+.ci-skip {
+  position: absolute;
+  bottom: calc(18px + var(--safe-bottom, 0px));
+  right: calc(20px + var(--safe-right, 0px));
+  font: 700 10px var(--font, system-ui);
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.55);
+}
+.ci-intro.out {
+  animation: ci-out 0.42s ease-in forwards;
+}
+@keyframes ci-out {
+  to { opacity: 0; transform: scale(1.06); }
+}
+.ci-intro.reduced *,
+.ci-intro.reduced {
+  animation: none !important;
+}
+.ci-intro.reduced .ci-title span,
+.ci-intro.reduced .ci-sub,
+.ci-intro.reduced .ci-stripe {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- banners: a slab that slides in with a stripe running under it; warnings pulse */
+.ph-banner:not(.hidden) {
+  animation: cb-in 0.38s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+.ph-banner:not(.hidden)::after {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: -7px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: left;
+  animation: cb-line 0.5s 0.12s ease-out both;
+  opacity: 0.8;
+}
+.ph-banner[data-tone='warn']:not(.hidden) {
+  animation: cb-in 0.38s cubic-bezier(0.2, 0.9, 0.3, 1.25), cb-pulse 0.9s 0.4s ease-in-out 3;
+}
+@keyframes cb-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(1.25); filter: blur(3px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); filter: none; }
+}
+@keyframes cb-line {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes cb-pulse {
+  50% { text-shadow: 0 0 22px rgba(255, 70, 50, 0.85), 0 3px 0 rgba(0, 0, 0, 0.6); }
+}
+
+/* ---- toasts (loot, squad news): in from the side with a little overshoot */
+.ph-toast {
+  animation: ct-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+@keyframes ct-in {
+  from { opacity: 0; transform: translateX(-24px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- your eliminations: stamped in */
+.killconfirm.pop {
+  animation: kc-stamp 0.42s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+.killconfirm.pop b {
+  display: inline-block;
+  animation: kc-name 0.5s 0.05s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+.killconfirm.wipe::before {
+  content: 'SQUAD WIPED';
+  position: absolute;
+  left: 50%;
+  top: -26px;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  font: 800 11px var(--font, system-ui);
+  letter-spacing: 0.24em;
+  color: #1a1206;
+  background: #ffd24a;
+  border-radius: 4px;
+  animation: kc-wipe 0.5s 0.15s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes kc-stamp {
+  0% { opacity: 0; transform: translateX(-50%) scale(1.6); }
+  60% { opacity: 1; transform: translateX(-50%) scale(0.95); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+@keyframes kc-name {
+  from { transform: scale(1.5) rotate(-4deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes kc-wipe {
+  from { transform: translateX(-50%) scale(0.4); opacity: 0; }
+  to { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+
+/* ---- the end of the match: knocked off, the win */
+.ph-out:not(.hidden),
+.ph-win:not(.hidden) {
+  animation: ce-in 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+.ph-out:not(.hidden) .ph-out-title,
+.ph-win:not(.hidden) h1,
+.ph-win:not(.hidden) .title {
+  animation: ce-title 0.7s 0.1s cubic-bezier(0.25, 1.6, 0.45, 1) both;
+}
+.ph-out:not(.hidden) .ph-out-stats,
+.ph-out:not(.hidden) .ph-out-place {
+  animation: ci-up 0.45s 0.45s ease-out both;
+}
+@keyframes ce-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ce-title {
+  from { opacity: 0; transform: scale(1.7) rotate(-3deg); letter-spacing: 0.3em; }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- menu screens: a quick rise and fade in when they open */
+.screen.overlay:not(.hidden) > .overlay-panel,
+.screen.eco:not(.hidden) {
+  animation: cs-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+.screen.menu:not(.hidden) {
+  animation: cs-fade 0.35s ease-out;
+}
+@keyframes cs-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cs-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ph-banner:not(.hidden),
+  .ph-banner:not(.hidden)::after,
+  .ph-toast,
+  .killconfirm.pop,
+  .killconfirm.pop b,
+  .killconfirm.wipe::before,
+  .ph-out:not(.hidden),
+  .ph-win:not(.hidden),
+  .ph-out:not(.hidden) *,
+  .ph-win:not(.hidden) *,
+  .screen.overlay:not(.hidden) > .overlay-panel,
+  .screen.eco:not(.hidden),
+  .screen.menu:not(.hidden) {
+    animation: none !important;
+  }
+}

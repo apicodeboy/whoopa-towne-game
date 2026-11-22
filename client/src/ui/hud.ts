@@ -196,6 +196,7 @@ export class Hud {
   private objectiveText: HTMLElement;
   private objectiveFill: HTMLElement;
   private confirmEl: HTMLElement;
+  private confirmWipe = false;
   private confirmTimer = 0;
   private respawnEl: HTMLElement;
   private respawnText: HTMLElement;
@@ -680,10 +681,17 @@ export class Hud {
   killConfirm(victim: string, victimTeam: TeamId, head: boolean): void {
     this.confirmEl.innerHTML = `<span>ELIMINATED</span><b class="t${victimTeam}">${escapeHtml(victim)}</b>${head ? '<em>HEADSHOT</em>' : ''}`;
     this.confirmEl.className = 'killconfirm';
+    this.confirmWipe = false;
     void this.confirmEl.offsetWidth;
     this.confirmEl.classList.add('pop');
     this.confirmTimer = 1.9;
   }
+  /** JUMP OFF THE PORCH: your elimination finished off a whole squad. */
+  squadWiped(): void {
+    this.confirmWipe = true;
+    this.confirmEl.classList.add('wipe');
+  }
+
 
   killFeed(killer: string, killerTeam: TeamId | -1, victim: string, victimTeam: TeamId, weaponCode: number, head: boolean, mine: boolean): void {
     const row = el('div', `kf${mine ? ' mine' : ''}`);

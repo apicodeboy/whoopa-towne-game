@@ -12,6 +12,7 @@ import './styles/economy.css';
 import './styles/menutheme.css';
 import './styles/gunpicker.css';
 import './styles/editor.css';
+import './styles/cinematic.css';
 import { CREWS } from '@shared/config/crews';
 import type { ModeId } from '@shared/config/game';
 import type { BotDifficulty } from '@shared/protocol';

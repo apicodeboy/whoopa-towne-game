@@ -172,10 +172,19 @@ export class PorchHud {
     apply();
   }
 
+  /** The match intro is saying it: no "EVERYBODY OFF THE PORCH!" banner this time. */
+  quietDeploy(): void {
+    this.deployQuiet = true;
+  }
+  private deployQuiet = false;
+
   /** Big center banner (text only: there is no announcer voice). */
   banner(text: string, tone: 'warn' | 'good' | 'info' = 'info', seconds = 3): void {
     this.bannerEl.textContent = text;
     this.bannerEl.dataset.tone = tone;
+    // (restart its entrance, even over a banner already showing)
+    this.bannerEl.classList.add('hidden');
+    void this.bannerEl.offsetWidth;
     this.bannerEl.classList.remove('hidden');
     this.bannerTimer = seconds;
   }
@@ -244,7 +253,9 @@ export class PorchHud {
         const prev = this.lastStage;
         this.lastStage = snap.stage;
         if (prev >= 0) {
-          if (snap.stage === STAGE_DEPLOY) this.banner('EVERYBODY OFF THE PORCH!', 'good');
+          if (snap.stage === STAGE_DEPLOY) {
+            if (!this.deployQuiet) this.banner('EVERYBODY OFF THE PORCH!', 'good');
+          }
           else if (snap.stage === STAGE_RIOT) this.banner('RIOT APPROACHING', 'warn', 3.5);
           else if (snap.stage === STAGE_ENDED - 1) this.banner('FINAL RIOT', 'warn', 3.5);
           else if (snap.stage > STAGE_RIOT && snap.stage < STAGE_ENDED) this.banner('RIOT APPROACHING', 'warn', 3.5);
