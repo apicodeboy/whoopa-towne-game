@@ -313,6 +313,11 @@ export class SkinnedCharacter implements CharacterVisual {
   private recoil = 0;
   private flinch = 0;
   private throwT = -1;
+  /** Bringing a weapon up after a switch (0 -> 1), and racking it after a shot (pump / bolt: 0 -> 1). */
+  private drawT = 1;
+  private rackT = 1;
+  /** Knees taking a landing (decays to 0). */
+  private landDip = 0;
   private dead = false;
   /** Animation time not yet applied because the character was off screen. */
   private skipped = 0;
@@ -649,6 +654,13 @@ export class SkinnedCharacter implements CharacterVisual {
   shot(): void {
     this.shootT = 1;
     this.recoil = 1;
+    // pump shotguns and bolt rifles work the action between shots
+    const w = this.held !== 'none' && this.held !== 'grenade' && this.held !== 'smoke' ? WEAPONS[this.held] : null;
+    if (w && (w.cls === 'shotgun' || w.cls === 'sniper')) this.rackT = 0;
+  }
+
+  land(speed: number): void {
+    this.landDip = Math.max(this.landDip, Math.min(1, (speed - 2) / 9));
   }
 
   throwItem(): void {
@@ -687,6 +699,8 @@ export class SkinnedCharacter implements CharacterVisual {
 
   private setHeld(item: HeldItem): void {
     if (item === this.held) return;
+    // a switch: the new one comes up from low (not on the very first one)
+    if (this.held !== 'none' || item !== 'none') this.drawT = 0;
     this.held = item;
     if (this.gun) {
       this.gunMount.remove(this.gun);
@@ -891,8 +905,11 @@ export class SkinnedCharacter implements CharacterVisual {
     _v5.set(cosY, 0, -sinY); // character's right axis in world space
 
     // crouch: drop the hips and re-solve both legs onto the (animated) feet
-    if (this.crouchT > 0.001 && this.body) {
-      const drop = CROUCH_DROP * this.crouchT;
+    // (a hard landing dips the knees for a moment, like a quick crouch)
+    this.landDip = Math.max(0, this.landDip - dt * 3.2);
+    const dipK = Math.sin(Math.min(1, this.landDip) * Math.PI * 0.5) * 0.55;
+    if ((this.crouchT > 0.001 || dipK > 0.001) && this.body) {
+      const drop = CROUCH_DROP * Math.min(1, this.crouchT + dipK);
       const anchors = this.legs.map((leg) => ({
         knee: leg.lower.getWorldPosition(new THREE.Vector3()),
         hip: leg.upper.getWorldPosition(new THREE.Vector3()),
@@ -955,10 +972,45 @@ export class SkinnedCharacter implements CharacterVisual {
       pitch = lerp(pitch, -0.75, this.sprintT);
       yaw = 0.55 * this.sprintT;
     }
-    const reload = pose.reload >= 0 && armed ? Math.sin(Math.PI * clamp(pose.reload, 0, 1)) : 0;
+    // each kind of gun reloads its own way (see the hands below): a magazine rifle rolls to
+    // show its mag well, a shotgun rolls further for its loading port and feeds shell by shell,
+    // a pistol comes up and back toward the face
+    const cls = wdef?.cls ?? 'rifle';
+    const rl = pose.reload >= 0 && armed ? clamp(pose.reload, 0, 1) : -1;
+    const reload = rl >= 0 ? Math.sin(Math.PI * rl) : 0;
     if (reload > 0) {
-      pitch += 0.3 * reload;
-      roll = 0.5 * reload;
+      if (cls === 'shotgun') {
+        pitch += 0.18 * reload;
+        roll = 0.85 * reload;
+      } else if (pistol) {
+        pitch += 0.45 * reload;
+        roll = -0.25 * reload;
+      } else {
+        pitch += 0.3 * reload;
+        roll = 0.5 * reload;
+      }
+    }
+    // switching: the gun comes up from pointing at the ground
+    if (this.drawT < 1) {
+      this.drawT = Math.min(1, this.drawT + dt / 0.32);
+      const k = 1 - this.drawT * this.drawT * (3 - 2 * this.drawT);
+      pitch -= 0.95 * k;
+      yaw += 0.35 * k;
+    }
+    // racking after a shot: a shotgun's pump (the left hand, below), a bolt rifle's cant
+    if (this.rackT < 1) {
+      this.rackT = Math.min(1, this.rackT + dt / (cls === 'sniper' ? 0.55 : 0.38));
+      if (cls === 'sniper') {
+        const k = Math.sin(Math.PI * this.rackT);
+        roll += 0.28 * k;
+        pitch += 0.07 * k;
+      }
+    }
+    // the gun bobs a little with your stride (less when aiming in)
+    if (armed && this.moveT > 0.05 && this.sprintT < 0.5) {
+      const sway = this.moveT * (1 - 0.7 * this.aimT);
+      pitch += Math.sin(this.phase * Math.PI * 4) * 0.022 * sway;
+      yaw += Math.sin(this.phase * Math.PI * 2) * 0.03 * sway;
     }
     if (this.throwT >= 0) {
       this.throwT += dt / 0.42;
@@ -1032,7 +1084,17 @@ export class SkinnedCharacter implements CharacterVisual {
           if (hand.distanceTo(shLl) <= armLen || along <= nearest) break;
           along = Math.max(nearest, along - 0.02);
         }
-        if (reload > 0 && fit.mag) {
+        if (cls === 'shotgun' && this.rackT < 1) {
+          // the pump: back along the handguard and forward again
+          hand.addScaledVector(dir, -0.1 * Math.sin(Math.PI * this.rackT));
+        }
+        if (reload > 0 && cls === 'shotgun') {
+          // shell by shell: from the belt up into the loading port under the receiver, four times
+          const port = new THREE.Vector3(0, -0.05, -0.09).applyQuaternion(q).add(grip).add(wristOff);
+          const belt = this.root.worldToLocal(this.arms.L.upper.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(0.05, -0.42, -0.05));
+          const feed = 0.5 - 0.5 * Math.cos(Math.PI * 2 * 4 * rl);
+          hand.lerp(port.lerp(belt, feed * 0.55), Math.min(1, reload * 2.2));
+        } else if (reload > 0 && fit.mag) {
           // left hand down to the magazine and back
           const mag = new THREE.Vector3(0, fit.mag[1] * sc, -fit.mag[0] * sc).applyQuaternion(q).add(grip).add(wristOff);
           hand.lerp(mag, reload);
@@ -1041,10 +1103,16 @@ export class SkinnedCharacter implements CharacterVisual {
         this.turnHand('L', axisL.applyQuaternion(rq), acrossL.applyQuaternion(rq));
         this.closeHand('L', 0.8);
       } else if (this.arms.L) {
-        // pistol: the free arm hangs relaxed at the side
+        // pistol: the free arm hangs relaxed at the side; on a reload it fetches a fresh
+        // magazine from the belt and seats it in the bottom of the grip
         const shL = this.root.worldToLocal(this.arms.L.upper.getWorldPosition(new THREE.Vector3()));
-        const rest = shL.add(new THREE.Vector3(-0.07, -0.4, 0.05 + Math.sin(this.phase * Math.PI * 2) * 0.07 * this.moveT));
-        reach(this.arms.L, this.root.localToWorld(rest), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
+        const rest = shL.clone().add(new THREE.Vector3(-0.07, -0.4, 0.05 + Math.sin(this.phase * Math.PI * 2) * 0.07 * this.moveT));
+        if (reload > 0) {
+          const well = new THREE.Vector3(0, -0.07, 0.02).applyQuaternion(q).add(grip);
+          rest.lerp(well, Math.min(1, reload * 1.6));
+        }
+        reach(this.arms.L, this.root.localToWorld(rest), new THREE.Vector3(-0.3, reload > 0 ? -1 : 0, 1).applyQuaternion(rq));
+        if (reload > 0) this.closeHand('L', 0.7);
       }
     } else if (this.handR) {
       // a grenade / smoke is held like a weapon: ready in front of the chest, cocked back over

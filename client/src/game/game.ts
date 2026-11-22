@@ -1109,7 +1109,10 @@ export class Game {
         audio?.jump();
         this.effects.airPuff(_v.set(st.x, st.y + 0.1, st.z));
       }
-      if (act.landed) audio?.land(act.landSpeed);
+      if (act.landed) {
+        audio?.land(act.landSpeed);
+        this.localChar.land?.(act.landSpeed);
+      }
     } else {
       this.predictor.record(cmd);
     }

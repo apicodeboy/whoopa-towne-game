@@ -82,6 +82,9 @@ export class RemotePlayer {
   vx = 0;
   vz = 0;
   flags = 0;
+  private lastY = 0;
+  private wasGrounded = true;
+  private fallSpeed = 0;
   held = 0;
   hp = 100;
   kills = 0;
@@ -230,6 +233,15 @@ export class RemotePlayer {
     p.yaw = this.yaw; p.pitch = this.pitch;
     p.vx = this.vx; p.vz = this.vz;
     p.grounded = (this.flags & PF.GROUND) !== 0;
+    // a landing: how fast they were coming down (from the interpolated height) dips the knees
+    if (dt > 0) {
+      const vy = (this.y - this.lastY) / dt;
+      if (!p.grounded) this.fallSpeed = Math.max(this.fallSpeed, -vy);
+      else if (!this.wasGrounded && this.fallSpeed > 2) this.visual.land?.(this.fallSpeed);
+      if (p.grounded) this.fallSpeed = 0;
+    }
+    this.lastY = this.y;
+    this.wasGrounded = p.grounded;
     p.crouching = (this.flags & PF.CROUCH) !== 0;
     p.sprinting = (this.flags & PF.SPRINT) !== 0;
     p.aiming = (this.flags & PF.AIM) !== 0;

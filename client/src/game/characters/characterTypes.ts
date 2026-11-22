@@ -60,6 +60,8 @@ export interface CharacterVisual {
   shot(): void;
   /** Play a throw gesture. */
   throwItem(): void;
+  /** Touched down after a fall (`speed` m/s down): the knees take it. */
+  land?(speed: number): void;
   /** Flinch when damaged. */
   hit(): void;
   /** Start the death fall; (dx,dz) is the world direction the killing blow travelled. */
