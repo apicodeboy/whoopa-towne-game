@@ -386,3 +386,49 @@ test('smoke blocks bot line of sight', async () => {
   assert(sim.phase === PHASE.PLAYING, 'still playing');
   sim.dispose();
 });
+
+test('hits line up with the crosshair: beside the target misses, on it hits, a wall still blocks', async () => {
+  const sim = await makeSim();
+  const { traceShot, makeShotResult, HIT_PLAYER, HIT_WORLD } = await import('../src/sim/combat');
+  // an open stretch of street; the shooter faces -Z, the camera behind and over the right shoulder
+  const X = -18, Z = 30;
+  const eye = { x: X, y: 1.62, z: Z };
+  const cam = { x: X + 0.85, y: 1.7, z: Z + 2.6 };
+  const target = { id: 7, x: X, y: 0, z: Z - 6, crouching: false };
+  const shoot = (px: number, py: number, pz: number) => {
+    const dx = px - cam.x, dy = py - cam.y, dz = pz - cam.z, l = Math.hypot(dx, dy, dz);
+    return traceShot(sim.phys, eye.x, eye.y, eye.z, cam.x, cam.y, cam.z, dx / l, dy / l, dz / l, 120, [target], makeShotResult());
+  };
+  // crosshair well to the right of the target, slightly up: the line from your eyes to that far
+  // point passes through the target's head (it used to count as a hit); the crosshair never did
+  const beside = shoot(X - 0.3, 3, Z - 100);
+  assert(beside.kind !== HIT_PLAYER, `a crosshair beside the target does not hit it (kind ${beside.kind})`);
+  // on the target's chest: a hit
+  const on = shoot(X, 1.2, Z - 6);
+  assert(on.kind === HIT_PLAYER && on.target === 7, 'a crosshair on the target hits it');
+  // on its head: a headshot
+  const head = shoot(X, 1.62, Z - 6);
+  assert(head.kind === HIT_PLAYER && head.head, 'on the head: headshot');
+  // a wall right in front of your body (the camera sees past it): the wall takes it
+  const R = await initRapier();
+  void R;
+  sim.dispose();
+  const sim2 = await makeSim();
+  const wallZ = Z - 0.8;
+  const blocked = (() => {
+    // (a thin wall just in front of the shooter's eyes, built into the shot through a fake world)
+    const phys = {
+      raycast: (ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number) => {
+        // only the bullet ray starts at the eye; the wall is a plane at z = wallZ
+        if (Math.abs(ox - eye.x) > 1e-6 || Math.abs(oz - eye.z) > 1e-6 || dz >= 0) return -1;
+        const t = (wallZ - oz) / dz;
+        return t >= 0 && t <= max ? t : -1;
+      },
+      hitNormal: { x: 0, y: 0, z: 1 },
+    } as unknown as typeof sim2.phys;
+    const dx = X - cam.x, dy = 1.2 - cam.y, dz = Z - 6 - cam.z, l = Math.hypot(dx, dy, dz);
+    return traceShot(phys, eye.x, eye.y, eye.z, cam.x, cam.y, cam.z, dx / l, dy / l, dz / l, 120, [target], makeShotResult());
+  })();
+  assert(blocked.kind === HIT_WORLD, `cover in front of your body still blocks (kind ${blocked.kind})`);
+  sim2.dispose();
+});

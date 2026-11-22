@@ -14,7 +14,8 @@ export class SettingsScreen {
   private store: SettingsStore;
   private refreshers: Array<() => void> = [];
   /** Which controller family to draw button names for (set by the app). */
-  padKind: 'xbox' | 'playstation' | 'gamepad' = 'xbox';
+  /** Which buttons the controller list shows (PS5 until a controller says otherwise). */
+  padKind: 'xbox' | 'playstation' | 'gamepad' = 'playstation';
 
   /** Opens the DEV MODE passcode prompt (set by the app). */
   onDevMode: (() => void) | null = null;
@@ -103,7 +104,10 @@ export class SettingsScreen {
       const render = () => {
         for (const b of tabs.querySelectorAll<HTMLElement>('.seg')) b.classList.toggle('on', b.dataset.mode === mode);
         clear(list);
-        const actions = (mode === 'keys' ? KEY_ACTIONS : PAD_ACTIONS) as readonly (KeyAction | PadAction)[];
+        let actions = (mode === 'keys' ? KEY_ACTIONS : PAD_ACTIONS) as readonly (KeyAction | PadAction)[];
+        // (on a controller, reload and use are one multipurpose button: one row for both)
+        const linked = mode === 'pad' && bindings.padLinked;
+        if (linked) actions = actions.filter((a) => a !== 'use');
         for (const a of actions) {
           const cur = el('button', 'bind-key');
           if (mode === 'keys') {
@@ -113,7 +117,8 @@ export class SettingsScreen {
             cur.innerHTML = `<kbd class="glyph pad ${g.c}">${g.t}</kbd>`;
           }
           cur.addEventListener('click', () => void capture(a, cur));
-          list.append(el('div', 'srow bind-row', [el('span', 'slabel', BINDING_LABELS[a]), cur]));
+          const label = linked && a === 'reload' ? 'Reload · Use · Pick up (one button: uses what is in reach, reloads otherwise)' : BINDING_LABELS[a];
+          list.append(el('div', 'srow bind-row', [el('span', 'slabel', label), cur]));
         }
       };
       const capture = async (action: KeyAction | PadAction, btnEl: HTMLElement): Promise<void> => {

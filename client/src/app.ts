@@ -36,7 +36,7 @@ import { LobbyScreen } from './ui/lobbyScreen';
 import { MainMenu } from './ui/mainMenu';
 import { MenuNav } from './ui/menuNav';
 import { ClickToPlay, PauseMenu, ResultsBar } from './ui/pauseMenu';
-import { FULL_LEGEND, deviceName, legendHtml } from './ui/prompts';
+import { FULL_LEGEND, FULL_PORCH_LEGEND, deviceName, legendHtml } from './ui/prompts';
 import { SettingsScreen } from './ui/settingsScreen';
 import { Toasts } from './ui/toast';
 
@@ -217,6 +217,8 @@ export class App {
         this.setPaused(false);
       },
     });
+    // (rebinding in Settings shows up in the pause menu straight away)
+    bindings.onChange(() => this.refreshPauseLegend());
     this.results = new ResultsBar(ui, {
       playAgain: () => {
         const last = this.lastPractice;
@@ -433,7 +435,7 @@ export class App {
     document.body.dataset.device = device;
     document.body.classList.toggle('is-touch', device === 'touch');
     this.menu.setDevice(device);
-    this.pause.setLegend(`CONTROLS · ${deviceName(device).toUpperCase()}`, legendHtml(device, FULL_LEGEND));
+    this.refreshPauseLegend();
     if (device !== 'kbm') this.input.kbm.releaseLock();
     // controller buttons fire no DOM events, so this is their chance to start the sound
     if (device !== 'kbm') this.audio.unlock();
@@ -739,10 +741,18 @@ export class App {
     this.setPaused(!this.game.paused);
   }
 
+  /** The pause menu's controls: for the device in use, the mode being played, the current bindings. */
+  private refreshPauseLegend(): void {
+    const device = this.input.device;
+    const list = this.session?.mode === 'porch' ? FULL_PORCH_LEGEND : FULL_LEGEND;
+    this.pause.setLegend(`CONTROLS · ${deviceName(device).toUpperCase()}`, legendHtml(device, list));
+  }
+
   setPaused(paused: boolean): void {
     const game = this.game;
     if (!game) return;
     game.paused = paused;
+    if (paused) this.refreshPauseLegend();
     const view = this.lobby?.view();
     const canEnd = !!view && view.isPrivate && view.hostId === view.myId;
     this.pause.setLoadoutAllowed(this.session?.mode !== 'porch');

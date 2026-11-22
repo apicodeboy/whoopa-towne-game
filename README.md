@@ -9,7 +9,8 @@ and a corner-store strip in the middle.
   royale, takes 60 per match (bots fill whatever humans don't)
 - **Team Deathmatch** (first to 50 kills, or most kills after 10 minutes) and
   **Gang Turf War** (hold zones A, B and C; first to 200)
-- Keyboard + mouse, PS5 / Xbox controllers, and phone touch controls
+- Keyboard + mouse, PS5 / Xbox controllers (PS5 buttons by default, and for any controller the
+  browser does not name), and phone touch controls
 - Authoritative server with client-side prediction, interpolation and lag-compensated hits
 - No accounts: pick a display name, Quick Play, or share a 6-character invite code
 - **Character Creator**: a character with a human face (eyes, brows, nose, lips) and big spiky
@@ -425,6 +426,10 @@ have not been tested yet (see below).
   instead and what needs Blender.
 - A JUMP OFF THE PORCH match cannot be joined once it is under way (the day/night sync covers
   late arrivals by design, but there is no way to arrive late yet).
+- Hits follow the crosshair: a shot hits the player the crosshair is on (and only if nothing
+  solid is between your gun and them). It used to also count anyone the line from your eyes to
+  the aim point passed through, which hit targets the crosshair was beside. Measured on a
+  simulated range, about 22% fewer hits than before.
 - The server trusts nothing a player's browser tells it about position or damage, but there
   is no additional anti-cheat (for example against aim bots).
 

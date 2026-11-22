@@ -21,7 +21,7 @@ export const BINDING_LABELS: Record<KeyAction | PadAction, string> = {
   crouch: 'Crouch (tap) · roll while sprinting',
   crouchHold: 'Crouch (hold)',
   sprint: 'Sprint',
-  reload: 'Reload (on a controller, shared with Use: uses what is in reach first)',
+  reload: 'Reload',
   swap: 'Next weapon',
   prev: 'Previous weapon (tap) · weapon wheel (hold; fire in it to mark danger)',
   wheel: 'Weapon wheel (hold) · click in it to mark danger',
@@ -97,8 +97,11 @@ export const KEY_RESERVED: readonly string[] = [
 ];
 
 const STORE_KEY = 'whoopa.bindings';
+/** Where an action pushed off its key / button goes (the first one free). */
+const SPARE_KEYS: readonly string[] = ['KeyF', 'KeyV', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyK', 'KeyM', 'Digit5', 'Digit6', 'Digit7'];
+const SPARE_BUTTONS: readonly number[] = [PAD.DOWN, PAD.R3, PAD.L3, PAD.SELECT, PAD.NORTH, PAD.TOUCHPAD, PAD.R1, PAD.L1];
 
-class BindingStore {
+export class BindingStore {
   keys: Record<KeyAction, string> = { ...DEFAULT_KEYS };
   /** True while Settings waits for a key / button (menus ignore controller presses meanwhile). */
   capturing = false;
@@ -132,6 +135,50 @@ class BindingStore {
     } catch {
       /* storage blocked or bad data: defaults */
     }
+    // (a layout saved with a key or button on two actions is put right)
+    this.dedupe();
+  }
+
+  /** Reload and use share one controller button (square: uses what is in reach, reloads otherwise). */
+  get padLinked(): boolean {
+    return this.pad.reload === this.pad.use;
+  }
+
+  /**
+   * One key / button per action. The one exception is the controller's multipurpose button
+   * (reload + use). Anything else found sharing keeps its place on one action; the others move
+   * to the first free key / button.
+   */
+  private dedupe(): void {
+    const keySeen = new Map<string, KeyAction>();
+    for (const a of KEY_ACTIONS) {
+      if (!keySeen.has(this.keys[a])) {
+        keySeen.set(this.keys[a], a);
+        continue;
+      }
+      const used = new Set(Object.values(this.keys));
+      const free = [DEFAULT_KEYS[a], ...SPARE_KEYS].find((k) => !used.has(k) && !KEY_RESERVED.includes(k));
+      if (free) {
+        this.keys[a] = free;
+        keySeen.set(free, a);
+      }
+    }
+    const padSeen = new Map<number, PadAction>();
+    for (const a of PAD_ACTIONS) {
+      const b = this.pad[a];
+      const other = padSeen.get(b);
+      const pair = other !== undefined && ((other === 'reload' && a === 'use') || (other === 'use' && a === 'reload'));
+      if (other === undefined || pair) {
+        padSeen.set(b, a);
+        continue;
+      }
+      const used = new Set(Object.values(this.pad));
+      const free = [DEFAULT_PAD[a], ...SPARE_BUTTONS].find((x) => !used.has(x) && !PAD_RESERVED.includes(x));
+      if (free !== undefined) {
+        this.pad[a] = free;
+        padSeen.set(free, a);
+      }
+    }
   }
 
   /** True while the keyboard layout is the default one (the extra F / V alternates stay on). */
@@ -159,17 +206,22 @@ class BindingStore {
     const old = this.keys[action];
     for (const a of KEY_ACTIONS) if (a !== action && this.keys[a] === code) this.keys[a] = old;
     this.keys[action] = code;
+    this.dedupe();
     this.save();
     return true;
   }
 
-  /** Puts a button on an action (swapping like keys; use and heal may share a button). */
+  /**
+   * Puts a button on an action, swapping like keys: an action that had that button gets this
+   * action's old one. Reload and use move together while they share their button.
+   */
   setPad(action: PadAction, index: number): boolean {
     if (PAD_RESERVED.includes(index)) return false;
+    const group: PadAction[] = this.padLinked && (action === 'reload' || action === 'use') ? ['reload', 'use'] : [action];
     const old = this.pad[action];
-    const shareable = (a: PadAction) => (a === 'use' && action === 'heal') || (a === 'heal' && action === 'use');
-    for (const a of PAD_ACTIONS) if (a !== action && this.pad[a] === index && !shareable(a)) this.pad[a] = old;
-    this.pad[action] = index;
+    for (const a of PAD_ACTIONS) if (!group.includes(a) && this.pad[a] === index) this.pad[a] = old;
+    for (const a of group) this.pad[a] = index;
+    this.dedupe();
     this.save();
     return true;
   }
@@ -202,7 +254,8 @@ export function keyName(code: string): string {
 
 /** A button's glyph text and style class per controller family. */
 export function padGlyph(device: DeviceKind, index: number): { t: string; c: string } {
-  const ps = device === 'playstation';
+  // (PS5 buttons unless the controller is an Xbox one: a pad the browser does not name too)
+  const ps = device === 'playstation' || device === 'gamepad';
   const xb = device === 'xbox';
   switch (index) {
     case PAD.SOUTH: return ps ? { t: '✕', c: 'face ps-cross' } : { t: 'A', c: xb ? 'face xb-a' : 'face' };

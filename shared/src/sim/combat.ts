@@ -64,9 +64,13 @@ export function rayHitbox(
  * Third-person hitscan, done in two rays so the crosshair is honest but cover still works:
  *
  *  1. Aim ray: from the camera through the crosshair, ignoring everything between the camera
- *     and the shooter. The first thing it meets is the point the player is aiming at.
- *  2. Bullet ray: from the shooter's eyes toward that point. Whatever it meets first is hit,
- *     so a wall right in front of your body blocks the shot even if the camera can see past it.
+ *     and the shooter. The first thing it meets is the point the player is aiming at, and the
+ *     only player that can be hit is one the crosshair is actually on.
+ *  2. Bullet ray: from the shooter's eyes toward that point. A wall it meets first takes the
+ *     shot instead (a wall right in front of your body blocks it even if the camera can see
+ *     past). Players are not hit along this ray: it runs at an angle to the crosshair (the
+ *     camera is over the shoulder), and hitting someone the crosshair is beside is exactly what
+ *     players see as a hit that does not line up.
  *
  * The server runs this against lag-compensated targets; the client runs the exact same
  * function for instant tracers and impact effects.
@@ -84,6 +88,7 @@ export function traceShot(
   const sx = camX + dirX * s0, sy = camY + dirY * s0, sz = camZ + dirZ * s0;
   let tAim = range;
   let aimHit = false;
+  let aimTarget = -1, aimHead = false;
   const tw = phys.raycast(sx, sy, sz, dirX, dirY, dirZ, range, Q_BULLET);
   if (tw >= 0) {
     tAim = tw;
@@ -94,6 +99,8 @@ export function traceShot(
     if (h.t >= 0 && h.t < tAim) {
       tAim = h.t;
       aimHit = true;
+      aimTarget = i;
+      aimHead = h.head;
     }
   }
   const px = sx + dirX * tAim, py = sy + dirY * tAim, pz = sz + dirZ * tAim;
@@ -120,14 +127,12 @@ export function traceShot(
     out.ny = phys.hitNormal.y;
     out.nz = phys.hitNormal.z;
   }
-  for (let i = 0; i < targets.length; i++) {
-    const h = rayHitbox(eyeX, eyeY, eyeZ, bx, by, bz, targets[i]);
-    if (h.t >= 0 && h.t <= maxLen && h.t < best) {
-      best = h.t;
-      out.kind = HIT_PLAYER;
-      out.target = targets[i].id;
-      out.head = h.head;
-    }
+  // the player under the crosshair, unless a wall is in the way first
+  if (aimTarget >= 0 && (tw2 < 0 || tw2 >= len - 0.05)) {
+    best = Math.min(len, maxLen);
+    out.kind = HIT_PLAYER;
+    out.target = targets[aimTarget].id;
+    out.head = aimHead;
   }
   out.dist = best;
   out.ex = eyeX + bx * best;

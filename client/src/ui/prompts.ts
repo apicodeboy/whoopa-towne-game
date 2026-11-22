@@ -97,24 +97,12 @@ const PLAYSTATION: GlyphSet = {
   mark: { t: 'R2', c: 'trig' },
 };
 
-/** Unknown pads: positional names without platform colors. */
-const GENERIC: GlyphSet = {
-  ...XBOX,
-  reload: { t: 'X', c: 'face' },
-  jump: { t: 'A', c: 'face' },
-  crouch: { t: 'B', c: 'face' },
-  throw: { t: 'Y', c: 'face' },
-  accept: { t: 'A', c: 'face' },
-  back: { t: 'B', c: 'face' },
-  scores: { t: 'Select', c: 'sys' },
-  pause: { t: 'Start', c: 'sys' },
-};
-
 const SETS: Record<DeviceKind, GlyphSet | null> = {
   kbm: KBM,
   xbox: XBOX,
   playstation: PLAYSTATION,
-  gamepad: GENERIC,
+  // (a controller the browser does not name: PS5 buttons, the default layout's own)
+  gamepad: PLAYSTATION,
   touch: null,
 };
 
@@ -201,12 +189,14 @@ export const GAMEPLAY_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jum
 /** JUMP OFF THE PORCH: inventory slots, searching, healing and dropping instead of the classic swap. */
 export const PORCH_LEGEND: readonly Action[] = ['fire', 'aim', 'reload', 'jump', 'crouch', 'sprint', 'slots', 'wheel', 'mark', 'use', 'heal', 'drop', 'throw', 'scores', 'pause'];
 export const FULL_LEGEND: readonly Action[] = ['move', 'look', ...GAMEPLAY_LEGEND];
+/** Everything, for the pause menu in JUMP OFF THE PORCH (searching, healing, dropping too). */
+export const FULL_PORCH_LEGEND: readonly Action[] = ['move', 'look', ...PORCH_LEGEND];
 
 export function deviceName(device: DeviceKind): string {
   switch (device) {
     case 'xbox': return 'Xbox controller';
     case 'playstation': return 'PlayStation controller';
-    case 'gamepad': return 'Controller';
+    case 'gamepad': return 'Controller (PS5 buttons)';
     case 'touch': return 'Touch';
     default: return 'Keyboard + mouse';
   }
