@@ -7,6 +7,7 @@ import { solidQuat } from '@shared/map/types';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { StaticModelBatch, type Assets } from '../assets';
 import { DAY, LIGHTING, NIGHT, lightUniforms, live as liveLight } from '../lighting';
+import { AnimatedBoard, BOARDS } from './billboards';
 import { BoxBatch, type BoxOptions } from './boxBatch';
 import { crops, disposeFarmShapes, farmSolid, FARM_AREAS, orchardTree, tractor, type Draw } from './farm';
 import { FarmAnimals } from './farmAnimals';
@@ -263,6 +264,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
   const extras: THREE.Object3D[] = [];
   /** Corners of the live scoreboard screens (two triangles each). */
   const liveQuads: number[] = [];
+  /** Ads with animated content (their own screens; the rest stay painted in the sign atlas). */
+  const boards: AnimatedBoard[] = [];
 
   const b = map.bounds;
   const yawQ = (ry: number) => solidQuat({ ry });
@@ -834,6 +837,8 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
           drawScores(page);
         }
       }
+      // animated ads near the camera play; the rest hold still
+      if (camera) for (const b of boards) b.update(time, camera, liveLight.night);
       // building interiors only near the camera
       if (camera) {
         const r = INTERIOR_RANGE + CHUNK * 0.71;
@@ -845,6 +850,7 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
     },
     dispose() {
       for (const d of disposables) d.dispose();
+      for (const b of boards) b.dispose();
       animals?.dispose();
       group.removeFromParent();
     },
@@ -885,7 +891,13 @@ export function buildWorld(map: MapDef, assets: Assets | null = null): WorldVisu
       } else {
         // (map signs face -Z at yaw 0; the atlas turns them half round, as it does for map signs)
         const yaw = f === 'n' ? 0 : f === 's' ? Math.PI : f === 'w' ? Math.PI / 2 : -Math.PI / 2;
-        signs.add(adCanvas(what), 'sign', cx, s.y, cz, yaw + Math.PI, pw, ph);
+        const cfg = BOARDS[what];
+        if (cfg) {
+          // an animated ad: its own screen on the same face (a plane faces +Z at yaw 0)
+          const board = new AnimatedBoard(cfg, adCanvas(what), new THREE.Vector3(cx + fx * 0.01, s.y, cz + fz * 0.01), yaw + Math.PI, pw, ph);
+          boards.push(board);
+          group.add(board.mesh);
+        } else signs.add(adCanvas(what), 'sign', cx, s.y, cz, yaw + Math.PI, pw, ph);
       }
     }
   }
