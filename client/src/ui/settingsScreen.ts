@@ -16,6 +16,9 @@ export class SettingsScreen {
   /** Which controller family to draw button names for (set by the app). */
   padKind: 'xbox' | 'playstation' | 'gamepad' = 'xbox';
 
+  /** Opens the DEV MODE passcode prompt (set by the app). */
+  onDevMode: (() => void) | null = null;
+
   constructor(parent: HTMLElement, store: SettingsStore, onClose: () => void) {
     this.store = store;
 
@@ -232,6 +235,7 @@ export class SettingsScreen {
           store.reset();
           this.refresh();
         }),
+        button('DEV MODE', 'btn ghost dev-open', () => this.onDevMode?.()),
         done,
       ]),
     ]);

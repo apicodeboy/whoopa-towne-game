@@ -69,6 +69,8 @@ export interface LocalSessionOptions {
   warmup?: number;
   /** Free roam: Greater Whoopa Towne to yourself, starting at AJ'S. No bots, no clock. */
   roam?: boolean;
+  /** DEV MODE: JUMP OFF THE PORCH alone, on foot, no riot, one of everything laid out. */
+  dev?: boolean;
 }
 
 /**
@@ -76,6 +78,9 @@ export interface LocalSessionOptions {
  * Inputs and snapshots travel through the same encode/decode path as online play
  * (optionally with artificial latency) so prediction and lag compensation behave identically.
  */
+/** Where DEV MODE starts (the plaza, open paving with room for the rows of gear). */
+export const DEV_SPOT = { x: 150, z: 30 };
+
 export class LocalSession implements Session {
   readonly kind = 'local' as const;
   readonly mode: ModeId;
@@ -85,6 +90,8 @@ export class LocalSession implements Session {
   porch?: PorchInit;
   bld?: number[];
   readonly roam: boolean;
+  /** DEV MODE (see LocalSessionOptions.dev). */
+  readonly dev: boolean;
   readonly map?: MapDef;
   handlers: SessionHandlers = {};
   ping = 0;
@@ -104,6 +111,7 @@ export class LocalSession implements Session {
     this.latency = Math.max(0, opts.latencyMs ?? 0);
     this.ping = this.latency * 2;
     this.roam = !!opts.roam;
+    this.dev = !!opts.dev && opts.mode === 'porch';
     if (opts.roam) {
       // free roam: the big map to yourself, out front of AJ'S
       this.map = getGreaterTowne();
@@ -118,8 +126,12 @@ export class LocalSession implements Session {
     }
     this.sim = new GameSim(R, {
       mode: opts.mode, botDifficulty: opts.difficulty ?? 'normal', seed: opts.seed, warmup: opts.warmup,
-      squads: opts.squads, maxPlayers: opts.mode === 'porch' ? (opts.lobbySize ?? PORCH.lobbySize) : undefined,
+      squads: this.dev ? 'solo' : opts.squads,
+      maxPlayers: opts.mode === 'porch' ? (this.dev ? 1 : opts.lobbySize ?? PORCH.lobbySize) : undefined,
+      ...(this.dev ? { warmup: 0 } : {}),
     });
+    // DEV MODE: on foot in the plaza with everything laid out in front of you, no riot
+    if (this.sim.porch && this.dev) this.sim.porch.dev = { ...DEV_SPOT };
     if (this.sim.porch) {
       // battle royale practice: you, then bots in squads until the lobby is full
       const size = SQUAD_MODES[this.sim.porch.squadMode].size;

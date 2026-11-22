@@ -276,6 +276,13 @@ export class PorchRules {
     return out;
   }
 
+  /**
+   * DEV MODE (a local practice session only, behind a passcode on the client): no riot
+   * damage, everyone starts on foot at the dev spot instead of aboard the transport, and one
+   * of everything is laid out there to try. Never set on the server.
+   */
+  dev: { x: number; z: number } | null = null;
+
   /** Puts a player aboard the transport for the start of the match. */
   board(p: SimPlayer): void {
     const s = p.state;
@@ -288,6 +295,15 @@ export class PorchRules {
     s.y = this.altitude;
     s.yaw = Math.atan2(-(this.route[2] - this.route[0]), -(this.route[3] - this.route[1]));
     s.air = AIR_RIDING;
+    if (this.dev) {
+      // dev mode: on foot at the dev spot, facing the rows of gear
+      s.x = this.dev.x;
+      s.z = this.dev.z - 3;
+      s.y = groundY(this.sim.map, s.x, s.z) + 0.05;
+      s.yaw = Math.PI;
+      s.air = AIR_GROUND;
+      s.grounded = 1;
+    }
     s.pool = 1;
     s.windX = this.windX;
     s.windZ = this.windZ;
@@ -329,6 +345,7 @@ export class PorchRules {
     this.dropBy = now + (lastInside / this.speed) * 1000;
     this.recount();
     this.squadsAtStart = this.squadsAlive;
+    if (this.dev) this.layoutDev();
   }
 
   // ------------------------------------------------------------------ per input
@@ -511,6 +528,39 @@ export class PorchRules {
     return left;
   }
 
+  /**
+   * DEV MODE: one of everything in rows in front of the dev spot (every gun with a full
+   * magazine, every ammo type, every heal, Perc 29, armor and every throwable).
+   */
+  layoutDev(): void {
+    const d = this.dev;
+    if (!d) return;
+    const rows: Item[][] = [
+      WEAPON_IDS.map((id, i) => ({ id, i })).filter(({ id }) => WEAPONS[id].kind !== 'melee' || id === 'knife')
+        .map(({ id, i }) => ({ kind: ITEM.WEAPON, code: i, count: WEAPONS[id].magSize })),
+      AMMO_TYPES.map((_a, i) => ({ kind: ITEM.AMMO, code: i, count: 240 })),
+      [
+        ...HEAL_KINDS.map((_h, i) => ({ kind: ITEM.HEAL, code: i, count: 5 })),
+        { kind: ITEM.IBUPROFEN, code: 0, count: 4 },
+        { kind: ITEM.ARMOR, code: 100, count: 1 },
+        ...THROWABLE_IDS.map((_t, i) => ({ kind: ITEM.THROWABLE, code: i, count: 4 })),
+      ],
+    ];
+    rows.forEach((row, r) => {
+      const gap = 1.5, z = d.z + 1.5 + r * 2.2;
+      row.forEach((it, k) => this.placeAt(it, d.x + (k - (row.length - 1) / 2) * gap, z));
+    });
+  }
+
+  /** An item exactly at (x, z), on whatever is there. */
+  private placeAt(it: Item, x: number, z: number): void {
+    const top = this.sim.phys.raycast(x, 40, z, 0, -1, 0, 60, Q_PROJECTILE);
+    const y = top >= 0 ? 40 - top : groundY(this.sim.map, x, z);
+    const pk: Pickup = { id: this.nextPickupId++, kind: it.kind, code: it.code, count: it.count, x, y, z };
+    this.pickups.set(pk.id, pk);
+    this.sim.pushEvent([EV.PICKUP_ADD, pk.id, pk.kind, pk.code, pk.count, Math.round(x * 100), Math.round(y * 100), Math.round(z * 100)]);
+  }
+
   /** Leaves an item on the ground (spread out a little when several land in one spot). */
   drop(it: Item, x: number, y: number, z: number, k: number): void {
     const a = k * 2.4 + this.rng.range(0, 0.6), d = k === 0 ? 0.3 : 0.6 + 0.25 * k;
@@ -668,7 +718,7 @@ export class PorchRules {
     }
 
     // the riot: anyone on the ground outside the safe area is caught in it
-    const dps = this.riotDps();
+    const dps = this.dev ? 0 : this.riotDps();
     this.riotTimer += TICK_DT;
     const hurt = this.riotTimer >= 0.5;
     if (hurt) this.riotTimer -= 0.5;

@@ -1721,3 +1721,65 @@
   100% { box-shadow: 0 0 0 2px #0a0a0d, 0 0 0 18px rgba(255, 59, 47, 0); }
 }
 .lg .plus, .wheel-hint .plus { margin: 0 2px; opacity: 0.8; }
+
+/* ---------------------------------------------------------------- DEV MODE */
+.dev-hud {
+  position: absolute;
+  top: calc(64px + var(--safe-top));
+  right: calc(12px + var(--safe-right, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: auto;
+}
+.dev-tag {
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #101114;
+  background: #ffd24a;
+  border-radius: 6px;
+}
+.dev-b {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: rgba(16, 17, 20, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.dev-b:hover {
+  border-color: #ffd24a;
+}
+.dev-panel .dev-note {
+  max-width: 340px;
+  margin: 4px auto 12px;
+  font-size: 13px;
+  opacity: 0.8;
+  text-align: center;
+}
+.dev-panel .dev-code {
+  display: block;
+  width: 200px;
+  margin: 0 auto 6px;
+  padding: 10px 12px;
+  font-size: 20px;
+  letter-spacing: 0.3em;
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+}
+.dev-panel .dev-msg {
+  min-height: 18px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #ff7a6e;
+  text-align: center;
+}

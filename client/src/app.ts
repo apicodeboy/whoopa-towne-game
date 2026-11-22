@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DevPasscodePrompt } from './ui/devMode';
 import { botAppearance, decodeAppearance, encodeAppearance, isPremiumOption, type Appearance } from '@shared/config/appearance';
 import { unlocksOf, type StoreCategory } from '@shared/config/economy';
 import type { ModeId } from '@shared/config/game';
@@ -226,6 +227,15 @@ export class App {
     });
     this.clickToPlay = new ClickToPlay(ui);
     this.settingsScreen = new SettingsScreen(ui, this.settings, () => this.settingsScreen.show(false));
+    // DEV MODE: from Settings, behind a passcode (menus only, not mid-match)
+    const devPrompt = new DevPasscodePrompt(ui, () => this.startDev());
+    this.settingsScreen.onDevMode = () => {
+      if (this.game || this.lobby) {
+        this.toasts.show('Leave the match first to open DEV MODE.', 'info', 3000);
+        return;
+      }
+      devPrompt.show(true);
+    };
     this.characterScreen = new CharacterScreen(ui, {
       profile: this.profile,
       build: (look) => this.makeCharacter(0, 0, look),
@@ -322,6 +332,18 @@ export class App {
       return;
     }
     this.gramsScreen.show(true);
+  }
+
+  // ------------------------------------------------------------------ DEV MODE
+  /** JUMP OFF THE PORCH alone, for testing (behind the passcode). */
+  startDev(): void {
+    this.settingsScreen.show(false);
+    this.enterFullscreen();
+    this.menu.commitName();
+    this.startGame(new LocalSession(this.R, {
+      mode: 'porch', dev: true, name: this.profile.name, loadout: this.profile.loadout, look: this.profile.look, seed: this.debug.seed,
+    }));
+    this.toasts.show('DEV MODE: everything is laid out in front of you. No riot. N skips 3 minutes, L lays the gear out again.', 'info', 6000);
   }
 
   // ------------------------------------------------------------------ free roam + AJ at the counter

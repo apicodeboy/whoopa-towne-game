@@ -518,3 +518,36 @@ test('porch: day and night alternate every 3 minutes from takeoff, fading over 1
   for (let ms = 0; ms < 1000 * 1000; ms += 50) worst = Math.max(worst, Math.abs(porchNight(ms + 50) - porchNight(ms)));
   assert(worst < 0.02, `no sudden change between frames (${worst.toFixed(4)} in 50 ms)`);
 });
+
+test('porch: DEV MODE starts you on foot with one of everything laid out, no riot damage, no end', async () => {
+  const R = await initRapier();
+  const sim = new GameSim(R, { mode: 'porch', seed: 3, warmup: 0, squads: 'solo', maxPlayers: 1 });
+  sim.porch!.dev = { x: 150, z: 30 };
+  const me = sim.addPlayer({ id: 'dev', name: 'Dev', team: 0, squad: 0 })!;
+  sim.start();
+  wait(sim, 0.5, me);
+  const s = me.state;
+  assert(s.air === AIR_GROUND && Math.hypot(s.x - 150, s.z - 27) < 1.5, `on foot at the dev spot (${s.x.toFixed(1)}, ${s.z.toFixed(1)}, air ${s.air})`);
+  const P = sim.porch!;
+  const kinds = new Map<number, number>();
+  for (const pk of P.pickups.values()) if (Math.abs(pk.z - 33) < 6) kinds.set(pk.kind, (kinds.get(pk.kind) ?? 0) + 1);
+  const guns = WEAPON_IDS.filter((id) => WEAPONS[id].kind !== 'melee' || id === 'knife').length;
+  assert(kinds.get(ITEM.WEAPON) === guns, `every gun laid out (${kinds.get(ITEM.WEAPON)} of ${guns})`);
+  assert((kinds.get(ITEM.AMMO) ?? 0) >= 4 && (kinds.get(ITEM.HEAL) ?? 0) === HEAL_KINDS.length && kinds.get(ITEM.THROWABLE) === 2 && (kinds.get(ITEM.IBUPROFEN) ?? 0) >= 1 && kinds.get(ITEM.ARMOR) === 1,
+    `ammo, heals, Perc 29, armor and throwables laid out (${JSON.stringify([...kinds])})`);
+  // into the late riot (the timeline moved on), standing outside the safe area: no damage
+  const shift = P.steps[P.steps.length - 1].start - sim.time + 1000;
+  for (const st of P.steps) { st.start -= shift; st.end -= shift; }
+  wait(sim, 1, me);
+  s.x = P.zone.x + P.zone.r + 20; s.z = P.zone.z;
+  wait(sim, 4, me);
+  assert(me.alive && me.health === 100, `no riot damage in dev mode (${me.health})`);
+  assert(sim.phase === PHASE.PLAYING, 'the match runs on with one player');
+  // and a normal match still hurts
+  const sim2 = new GameSim(R, { mode: 'porch', seed: 3, warmup: 0, squads: 'solo', maxPlayers: 1 });
+  const me2 = sim2.addPlayer({ id: 'p', name: 'P', team: 0, squad: 0 })!;
+  sim2.start();
+  assert(me2.state.air !== AIR_GROUND, 'a normal match boards the transport');
+  sim.dispose();
+  sim2.dispose();
+});

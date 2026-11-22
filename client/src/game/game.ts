@@ -23,7 +23,7 @@ import {
 import type { Assets } from './assets';
 import type { SettingsStore } from '../core/settings';
 import type { InputManager } from '../input/inputManager';
-import type { Session } from '../net/session';
+import { LocalSession, type Session } from '../net/session';
 import { Hud, escapeHtml, makeHudState, type HudPlayerRow, type HudState } from '../ui/hud';
 import { WeaponWheel, WHEEL_SEGMENTS, segmentAt, type WheelItem } from '../ui/weaponWheel';
 import { PorchHud, type PorchHudState } from '../ui/porchHud';
@@ -34,6 +34,7 @@ import { Effects } from './fx/effects';
 import { BASE_NIGHT, live as liveLight, setNight } from './lighting';
 import { ThrowArc } from './fx/throwArc';
 import { surfaceAt, type Surface } from './fx/quarksFx';
+import { DevPanel } from '../ui/devMode';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
 import { AirLabels } from './porch/airLabels';
@@ -187,6 +188,9 @@ export class Game {
   private readonly thrower = { x: 0, y: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0, crouching: 0 };
   /** THROW was down last tick (it takes the throwable out on a press). */
   private throwWas = false;
+  /** DEV MODE (a local practice session): its panel and keys. */
+  private devPanel: DevPanel | null = null;
+  private onDevKey: ((e: KeyboardEvent) => void) | null = null;
   readonly gunIcons: GunIcons;
   private mySkin = 'none';
   /** JUMP OFF THE PORCH visuals and HUD (null in the crew modes). */
@@ -325,6 +329,7 @@ export class Game {
       // for the night now (one shader compile while loading, never at dusk)
       this.gfx.setDayNight(true);
       this.porchWorld = new PorchWorld(this.session.porch, deps.assets ?? null);
+      if (this.session instanceof LocalSession && this.session.dev) this.setupDev();
       this.gfx.scene.add(this.porchWorld.group);
       this.crowd = new RiotCrowd(this.phys, this.map);
       this.gfx.scene.add(this.crowd.group);
@@ -1677,6 +1682,31 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
     this.onTalkToAj?.();
   }
 
+  /** DEV MODE: the panel (skip the clock to the next change of day and night, lay the gear out again) and its keys. */
+  private setupDev(): void {
+    const session = this.session;
+    if (!(session instanceof LocalSession)) return;
+    const sim = session.sim;
+    const skipTime = () => {
+      const P = sim.porch;
+      if (!P || !Number.isFinite(P.takeoff)) return;
+      // to half a second before the next change, so the whole fade plays
+      const period = PORCH.dayNight.period;
+      const e = (sim.time - P.takeoff) / 1000;
+      const target = Math.floor(e / period + 1) * period - 0.5;
+      P.takeoff = sim.time - target * 1000;
+    };
+    const relayout = () => sim.porch?.layoutDev();
+    this.devPanel = new DevPanel(this.hud.root, { skipTime, relayout });
+    this.onDevKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      if (e.code === 'KeyN') skipTime();
+      else if (e.code === 'KeyL') relayout();
+    };
+    window.addEventListener('keydown', this.onDevKey);
+  }
+
   /** What a bullet hit: the ground there (dirt, water, ...) when it hit from above, else hard (walls, props). */
   private surfaceHit(p: THREE.Vector3, n: THREE.Vector3): Surface {
     return n.y > 0.6 ? this.surfaceUnder(p.x, p.z, p.y) : 'hard';
@@ -1706,6 +1736,8 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
 
   dispose(): void {
     this.scoreFeed?.stop();
+    this.devPanel?.dispose();
+    if (this.onDevKey) window.removeEventListener('keydown', this.onDevKey);
     // back to the usual lighting for the menus
     if (this.porchWorld) this.gfx.setDayNight(false);
     applyTimeOfDay(this.stage, BASE_NIGHT);
