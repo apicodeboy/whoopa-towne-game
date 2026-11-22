@@ -71,6 +71,8 @@ export function mountEconomyApi(app: Application, eco: Economy, opts: EconomyApi
   };
   const fresh = (req: Authed): AccountRec => eco.store.state.accounts[req.account!.id];
   const signIns = limiter(12, 10 * 60e3);
+  // promo codes: a handful of tries per account and address (codes are not for guessing)
+  const promoTries = limiter(20, 10 * 60e3);
   const ip = (req: Request) => String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
 
   // ---- the Stripe webhook needs the raw body for its signature: mount it before the JSON parser
@@ -88,7 +90,7 @@ export function mountEconomyApi(app: Application, eco: Economy, opts: EconomyApi
   app.use(['/api/economy', '/api/account', '/api/grams', '/api/store', '/api/trap'], cors, noStore, express.json({ limit: '20kb' }));
 
   app.get('/api/economy', (_req, res) => {
-    res.json({ provider: eco.provider?.id ?? null, packages: GRAMS_PACKAGES, catalog: CATALOG });
+    res.json({ provider: eco.provider?.id ?? null, packages: GRAMS_PACKAGES, catalog: CATALOG, promos: eco.promosEnabled });
   });
 
   // ---- accounts
@@ -138,6 +140,13 @@ export function mountEconomyApi(app: Application, eco: Economy, opts: EconomyApi
   // ---- AJ's
   app.post('/api/store/buy', auth, wrap(async (req, res) => {
     const out = await eco.buy(fresh(req), req.body?.itemId, req.body?.requestId);
+    res.json({ ok: true, ...out, account: eco.summary(fresh(req)) });
+  }));
+
+  app.post('/api/store/redeem', auth, wrap(async (req, res) => {
+    const a = fresh(req);
+    if (!promoTries(`p:${a.id}`) || !promoTries(`pi:${ip(req)}`)) return res.status(429).json({ error: 'slow_down', message: 'Too many tries. Wait a few minutes.' });
+    const out = await eco.redeem(a, req.body?.itemId, req.body?.code, req.body?.requestId);
     res.json({ ok: true, ...out, account: eco.summary(fresh(req)) });
   }));
 

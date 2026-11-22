@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { Application } from 'express';
 import { mountEconomyApi } from './api.ts';
 import { DevProvider, StripeProvider, type PaymentProvider } from './payments.ts';
+import { DEV_PROMO_CODES, type PromoCode } from './promo.ts';
 import { Economy } from './service.ts';
 import { FileEconomyStore } from './store.ts';
 
@@ -27,12 +28,14 @@ export interface EconomySetup {
  *  ALLOWED_ORIGINS         extra origins the game is served from, comma separated
  *  STRIPE_SECRET_KEY       turns on buying GRAMS with Stripe Checkout
  *  STRIPE_WEBHOOK_SECRET   the Stripe webhook endpoint's signing secret
- *  ECONOMY_TEST_PAYMENTS=1 test checkout instead of Stripe (refused when NODE_ENV=production)
+ *  ECONOMY_TEST_PAYMENTS=1 test checkout instead of Stripe, and the developers' promo code
+ *                          (FREEME); both refused when NODE_ENV=production
  */
 export function setupEconomy(app: Application, setup: EconomySetup): Economy {
   const env = process.env;
   const production = env.NODE_ENV === 'production';
   let provider: PaymentProvider | null = null;
+  let promoCodes: readonly PromoCode[] = [];
   if (env.STRIPE_SECRET_KEY) {
     provider = new StripeProvider(env.STRIPE_SECRET_KEY);
     if (!env.STRIPE_WEBHOOK_SECRET) console.warn('[economy] STRIPE_WEBHOOK_SECRET is not set: payments are confirmed by polling Stripe only');
@@ -41,11 +44,12 @@ export function setupEconomy(app: Application, setup: EconomySetup): Economy {
       console.error('[economy] ECONOMY_TEST_PAYMENTS is ignored in production: buying GRAMS is off until Stripe is configured');
     } else {
       provider = new DevProvider(setup.publicUrl);
-      console.warn('[economy] TEST PAYMENTS are on: GRAMS can be "bought" without real money (development only)');
+      promoCodes = DEV_PROMO_CODES;
+      console.warn('[economy] TEST PAYMENTS are on: GRAMS can be "bought" without real money, and the promo code FREEME gets any item free (development only)');
     }
   }
   const store = new FileEconomyStore(setup.dbPath === ':memory:' ? null : resolve(setup.dbPath));
-  const eco = new Economy(store, provider);
+  const eco = new Economy(store, provider, { promoCodes });
   mountEconomyApi(app, eco, {
     publicUrl: setup.publicUrl.replace(/\/$/, ''),
     allowedOrigins: setup.allowedOrigins,

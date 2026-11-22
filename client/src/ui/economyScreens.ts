@@ -10,6 +10,7 @@ import { ApiError, type AccountService } from '../net/account';
 import { button, clear, el } from './dom';
 import { ED, tool } from './editorKit';
 import { gIcon, gramsHtml, itemArt, rarityTag } from './economyArt';
+import { promoRow } from './promoRow';
 
 export interface EconomyDeps {
   account: AccountService;
@@ -433,6 +434,28 @@ export class StoreScreen extends ShopLike {
       actions.append(preview, button('Buy', 'eco-btn gold', () => this.confirmBuy(it)));
     }
     this.side.append(info, price, actions);
+    // a promo code gets it free (only offered where the server takes codes)
+    if (!owned && a.promos) this.side.append(promoRow((code) => this.redeem(it, code)));
+  }
+
+  /** Gets the item with a promo code: sign in first if needed; the server checks the code. */
+  private async redeem(it: StoreItem, code: string): Promise<void> {
+    const a = this.deps.account;
+    if (!a.signedIn) {
+      this.deps.auth.open(() => this.render());
+      throw new ApiError('signed_out', 'Sign in first, then apply the code.', 401);
+    }
+    await a.redeem(it.id, code);
+    const art = el('div', 'eco-dialog-art pop');
+    art.innerHTML = itemArt(it);
+    this.dialog.open([art, el('h2', '', 'Unlocked with a promo code!'), `${it.name} is in your TRAP. No GRAMS spent.`], [
+      button('Later', 'eco-btn ghost', () => this.dialog.close()),
+      button('Equip now', 'eco-btn gold', () => {
+        this.dialog.close();
+        void this.equip(it);
+      }),
+    ]);
+    this.render();
   }
 
   private confirmBuy(it: StoreItem): void {

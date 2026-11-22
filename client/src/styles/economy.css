@@ -985,3 +985,69 @@ body.is-touch .use-prompt {
     font-size: 13px;
   }
 }
+
+/* ---- promo code (next to anything for sale, where the server takes codes) */
+.promo-row {
+  margin-top: 10px;
+}
+.promo-line {
+  display: flex;
+  gap: 8px;
+}
+.promo-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: #f4f2ec;
+  font: 700 14px 'Inter', var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.promo-input::placeholder {
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: rgba(244, 242, 236, 0.5);
+}
+.promo-input:focus {
+  outline: none;
+  border-color: var(--eco-gold-2, #f6b73c);
+}
+.promo-apply {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f2ec;
+  font: 700 14px 'Inter', var(--font);
+  cursor: pointer;
+}
+.promo-apply:hover:not(:disabled) {
+  border-color: var(--eco-gold-2, #f6b73c);
+}
+.promo-apply:disabled,
+.promo-input:disabled {
+  opacity: 0.6;
+}
+.promo-msg {
+  min-height: 16px;
+  margin-top: 5px;
+  padding-left: 14px;
+  font: 600 12px 'Inter', var(--font);
+  color: #ffb4a8;
+}
+/* (in the gun picker: its own hand-drawn look) */
+.gp-promo {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+.gp-promo .promo-input,
+.gp-promo .promo-apply {
+  height: 34px;
+  border-radius: 5px 3px 6px 4px;
+  font-size: 13px;
+}

@@ -14,6 +14,7 @@ import type { DeviceKind } from '../input/types';
 import { ApiError, type AccountService } from '../net/account';
 import { button, clear, el } from './dom';
 import { glyphHtml } from './prompts';
+import { promoRow } from './promoRow';
 
 /**
  * WHOOPA TOWNE weapon collection: the gun picker. Browse every gun (numbered like the
@@ -277,6 +278,18 @@ export class GunPicker {
     }
   }
 
+  /** A skin for a promo code: sign in first if needed; on success it goes straight on. */
+  private async redeemSkin(gun: string, skin: string, code: string): Promise<void> {
+    if (!this.deps.account.signedIn) {
+      this.deps.signIn(() => this.render());
+      throw new ApiError('signed_out', 'Sign in first, then apply the code.', 401);
+    }
+    await this.deps.account.redeem(gunSkinItemId(gun, skin), code);
+    await this.wearSkin(gun, skin);
+    this.noteEl.textContent = `${GUN_SKINS.find((s) => s.id === skin)?.name ?? 'Skin'} unlocked with a promo code, and it's on.`;
+    this.render();
+  }
+
   // ------------------------------------------------------------------ drawing
   private render(): void {
     const a = this.deps.account.account;
@@ -379,6 +392,8 @@ export class GunPicker {
       else {
         const it = catalogItem(gunSkinItemId(id, s));
         this.actionsEl.append(button(`BUY · ${it ? formatGrams(it.price) : '?'} GRAMS`, 'gp-btn gold', () => void this.buySkin(id, s)));
+        // a promo code gets the skin free (only where the server takes codes)
+        if (this.deps.account.promos) this.actionsEl.append(promoRow((code) => this.redeemSkin(id, s, code), 'gp-promo'));
       }
     }
     if (!this.busy && !this.noteEl.textContent) this.noteEl.textContent = '';

@@ -88,6 +88,10 @@ Open http://localhost:5173, sign up (main menu → **Sign in** → *Create an ac
 the GRAMS chip and buy a package. A new tab opens the **TEST CHECKOUT** page: **PAY (TEST)**
 credits the account, **DECLINE** does not. The game tab picks up the result on its own.
 
+**Promo code (developers):** with test payments on, every item at AJ'S and every gun skin in the
+gun picker has a **Promo code** box; **FREEME** gets that item free (no GRAMS spent). The box only
+shows on servers where a code works, so it never appears in production.
+
 Account data goes to `server/data/economy.json` (git-ignored). Delete that file to start over.
 To keep test data somewhere else: `ECONOMY_DB=/tmp/eco.json`.
 
@@ -102,7 +106,7 @@ All settings are environment variables on the game server.
 | `ALLOWED_ORIGINS` | Extra origins (comma separated) allowed to call the API, if the client is served from a different domain than the server. | dev ports only |
 | `STRIPE_SECRET_KEY` | Turns on buying GRAMS through Stripe Checkout. | off |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret of the Stripe webhook endpoint (strongly recommended). | none |
-| `ECONOMY_TEST_PAYMENTS` | `1` = fake checkout for development. **Refused when `NODE_ENV=production`.** | off |
+| `ECONOMY_TEST_PAYMENTS` | `1` = fake checkout and the developers' promo code `FREEME` (any item free). **Both refused when `NODE_ENV=production`.** | off |
 
 With neither Stripe nor test payments configured, everything else works (accounts, TRAP, buying
 with GRAMS you already have) and the GRAMS screen says buying isn't set up yet.
@@ -161,6 +165,18 @@ uses an `Idempotency-Key`, so a retried request never makes two sessions.
   tokens are random 256-bit values stored only as SHA-256 hashes, valid for 30 days. Sign-in and
   sign-up are rate limited.
 - **No selling, gifting or trading** exists anywhere in the API.
+
+### Promo codes
+
+- Codes are defined on the server only (`server/src/economy/promo.ts`); the browser sends what was
+  typed and the server decides. `FREEME` (every item free) is a development code: it is active
+  only when test payments are on, and never under `NODE_ENV=production`.
+- `POST /api/store/redeem` `{ itemId, code, requestId }` (signed in): the code check, the
+  ownership grant and a log entry (`redemptions`: account, item, code, time) happen in one
+  transaction; a retried request gets the first answer; an item already owned is refused. No
+  GRAMS move, so the ledger is untouched; the owned record says `via: "promo:FREEME"`.
+- 20 tries per account and per address every 10 minutes.
+- `GET /api/economy` says `promos: true|false`; the store shows the code box only when true.
 
 ## Testing
 

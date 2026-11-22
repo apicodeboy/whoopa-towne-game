@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { DEFAULT_APPEARANCE, decodeAppearance, encodeAppearance, isPremiumOption, stripUnowned, EXTRA_FIELD_KEYS, LOOK_FIELD_KEYS } from '../../../shared/src/config/appearance.ts';
 import { CATALOG, catalogItem, gramsPackage, unlocksOf } from '../../../shared/src/config/economy.ts';
 import type { PaymentProvider, VerifiedPayment } from './payments.ts';
+import { normalizeCode, type PromoCode } from './promo.ts';
 import type { AccountRec, EconomyState, EconomyStore, OrderRec, TxRec } from './store.ts';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, keylen: number, opts: { N: number; r: number; p: number; maxmem: number }) => Promise<Buffer>;
@@ -42,10 +43,18 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 export class Economy {
   readonly store: EconomyStore;
   readonly provider: PaymentProvider | null;
+  /** Promo codes that work on this server (none unless set up: see setupEconomy). */
+  private readonly promos: readonly PromoCode[];
 
-  constructor(store: EconomyStore, provider: PaymentProvider | null) {
+  constructor(store: EconomyStore, provider: PaymentProvider | null, opts: { promoCodes?: readonly PromoCode[] } = {}) {
     this.store = store;
     this.provider = provider;
+    this.promos = opts.promoCodes ?? [];
+  }
+
+  /** Whether any promo code works here (the store only shows the code box when one does). */
+  get promosEnabled(): boolean {
+    return this.promos.length > 0;
   }
 
   // ------------------------------------------------------------------ accounts
@@ -235,6 +244,34 @@ export class Economy {
       // keep the retry table from growing without end
       const keys = Object.keys(s.requests);
       if (keys.length > 5000) for (const k of keys.slice(0, keys.length - 4000)) delete s.requests[k];
+      return result;
+    });
+  }
+
+  /**
+   * Gets an item with a promo code instead of GRAMS: the code check, the ownership and the log
+   * entry happen in one transaction; a retried request gets the first answer.
+   */
+  async redeem(acc: AccountRec, itemId: unknown, rawCode: unknown, requestId: unknown): Promise<{ owned: string[]; redemptionId: string }> {
+    const item = catalogItem(itemId);
+    if (!item) throw new EconomyError('unknown_item', 'That item is not sold here.', 404);
+    if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId)) throw new EconomyError('bad_request', 'Missing request id.');
+    const code = normalizeCode(rawCode);
+    const promo = code ? this.promos.find((p) => p.code === code) : undefined;
+    if (!promo || !promo.allItems) throw new EconomyError('bad_code', "That code doesn't work.", 400);
+    const reqKey = `${acc.id}:promo:${requestId}`;
+    return this.store.tx((s) => {
+      const prev = s.requests[reqKey];
+      if (prev) return prev.result as { owned: string[]; redemptionId: string };
+      const a = s.accounts[acc.id];
+      const owned = a.owned[item.id];
+      if (owned && (!owned.expiresAt || owned.expiresAt > Date.now())) throw new EconomyError('already_owned', 'You already own that.', 409);
+      const now = Date.now();
+      a.owned[item.id] = { at: now, via: `promo:${promo.code}`, ...(item.temporaryDays ? { expiresAt: now + item.temporaryDays * 86400e3 } : {}) };
+      const redemptionId = randomUUID();
+      s.redemptions.push({ id: redemptionId, accountId: a.id, itemId: item.id, code: promo.code, at: now });
+      const result = { owned: Object.keys(a.owned), redemptionId };
+      s.requests[reqKey] = { at: now, result };
       return result;
     });
   }

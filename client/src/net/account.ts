@@ -40,6 +40,8 @@ export class AccountService {
   account: AccountInfo | null = null;
   /** 'stripe' | 'dev' (test payments) | null (buying GRAMS not set up on this server). */
   provider: string | null = null;
+  /** Whether promo codes work on this server (the store shows a code box when they do). */
+  promos = false;
   packages: readonly GramsPackage[] = GRAMS_PACKAGES;
   catalog: readonly StoreItem[] = CATALOG;
   private token: string | null = null;
@@ -115,8 +117,9 @@ export class AccountService {
   /** Loads the store config and, with a saved session, the account. */
   async init(): Promise<void> {
     try {
-      const cfg = await this.call<{ provider: string | null; packages: GramsPackage[]; catalog: StoreItem[] }>('GET', '/api/economy');
+      const cfg = await this.call<{ provider: string | null; packages: GramsPackage[]; catalog: StoreItem[]; promos?: boolean }>('GET', '/api/economy');
       this.provider = cfg.provider;
+      this.promos = cfg.promos === true;
       this.packages = cfg.packages;
       this.catalog = cfg.catalog;
     } catch {
@@ -186,6 +189,14 @@ export class AccountService {
   async buy(itemId: string): Promise<void> {
     const requestId = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
     const r = await this.call<{ account: AccountInfo }>('POST', '/api/store/buy', { itemId, requestId });
+    this.account = r.account;
+    this.emit();
+  }
+
+  /** Gets an item with a promo code instead of GRAMS (the server checks the code). */
+  async redeem(itemId: string, code: string): Promise<void> {
+    const requestId = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const r = await this.call<{ account: AccountInfo }>('POST', '/api/store/redeem', { itemId, code, requestId });
     this.account = r.account;
     this.emit();
   }

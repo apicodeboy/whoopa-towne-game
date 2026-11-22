@@ -303,3 +303,54 @@ test('the HTTP API: sign up, test checkout, buy, equip, history', async () => {
     http.close();
   }
 });
+
+test('promo codes: FREEME gets any item free on a dev server, logged, once; refused elsewhere', async () => {
+  const { DEV_PROMO_CODES } = await import('../src/economy/promo.ts');
+  const eco = new Economy(new FileEconomyStore(null), new DevProvider('http://x'), { promoCodes: DEV_PROMO_CODES });
+  const { acc } = await account(eco, 'Promo1');
+  const code = (e: unknown) => (e instanceof EconomyError ? e.code : String(e));
+  const fails = async (p: Promise<unknown>) => { try { await p; return 'ok'; } catch (e) { return code(e); } };
+  assert(eco.promosEnabled, 'codes on for a dev economy');
+  // typed any case, with spaces: the item is owned, nothing charged, logged
+  const r = await eco.redeem(acc(), 'top-gold-puffer', '  freeme ', reqId());
+  const a = acc();
+  assert(r.owned.includes('top-gold-puffer') && a.owned['top-gold-puffer']?.via === 'promo:FREEME', 'item owned via the promo');
+  assert(a.balance === 0 && eco.store.state.ledger.length === 0, 'no GRAMS moved');
+  const log = eco.store.state.redemptions;
+  assert(log.length === 1 && log[0].accountId === a.id && log[0].itemId === 'top-gold-puffer' && log[0].code === 'FREEME', 'logged');
+  // a retried request: the same answer, no second grant
+  const id = reqId();
+  const g1 = await eco.redeem(acc(), 'skin-camo', 'FREEME', id);
+  const g2 = await eco.redeem(acc(), 'skin-camo', 'FREEME', id);
+  assert(g1.redemptionId === g2.redemptionId && eco.store.state.redemptions.length === 2, 'retry is safe');
+  // already owned, wrong codes, unknown items
+  assert((await fails(eco.redeem(acc(), 'top-gold-puffer', 'FREEME', reqId()))) === 'already_owned', 'already owned');
+  assert((await fails(eco.redeem(acc(), 'kicks-volt', 'FREEMEE', reqId()))) === 'bad_code', 'wrong code');
+  assert((await fails(eco.redeem(acc(), 'kicks-volt', '', reqId()))) === 'bad_code', 'empty code');
+  assert((await fails(eco.redeem(acc(), 'no-such-item', 'FREEME', reqId()))) === 'unknown_item', 'unknown item');
+  // the item it got can be worn (the server checks ownership as for a purchase)
+  const look = await eco.equip(acc(), encodeAppearance({ ...DEFAULT_APPEARANCE, top: 'puffer', topColor: 'gold' }));
+  assert(decodeAppearance(look).topColor === 'gold', 'promo item can be equipped');
+  // a server without dev codes (production): FREEME does nothing
+  const prod = new Economy(new FileEconomyStore(null), null);
+  const p = await account(prod, 'Promo2');
+  assert(!prod.promosEnabled && (await fails(prod.redeem(p.acc(), 'kicks-volt', 'FREEME', reqId()))) === 'bad_code' && !p.acc().owned['kicks-volt'], 'no codes in production');
+  // over HTTP: signed in only, and the config says whether codes work
+  const app = express();
+  const http: HttpServer = createServer(app);
+  await new Promise<void>((res) => http.listen(0, res));
+  const base = `http://localhost:${(http.address() as { port: number }).port}`;
+  mountEconomyApi(app, eco, { publicUrl: base, allowedOrigins: [], stripeWebhookSecret: null });
+  try {
+    const cfg = await (await fetch(`${base}/api/economy`)).json() as { promos: boolean };
+    assert(cfg.promos === true, 'config says codes work');
+    const anon = await fetch(`${base}/api/store/redeem`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId: 'kicks-volt', code: 'FREEME', requestId: reqId() }) });
+    assert(anon.status === 401, 'signed in only');
+    const { token } = await eco.register('Promo3', 'correct horse');
+    const ok = await fetch(`${base}/api/store/redeem`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ itemId: 'kicks-volt', code: 'FREEME', requestId: reqId() }) });
+    const body = await ok.json() as { account: { owned: string[]; balance: number } };
+    assert(ok.status === 200 && body.account.owned.includes('kicks-volt') && body.account.balance === 0, 'redeemed over HTTP');
+  } finally {
+    http.close();
+  }
+});

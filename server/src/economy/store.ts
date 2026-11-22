@@ -64,6 +64,15 @@ export interface OrderRec {
   txId?: string;
 }
 
+/** An item given for a promo code (no GRAMS moved). */
+export interface RedemptionRec {
+  id: string;
+  accountId: string;
+  itemId: string;
+  code: string;
+  at: number;
+}
+
 /** One movement of GRAMS (the transaction history). */
 export interface TxRec {
   id: string;
@@ -90,10 +99,12 @@ export interface EconomyState {
   events: Record<string, number>;
   /** Purchase requests already handled ("account:request" -> result), so a retried click buys once. */
   requests: Record<string, { at: number; result: unknown }>;
+  /** Items given for promo codes (the log). */
+  redemptions: RedemptionRec[];
 }
 
 export function emptyState(): EconomyState {
-  return { version: 1, accounts: {}, byName: {}, sessions: {}, orders: {}, ledger: [], events: {}, requests: {} };
+  return { version: 1, accounts: {}, byName: {}, sessions: {}, orders: {}, ledger: [], events: {}, requests: {}, redemptions: [] };
 }
 
 export interface EconomyStore {
