@@ -24,6 +24,24 @@ and a corner-store strip in the middle.
   sees your character; teammates are told apart by their name tags.
 - Behind the menus, a tour of the big map: every area in turn, 7 seconds each, its name in the
   corner.
+- **Day and night in JUMP OFF THE PORCH**: daylight for 3 minutes from takeoff, then night,
+  alternating, each change easing over 10 seconds (sky, sun to moon, stars, street lamps, lit
+  windows, exposure). Every player sees the same sky: it is worked out from the server's
+  takeoff time and clock.
+- **Minimap** (top left): the riot's edge animated and pulsing when it closes in, the next safe
+  area drawn on with a distance line to it, numbered squad markers, a view cone, north and a
+  scale bar; north up or turning with you.
+- **Post effects** on Medium and High: bloom on lights, a light color grade, depth of field on
+  the menu backdrop, optional ambient occlusion (pmndrs/postprocessing).
+- **Particles** (three.quarks): muzzle sparks and smoke per weapon class, shell casings,
+  impacts by surface (dust and clods on dirt, sparks and grey dust on walls), grenade
+  fireballs and debris, dust kicked up running on loose ground, splashes in the surf.
+- **Animated billboards**: motion-graphic ads (AJ'S, GRAMS, JOTP, KICKS, the Food Mart, Hong
+  Kong, the Shrimp Shack) on the existing boards; the live ESPN scoreboards are unchanged.
+- **Cinematic moments**: the JOTP intro counting down to liftoff, stamped eliminations and
+  squad wipes, animated banners (NIGHT FALLS / SUNRISE too) and end screens.
+- **DEV MODE** (Settings, behind a passcode): JOTP alone, on foot, no riot, every gun and item
+  laid out, the day/night clock under your control. Offline only.
 
 Built with Three.js + TypeScript + Vite (client), Node.js + Colyseus (server) and Rapier
 (physics, shared by both). Art is original or CC0; all sound is synthesized in code.
@@ -144,7 +162,9 @@ the classic modes) and nobody else.
 Mouse, stick and touch sensitivity (plus a separate aiming multiplier), invert Y, field of
 view, graphics quality (low / medium / high), performance mode for low-end phones, dynamic
 resolution, master and ambience volume, aim assist on/off, stick deadzones, touch auto-fire,
-crouch toggle, default camera shoulder, vibration, and an FPS / ping readout.
+crouch toggle, default camera shoulder, vibration, an FPS / ping readout, the minimap turning
+with you, post effects (bloom and grading, Medium / High) and ambient occlusion (High; off by
+default). The DEV MODE button is at the bottom of Settings.
 
 ---
 
@@ -400,6 +420,11 @@ have not been tested yet (see below).
   have no collision and can't be shot. Corn is cover from sight, not from bullets.
 - The guns are procedural low-poly models built in code (`client/src/game/gunKit.ts`), not
   hand-modelled art.
+- The Blender-based character, building and weapon model upgrade has not been done: Blender is
+  not installed where this was built. See `docs/GRAPHICS_UPGRADE.md` for what was built
+  instead and what needs Blender.
+- A JUMP OFF THE PORCH match cannot be joined once it is under way (the day/night sync covers
+  late arrivals by design, but there is no way to arrive late yet).
 - The server trusts nothing a player's browser tells it about position or damage, but there
   is no additional anti-cheat (for example against aim bots).
 
