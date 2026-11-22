@@ -33,6 +33,7 @@ import { ProceduralCharacter } from './characters/proceduralCharacter';
 import { Effects } from './fx/effects';
 import { BASE_NIGHT, live as liveLight, setNight } from './lighting';
 import { ThrowArc } from './fx/throwArc';
+import { surfaceAt, type Surface } from './fx/quarksFx';
 import { PorchWorld, makeBalloon, swayBalloon } from './porch/porchWorld';
 import { RiotCrowd } from './porch/riotCrowd';
 import { AirLabels } from './porch/airLabels';
@@ -538,13 +539,18 @@ export class Game {
           this.effects.tracer(origin, _v2, color);
           if (e[o + 3] === HIT_WORLD) {
             _n.copy(origin).sub(_v2).normalize();
-            this.effects.impact(_v2, _n);
+            this.effects.impact(_v2, _n, this.surfaceHit(_v2, _n));
             if (k === 0) audio?.impact(_v2);
           } else if (e[o + 3] === HIT_PLAYER) {
             this.effects.hitPuff(_v2);
           }
         }
-        this.effects.muzzleFlash(origin);
+        {
+          // that gun's own muzzle (toward its first shot), with a casing
+          const wdef = WEAPONS[WEAPON_IDS[e[2]]];
+          _n.set(e[7] / 100, e[8] / 100, e[9] / 100).sub(origin).normalize();
+          this.effects.muzzleFlash(origin, 1, _n, wdef?.cls, !!wdef?.suppressed);
+        }
         audio?.gunshot(e[2], origin, false);
         break;
       }
@@ -905,6 +911,7 @@ export class Game {
       if (this.stepTimer <= 0) {
         this.stepTimer = 0.36;
         if (!st.crouching) audio?.footstep(null, st.sprinting === 1);
+        if (Math.hypot(st.vx, st.vz) > 4) this.effects.quarks.step(_v.set(st.x, st.y + 0.05, st.z), this.surfaceUnder(st.x, st.z, st.y));
       }
     } else {
       this.stepTimer = Math.min(this.stepTimer, 0.12);
@@ -920,7 +927,11 @@ export class Game {
     for (const rp of this.remotes.values()) {
       _sphere.center.set(rp.x, rp.y + 0.9, rp.z);
       rp.update(dt, rt, camPos, this.frustum.intersectsSphere(_sphere));
-      if (audio && rp.takeStep()) audio.footstep(_v.set(rp.x, rp.y, rp.z), rp.sprinting);
+      if (rp.takeStep()) {
+        audio?.footstep(_v.set(rp.x, rp.y, rp.z), rp.sprinting);
+        // dust off loose ground, a splash in water (only running, only near the camera)
+        if (rp.sprinting) this.effects.quarks.step(_v.set(rp.x, rp.y + 0.05, rp.z), this.surfaceUnder(rp.x, rp.z, rp.y));
+      }
       if (this.porchWorld) {
         const ballooning = rp.alive && (rp.flags & PF.BALLOON) !== 0;
         const has = this.balloons.get(rp.idx);
@@ -1290,13 +1301,14 @@ export class Game {
       _v2.set(res.ex, res.ey, res.ez);
       this.effects.tracer(_v, _v2, 0xfff0c2);
       if (res.kind === HIT_WORLD) {
-        this.effects.impact(_v2, _n.set(res.nx, res.ny, res.nz));
+        _n.set(res.nx, res.ny, res.nz);
+        this.effects.impact(_v2, _n, this.surfaceHit(_v2, _n));
         if (k === 0) this.deps.audio?.impact(_v2);
       } else if (res.kind === HIT_PLAYER) {
         this.effects.hitPuff(_v2);
       }
     }
-    this.effects.muzzleFlash(_v);
+    this.effects.muzzleFlash(_v, 1, _n.set(this.dir.x, this.dir.y, this.dir.z), w.cls, !!w.suppressed);
     this.localChar.shot();
     this.applyRecoil(w, st);
     this.deps.input.rumble(w.pellets > 1 ? 0.6 : 0.0, w.pellets > 1 ? 0.8 : 0.32, w.pellets > 1 ? 110 : 45);
@@ -1663,6 +1675,18 @@ ${img ? `<img class="pc-img" src="${img}" alt="">` : ''}
     if (!this.aj || !this.canTalkToAj) return;
     this.aj.greet();
     this.onTalkToAj?.();
+  }
+
+  /** What a bullet hit: the ground there (dirt, water, ...) when it hit from above, else hard (walls, props). */
+  private surfaceHit(p: THREE.Vector3, n: THREE.Vector3): Surface {
+    return n.y > 0.6 ? this.surfaceUnder(p.x, p.z, p.y) : 'hard';
+  }
+
+  /** The ground under (x, z): painted areas, and water where you are standing in it. */
+  private surfaceUnder(x: number, z: number, y: number): Surface {
+    const s = surfaceAt(this.map, x, z);
+    // (only the surf and shallow water count as water when you are actually down in it)
+    return s === 'water' && y > 0.4 ? 'hard' : s;
   }
 
   /**

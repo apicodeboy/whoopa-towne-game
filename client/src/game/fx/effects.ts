@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { live as liveLight } from '../lighting';
+import { QuarksFx, type Surface } from './quarksFx';
+import type { WeaponClass } from '@shared/config/weapons';
 import { SMOKE } from '@shared/config/game';
 
 const TRACER_CAP = 96;
@@ -172,8 +174,17 @@ const smokeColor = (): number => new THREE.Color(0xb9bcc2).multiplyScalar(Math.m
  */
 export class Effects {
   readonly group = new THREE.Group();
+  /** The three.quarks layer: per-weapon muzzle effects, casings, surface impacts, blasts, footfalls. */
+  readonly quarks = new QuarksFx();
   /** Scales particle counts (performance mode). */
-  density = 1;
+  private _density = 1;
+  get density(): number {
+    return this._density;
+  }
+  set density(v: number) {
+    this._density = v;
+    this.quarks.density = v;
+  }
   private tracers: Tracer[] = [];
   private tracerMesh: THREE.InstancedMesh;
   private tracerHeads: THREE.Points;
@@ -195,6 +206,7 @@ export class Effects {
 
   constructor() {
     this.group.name = 'effects';
+    this.group.add(this.quarks.group);
 
     // tracers: one instanced stretched box, additive, bright at the head and fading to the tail
     const tGeo = new THREE.BoxGeometry(0.05, 0.05, 1);
@@ -302,7 +314,13 @@ export class Effects {
     t.r = _c.r; t.g = _c.g; t.b = _c.b;
   }
 
-  muzzleFlash(pos: THREE.Vector3, scale = 1): void {
+  /**
+   * A shot leaving the barrel. With the gun's class and aim (`dir`), the three.quarks layer adds
+   * that weapon's own sparks and smoke and kicks out a casing.
+   */
+  muzzleFlash(pos: THREE.Vector3, scale = 1, dir?: THREE.Vector3, cls?: WeaponClass, suppressed = false): void {
+    if (dir && cls) this.quarks.muzzle(pos, dir, cls, suppressed);
+    if (suppressed) scale *= 0.35;
     this.flash(pos, 0.42 * scale, 0.05, 0);
     this.light.position.copy(pos);
     this.light.intensity = 9 * scale;
@@ -330,8 +348,9 @@ export class Effects {
     }
   }
 
-  /** Bullet hitting the world: sparks, a puff of dust and a decal. */
-  impact(pos: THREE.Vector3, normal: THREE.Vector3): void {
+  /** Bullet hitting the world: sparks, a puff of dust and a decal (and what the surface throws up). */
+  impact(pos: THREE.Vector3, normal: THREE.Vector3, surface: Surface = 'hard'): void {
+    this.quarks.impact(pos, normal, surface);
     const n = Math.max(2, Math.round(7 * this.density));
     for (let i = 0; i < n; i++) {
       const sp = 2 + Math.random() * 5;
@@ -394,6 +413,7 @@ export class Effects {
   }
 
   explosion(pos: THREE.Vector3): void {
+    this.quarks.explosion(pos);
     _v.copy(pos).setY(pos.y + 0.6);
     this.flash(_v, 3.5, 0.28, 16);
     this.light.position.copy(_v);
@@ -447,6 +467,7 @@ export class Effects {
   }
 
   update(dt: number): void {
+    this.quarks.update(dt);
     // tracers
     let n = 0;
     for (const t of this.tracers) {
@@ -548,6 +569,7 @@ export class Effects {
 
   /** Remove lingering effects between matches. */
   clear(): void {
+    this.quarks.clear();
     for (const t of this.tracers) t.active = false;
     for (const s of this.smokes) {
       for (const sp of s.sprites) sp.material.dispose();
@@ -558,6 +580,7 @@ export class Effects {
 
   dispose(): void {
     this.clear();
+    this.quarks.dispose();
     this.sparks.dispose();
     this.dust.dispose();
     this.shards.dispose();
