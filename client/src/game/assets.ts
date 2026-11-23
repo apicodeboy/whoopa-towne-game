@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { crewColorHex, type TeamId } from '@shared/config/crews';
 import { lightUniforms } from './lighting';
@@ -202,6 +202,11 @@ export class Assets {
     // stable order regardless of which download finished first
     this.characters.sort((a, b) => CHARACTER_SPECS.findIndex((s) => s.name === a.name) - CHARACTER_SPECS.findIndex((s) => s.name === b.name));
     this.loaded = true;
+  }
+
+  /** A model that is only downloaded when somebody needs it (the one-piece characters), as it is in the file. */
+  loadExtra(url: string): Promise<GLTF> {
+    return new GLTFLoader().loadAsync(this.base + url);
   }
 
   model(name: string): ModelTemplate | null {

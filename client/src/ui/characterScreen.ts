@@ -1,7 +1,7 @@
 import {
   BELTS, BODY_DETAILS, BODY_TYPES, BOTTOMS, BOTTOM_COLORS, BROWS, BUILDS, CARRY, DEFAULT_APPEARANCE, EARRINGS, EARS, EXPRESSIONS, EYE_COLORS,
   EYE_SHAPES, FACE_ACCESSORIES, FACE_MARKS, FACE_SHAPES, FACIAL_HAIR, GLASSES, HAIRSTYLES, HAIR_COLORS, HATS, HEAD_SHAPES, HEAD_SIZES, LEG_PRINTS,
-  LIPS, MASKS, MOUTH_ACCESSORIES, MOUTH_PROPS, NECKLACES, NOSES, SHOES, SHOE_COLORS, SHOULDERS, SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TEETH,
+  LIPS, MASKS, MODELS, MOUTH_ACCESSORIES, MOUTH_PROPS, NECKLACES, NOSES, SHOES, SHOE_COLORS, SHOULDERS, SKIN_TONES, TATTOO_DESIGNS, TATTOO_SPOTS, TEETH,
   TOPS, TOP_COLORS, WAIST_CHAINS, WRIST, LOOK_PRESETS, cloneAppearance, isPremiumOption, randomAppearance, sameAppearance,
   type Appearance, type LookField, type LookOption,
 } from '@shared/config/appearance';
@@ -27,7 +27,7 @@ type Kind = 'cards' | 'swatches' | 'expression' | 'details' | 'locked' | 'preset
 interface Sub {
   id: string;
   name: string;
-  field?: LookField | 'shoulders' | 'headSize' | 'mask' | 'carry' | 'waistChain' | 'face' | 'faceMark' | 'belt' | 'legPrint';
+  field?: LookField | 'shoulders' | 'headSize' | 'mask' | 'carry' | 'waistChain' | 'face' | 'faceMark' | 'belt' | 'legPrint' | 'model';
   kind: Kind;
   options: readonly LookOption[];
   frame: PreviewFrame;
@@ -63,6 +63,49 @@ const UI = {
 };
 
 const sub = (id: string, name: string, field: Sub['field'], kind: Kind, options: readonly LookOption[], frame: PreviewFrame, note?: string): Sub => ({ id, name, field, kind, options, frame, note });
+
+const MODEL_CATEGORY: Category = {
+  id: 'model', name: 'Character', icon: ICONS.body, subs: [
+    sub('model', 'Character', 'model', 'cards', MODELS, 'full',
+      'Whoopa Tall (hood down or up), or the classic custom character. Switching keeps everything you set on the other one.'),
+  ],
+};
+
+/** Whoopa Tall's own swatches: "Original" shows the color it was made in. */
+const asMade = (list: readonly LookOption[], hex: string): LookOption[] => {
+  const orig = list.find((o) => o.id === 'original');
+  return [...(orig ? [{ ...orig, color: hex }] : []), ...list.filter((o) => o.id !== 'original')];
+};
+/** Whoopa Tall's garments: his own sculpted jacket / cargos first, then the clothing system's. */
+const wtGarments = (list: readonly LookOption[], own: string): LookOption[] => [
+  ...list.filter((o) => o.id === own), ...list.filter((o) => o.id !== own && !o.modelOnly),
+];
+const OWN_NOTE = 'His own jacket and cargos are sculpted into the model; the rest are fitted to him from the clothing rack.';
+/** What can really be changed on Whoopa Tall (its maps are recolored; see imported/recolor.ts). */
+const WT_CATEGORIES: Category[] = [
+  {
+    id: 'wt-head', name: 'Skin & Head', icon: ICONS.face, subs: [
+      sub('skin', 'Skin Tone', 'skin', 'swatches', asMade(SKIN_TONES, '#4a2618'), 'upper'),
+      sub('hairColor', 'Braids Color', 'hairColor', 'swatches', HAIR_COLORS, 'face', 'Black is how the braids were made.'),
+      sub('headSize', 'Head Size', 'headSize', 'cards', HEAD_SIZES, 'upper', 'Looks only: everybody is hit in the same place.'),
+    ],
+  },
+  {
+    id: 'wt-top', name: 'Tops', icon: ICONS.top, subs: [
+      sub('top', 'Top', 'top', 'cards', wtGarments(TOPS, 'wtjacket'), 'upper', OWN_NOTE),
+      sub('topColor', 'Top Color', 'topColor', 'swatches', asMade(TOP_COLORS, '#cfcfcb'), 'upper', 'Original: his jacket as it was made.'),
+    ],
+  },
+  {
+    id: 'wt-bottom', name: 'Bottoms', icon: ICONS.pants, subs: [
+      sub('bottom', 'Bottom', 'bottom', 'cards', wtGarments(BOTTOMS, 'wtcargos'), 'full', OWN_NOTE),
+      sub('bottomColor', 'Bottom Color', 'bottomColor', 'swatches', asMade(BOTTOM_COLORS, '#cfcfcb'), 'full', 'Original: his cargos as they were made.'),
+    ],
+  },
+  { id: 'wt-boots', name: 'Boots', icon: ICONS.shoes, subs: [sub('shoeColor', 'Boot Color', 'shoeColor', 'swatches', asMade(SHOE_COLORS, '#d6d6d2'), 'full', 'His own boots, in any color.')] },
+];
+/** Models with a mask and no hair showing. */
+const HAIRLESS = new Set(['whoopa_tall_hooded']);
 
 export const CATEGORIES: Category[] = [
   {
@@ -156,6 +199,8 @@ export interface CharacterScreenDeps {
   profile: Profile;
   /** Builds a character for the preview (null while the models are loading). */
   build: (look: Appearance) => CharacterVisual;
+  /** Downloads a one-piece model: false when it could not be loaded. */
+  loadModel: (id: string) => Promise<boolean>;
   /** The player kept a new look. */
   onKeep: (look: Appearance) => void;
   onClose: () => void;
@@ -180,6 +225,10 @@ export class CharacterScreen {
 
   private catList: HTMLElement;
   private catButtons = new Map<string, HTMLButtonElement>();
+  /** Everything that only edits the custom character (hidden while a one-piece model is picked)... */
+  private customOnly: HTMLElement[] = [];
+  /** ...and what only edits the one-piece models. */
+  private modelOnly: HTMLElement[] = [];
   private panelTitle: HTMLElement;
   private panelBack: HTMLButtonElement;
   private panelBody: HTMLElement;
@@ -206,9 +255,9 @@ export class CharacterScreen {
     this.headerBack = tool(ED.back, 'Back', () => this.requestClose(), 'solo');
     this.headerBack.dataset.back = '1';
     this.dirtyMark = el('span', 'cc-dirty hidden', 'Unsaved changes');
-    const titleBtn = button('', 'ed-title', () => this.selectCategory(CATEGORIES[0]));
+    const titleBtn = button('', 'ed-title', () => this.selectCategory(this.draft.model === 'custom' ? CATEGORIES[0] : MODEL_CATEGORY));
     titleBtn.innerHTML = `<b>${(deps.profile.name || 'Character').replace(/[<>&"]/g, '')}</b><span class="ed-chev">${ED.chevron}</span>`;
-    titleBtn.title = 'Starter looks';
+    titleBtn.title = 'Character';
     const topLeft = el('div', 'ed-tl', [this.headerBack, el('div', 'ed-name', [titleBtn, this.dirtyMark])]);
 
     // ================================================================ top middle: the framings, zoom
@@ -227,9 +276,10 @@ export class CharacterScreen {
     const topMid = el('div', 'ed-tm', [views, zoom]);
 
     // ================================================================ top right: TRAP, randomize / reset, keep
+    const remix = el('div', 'ed-pill', [tool(ED.dice, 'Randomize', () => this.randomize()), tool(ED.reset, 'Reset', () => this.reset())]);
     const topRight = el('div', 'ed-tr', [
       ...(deps.openTrap ? [tool(ED.trap, 'TRAP', () => deps.openTrap!(), 'solo')] : []),
-      el('div', 'ed-pill', [tool(ED.dice, 'Randomize', () => this.randomize()), tool(ED.reset, 'Reset', () => this.reset())]),
+      remix,
       tool(ED.keep, 'Keep', () => this.confirmKeep(), 'solo primary cc-keep'),
     ]);
 
@@ -284,15 +334,28 @@ export class CharacterScreen {
     this.catList = el('nav', 'ed-cats');
     this.catList.setAttribute('aria-label', 'Customization categories');
     const pill = el('div', 'ed-pill');
-    for (const c of CATEGORIES) {
+    for (const c of [MODEL_CATEGORY, ...CATEGORIES]) {
       const [label, icon] = SHORT[c.id] ?? [c.name, ED.starter];
-      const b = tool(icon, label, () => this.selectCategory(c), c.id === 'presets' ? 'solo' : '');
+      const solo = c.id === 'presets' || c === MODEL_CATEGORY;
+      const b = tool(icon, label, () => this.selectCategory(c), solo ? 'solo' : '');
       b.title = c.name;
       this.catButtons.set(c.id, b);
-      if (c.id === 'presets') this.catList.append(b);
+      if (solo) this.catList.append(b);
       else pill.append(b);
+      if (c.id === 'presets') this.customOnly.push(b);
     }
     this.catList.append(pill);
+    this.customOnly.push(pill);
+    const wtPill = el('div', 'ed-pill');
+    for (const c of WT_CATEGORIES) {
+      const [label, icon] = SHORT[c.id] ?? [c.name, ED.starter];
+      const b = tool(icon, label, () => this.selectCategory(c));
+      b.title = c.name;
+      this.catButtons.set(c.id, b);
+      wtPill.append(b);
+    }
+    this.catList.append(wtPill);
+    this.modelOnly.push(wtPill);
     this.colorRow = el('div', 'ed-pill ed-colors');
     this.colorTool = el('div', 'ed-colortool', [this.colorRow, el('span', 'ed-cl', 'Color')]);
     this.spinBtn = tool(ED.play, 'Spin', () => {
@@ -337,7 +400,7 @@ export class CharacterScreen {
   /** The color row: the swatches of what you are editing (its first color pick). */
   private renderColors(): void {
     clear(this.colorRow);
-    const s = (this.open && this.open.kind === 'swatches' ? this.open : null) ?? this.category.subs.find((x) => x.kind === 'swatches') ?? null;
+    const s = (this.open && this.open.kind === 'swatches' ? this.open : null) ?? this.subsOf(this.category).find((x) => x.kind === 'swatches') ?? null;
     this.colorTool.classList.toggle('none', !s);
     if (!s || !s.field) return;
     const cur = this.draft[s.field];
@@ -366,18 +429,36 @@ export class CharacterScreen {
   }
 
   // ------------------------------------------------------------------ navigation
+  /** Shows the controls for the body being edited (custom character or one-piece model). */
+  private syncMode(): boolean {
+    const custom = this.draft.model === 'custom';
+    for (const e of this.customOnly) e.hidden = !custom;
+    for (const e of this.modelOnly) e.hidden = custom;
+    return custom;
+  }
+
+  /** A category's items for the body being edited. */
+  private subsOf(c: Category): Sub[] {
+    // (the hooded model's hood and mask are part of its hoodie: it keeps its own top)
+    return HAIRLESS.has(this.draft.model) ? c.subs.filter((s) => s.field !== 'hairColor' && s.field !== 'top') : c.subs;
+  }
+
   private selectCategory(c: Category): void {
+    const custom = this.syncMode();
+    const ok = c === MODEL_CATEGORY || (custom ? CATEGORIES : WT_CATEGORIES).includes(c);
+    if (!ok) c = custom ? CATEGORIES[0] : MODEL_CATEGORY;
     this.category = c;
     for (const [id, b] of this.catButtons) {
       b.classList.toggle('on', id === c.id);
       b.setAttribute('aria-pressed', String(id === c.id));
     }
     // single-item categories go straight to their options
-    if (c.subs.length === 1) this.openOptions(c.subs[0]);
+    const subs = this.subsOf(c);
+    if (subs.length === 1) this.openOptions(subs[0]);
     else {
       this.open = null;
       this.renderPanel();
-      this.setView(c.subs[0].frame);
+      this.setView(subs[0].frame);
     }
     this.renderColors();
   }
@@ -393,7 +474,7 @@ export class CharacterScreen {
   }
 
   private closeOptions(): void {
-    if (this.category.subs.length === 1 || !this.open) return;
+    if (this.subsOf(this.category).length === 1 || !this.open) return;
     const was = this.open;
     this.open = null;
     this.renderPanel();
@@ -409,7 +490,7 @@ export class CharacterScreen {
   private renderPanel(): void {
     clear(this.panelBody);
     const s = this.open;
-    const nested = s !== null && this.category.subs.length > 1;
+    const nested = s !== null && this.subsOf(this.category).length > 1;
     this.panelBack.classList.toggle('hidden', !nested);
     // Escape / controller B: closes the option grid first, then the creator
     if (nested) {
@@ -423,11 +504,11 @@ export class CharacterScreen {
     this.panelNote.textContent = s?.note ?? '';
     if (!s) {
       this.panelBody.className = 'cc-pbody items';
-      for (const item of this.category.subs) this.panelBody.append(this.itemRow(item));
+      for (const item of this.subsOf(this.category)) this.panelBody.append(this.itemRow(item));
       return;
     }
     this.panelBody.className = `cc-pbody ${s.kind === 'swatches' ? 'swatches' : 'cards'}`;
-    for (const o of s.options) this.panelBody.append(this.optionButton(s, o));
+    for (const o of this.optionsOf(s)) this.panelBody.append(this.optionButton(s, o));
   }
 
   /** A row in a category's item list: name, current value, quick arrows; click opens the grid. */
@@ -455,7 +536,7 @@ export class CharacterScreen {
     const row = el('div', 'cc-irow', [openBtn]);
     if (s.field) {
       const cycle = (dir: number) => {
-        const ok = s.options.filter((o) => o.available !== false && !this.lockedPremium(s, o));
+        const ok = this.optionsOf(s).filter((o) => o.available !== false && !this.lockedPremium(s, o));
         const i = ok.findIndex((o) => o.id === this.draft[s.field!]);
         const next = ok[(i + dir + ok.length) % ok.length];
         this.pick(s, next.id, false);
@@ -471,6 +552,11 @@ export class CharacterScreen {
       row.append(next);
     }
     return row;
+  }
+
+  /** A list's options for the body being edited (the models' own garments only on them). */
+  private optionsOf(s: Sub): readonly LookOption[] {
+    return this.draft.model === 'custom' ? s.options.filter((o) => !o.modelOnly) : s.options;
   }
 
   /** An AJ's exclusive this player does not own. */
@@ -560,6 +646,14 @@ export class CharacterScreen {
   private pick(s: Sub, id: string, rerender: boolean): void {
     if (!s.field) return;
     this.draft[s.field] = id;
+    // "Original" is the color of his own garments: another garment starts out brown
+    if (s.field === 'top' && id !== 'wtjacket' && this.draft.topColor === 'original') this.draft.topColor = 'brown';
+    if (s.field === 'bottom' && id !== 'wtcargos' && this.draft.bottomColor === 'original') this.draft.bottomColor = 'brown';
+    // (and on the custom character, the models' own garments are its nearest ones)
+    if (this.draft.model === 'custom' && s.field === 'model') {
+      if (this.draft.top === 'wtjacket') this.draft.top = 'ziphoodie';
+      if (this.draft.bottom === 'wtcargos') this.draft.bottom = 'cargo';
+    }
     this.changed();
     if (rerender) {
       for (const b of this.panelBody.querySelectorAll<HTMLButtonElement>('.cc-opt')) {
@@ -570,6 +664,20 @@ export class CharacterScreen {
     }
     this.setView(s.frame);
     if (s.frame === 'face') this.preview.showcaseFace();
+    if (s.field === 'model') this.modelPicked(s);
+  }
+
+  /** A model was picked: only its controls stay, and the note follows the download. */
+  private modelPicked(s: Sub): void {
+    const id = this.draft.model;
+    this.syncMode();
+    this.panelNote.textContent = s.note ?? '';
+    if (id === 'custom') return;
+    this.panelNote.textContent = 'Loading the model (about 12 MB the first time)…';
+    void this.deps.loadModel(id).then((ok) => {
+      if (this.draft.model !== id || this.open !== s) return;
+      this.panelNote.textContent = ok ? (s.note ?? '') : 'That model did not load, so your custom character is showing. Pick it again to retry.';
+    });
   }
 
   // ------------------------------------------------------------------ draft
@@ -598,6 +706,17 @@ export class CharacterScreen {
   }
 
   private randomize(): void {
+    if (this.draft.model !== 'custom') {
+      // a one-piece model: new colors (free ones), the same model
+      const pick = (list: readonly LookOption[]) => {
+        const ok = list.filter((o) => o.available !== false && !o.premium);
+        return ok[Math.floor(Math.random() * ok.length)].id;
+      };
+      Object.assign(this.draft, { skin: pick(SKIN_TONES), topColor: pick(TOP_COLORS), bottomColor: pick(BOTTOM_COLORS), shoeColor: pick(SHOE_COLORS), hairColor: pick(HAIR_COLORS) });
+      this.changed();
+      this.renderPanel();
+      return;
+    }
     this.draft = randomAppearance();
     this.changed();
     this.renderPanel();

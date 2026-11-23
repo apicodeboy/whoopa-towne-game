@@ -1,0 +1,516 @@
+{
+  "models": [
+    {
+      "file": "whoopa_tall_unmasked.glb",
+      "bytes": 11853464,
+      "triangles": 30889,
+      "mesh_count": 1,
+      "materials": 1,
+      "embedded_images": 3,
+      "skins": 1,
+      "joints": [
+        70
+      ],
+      "joint_names": [
+        [
+          "mixamorig:Hips",
+          "mixamorig:Spine",
+          "mixamorig:Spine1",
+          "mixamorig:Spine2",
+          "mixamorig:Neck",
+          "mixamorig:Head",
+          "mixamorig:HeadTop_End",
+          "Bone_018",
+          "Bone_017",
+          "headfront",
+          "mixamorig:LeftShoulder",
+          "mixamorig:LeftArm",
+          "mixamorig:LeftForeArm",
+          "mixamorig:LeftHand",
+          "mixamorig:LeftHandThumb1",
+          "mixamorig:LeftHandThumb2",
+          "mixamorig:LeftHandThumb3",
+          "mixamorig:LeftHandThumb4",
+          "mixamorig:LeftHandPinky1",
+          "mixamorig:LeftHandPinky2",
+          "mixamorig:LeftHandPinky3",
+          "mixamorig:LeftHandPinky4",
+          "mixamorig:LeftHandIndex1",
+          "mixamorig:LeftHandIndex2",
+          "mixamorig:LeftHandIndex3",
+          "mixamorig:LeftHandIndex4",
+          "mixamorig:LeftHandRing1",
+          "mixamorig:LeftHandRing2",
+          "mixamorig:LeftHandRing3",
+          "mixamorig:LeftHandRing4",
+          "mixamorig:LeftHandMiddle1",
+          "mixamorig:LeftHandMiddle2",
+          "mixamorig:LeftHandMiddle3",
+          "mixamorig:LeftHandMiddle4",
+          "mixamorig:RightShoulder",
+          "mixamorig:RightArm",
+          "mixamorig:RightForeArm",
+          "mixamorig:RightHand",
+          "mixamorig:RightHandThumb1",
+          "mixamorig:RightHandThumb2",
+          "mixamorig:RightHandThumb3",
+          "mixamorig:RightHandThumb4",
+          "mixamorig:RightHandPinky1",
+          "mixamorig:RightHandPinky2",
+          "mixamorig:RightHandPinky3",
+          "mixamorig:RightHandPinky4",
+          "mixamorig:RightHandIndex1",
+          "mixamorig:RightHandIndex2",
+          "mixamorig:RightHandIndex3",
+          "mixamorig:RightHandIndex4",
+          "mixamorig:RightHandRing1",
+          "mixamorig:RightHandRing2",
+          "mixamorig:RightHandRing3",
+          "mixamorig:RightHandRing4",
+          "mixamorig:RightHandMiddle1",
+          "mixamorig:RightHandMiddle2",
+          "mixamorig:RightHandMiddle3",
+          "mixamorig:RightHandMiddle4",
+          "mixamorig:LeftUpLeg",
+          "mixamorig:LeftLeg",
+          "Bone_014",
+          "mixamorig:LeftFoot",
+          "mixamorig:LeftToeBase",
+          "mixamorig:LeftToe_End",
+          "mixamorig:RightUpLeg",
+          "mixamorig:RightLeg",
+          "Bone_010",
+          "mixamorig:RightFoot",
+          "mixamorig:RightToeBase",
+          "mixamorig:RightToe_End"
+        ]
+      ],
+      "animations": [
+        {
+          "name": "Idle",
+          "channels": 192,
+          "duration_seconds": 4.0
+        },
+        {
+          "name": "Walk",
+          "channels": 192,
+          "duration_seconds": 1.0333333015441895
+        },
+        {
+          "name": "Run",
+          "channels": 192,
+          "duration_seconds": 0.6333333253860474
+        }
+      ],
+      "extensions_required": [],
+      "self_contained": true,
+      "sha256": "02544f1d9794e83d0ccdd774a4359ae1db12c91e37e3ff80c92449fa0a5e131c"
+    },
+    {
+      "file": "whoopa_tall_hooded.glb",
+      "bytes": 11602120,
+      "triangles": 30755,
+      "mesh_count": 1,
+      "materials": 1,
+      "embedded_images": 3,
+      "skins": 1,
+      "joints": [
+        72
+      ],
+      "joint_names": [
+        [
+          "mixamorig:Hips",
+          "mixamorig:Spine",
+          "mixamorig:Spine1",
+          "mixamorig:Spine2",
+          "mixamorig:Neck",
+          "mixamorig:Head",
+          "mixamorig:HeadTop_End",
+          "headfront",
+          "mixamorig:LeftShoulder",
+          "mixamorig:LeftArm",
+          "mixamorig:LeftForeArm",
+          "mixamorig:LeftHand",
+          "mixamorig:LeftHandThumb1",
+          "mixamorig:LeftHandThumb2",
+          "mixamorig:LeftHandThumb3",
+          "mixamorig:LeftHandThumb4",
+          "mixamorig:LeftHandIndex1",
+          "mixamorig:LeftHandIndex2",
+          "mixamorig:LeftHandIndex3",
+          "mixamorig:LeftHandIndex4",
+          "mixamorig:LeftHandPinky1",
+          "mixamorig:LeftHandPinky2",
+          "mixamorig:LeftHandPinky3",
+          "mixamorig:LeftHandPinky4",
+          "mixamorig:LeftHandRing1",
+          "mixamorig:LeftHandRing2",
+          "mixamorig:LeftHandRing3",
+          "mixamorig:LeftHandRing4",
+          "mixamorig:LeftHandMiddle1",
+          "mixamorig:LeftHandMiddle2",
+          "mixamorig:LeftHandMiddle3",
+          "mixamorig:LeftHandMiddle4",
+          "Bone_023",
+          "Bone_043",
+          "Bone_042",
+          "mixamorig:RightShoulder",
+          "mixamorig:RightArm",
+          "mixamorig:RightForeArm",
+          "mixamorig:RightHand",
+          "mixamorig:RightHandIndex1",
+          "mixamorig:RightHandIndex2",
+          "mixamorig:RightHandIndex3",
+          "mixamorig:RightHandIndex4",
+          "mixamorig:RightHandThumb1",
+          "mixamorig:RightHandThumb2",
+          "mixamorig:RightHandThumb3",
+          "mixamorig:RightHandThumb4",
+          "mixamorig:RightHandPinky1",
+          "mixamorig:RightHandPinky2",
+          "mixamorig:RightHandPinky3",
+          "mixamorig:RightHandPinky4",
+          "mixamorig:RightHandRing1",
+          "mixamorig:RightHandRing2",
+          "mixamorig:RightHandRing3",
+          "mixamorig:RightHandRing4",
+          "mixamorig:RightHandMiddle1",
+          "mixamorig:RightHandMiddle2",
+          "mixamorig:RightHandMiddle3",
+          "mixamorig:RightHandMiddle4",
+          "Bone_018",
+          "Bone_029",
+          "Bone_028",
+          "mixamorig:LeftUpLeg",
+          "mixamorig:LeftLeg",
+          "mixamorig:LeftFoot",
+          "mixamorig:LeftToeBase",
+          "mixamorig:LeftToe_End",
+          "mixamorig:RightUpLeg",
+          "mixamorig:RightLeg",
+          "mixamorig:RightFoot",
+          "mixamorig:RightToeBase",
+          "mixamorig:RightToe_End"
+        ]
+      ],
+      "animations": [
+        {
+          "name": "Idle",
+          "channels": 192,
+          "duration_seconds": 4.0
+        },
+        {
+          "name": "Walk",
+          "channels": 192,
+          "duration_seconds": 1.0333333015441895
+        },
+        {
+          "name": "Run",
+          "channels": 192,
+          "duration_seconds": 0.6333333253860474
+        }
+      ],
+      "extensions_required": [],
+      "self_contained": true,
+      "sha256": "0f322d7e601342aa54fc500fb02bd92bdc27e6c28abf72b5945dcf31b386b483"
+    }
+  ],
+  "animation_sampling": [
+    {
+      "file": "whoopa_tall_unmasked.glb",
+      "bone_count": 70,
+      "animation_checks": [
+        {
+          "clip": "Idle_SmartRigArmature",
+          "mesh_deformation": true,
+          "sampled_frames": [
+            {
+              "frame": 0.0,
+              "min": [
+                -0.3272225856781006,
+                -0.5636979341506958,
+                -0.025867652148008347
+              ],
+              "max": [
+                0.3322334885597229,
+                0.3303072452545166,
+                1.678710699081421
+              ]
+            },
+            {
+              "frame": 48.0,
+              "min": [
+                -0.30164480209350586,
+                -0.5646865367889404,
+                -0.038442350924015045
+              ],
+              "max": [
+                0.29470446705818176,
+                0.3766210377216339,
+                1.675170660018921
+              ]
+            },
+            {
+              "frame": 96.0,
+              "min": [
+                -0.3272134065628052,
+                -0.5636974573135376,
+                -0.02586788684129715
+              ],
+              "max": [
+                0.33221983909606934,
+                0.3303069472312927,
+                1.6787320375442505
+              ]
+            }
+          ]
+        },
+        {
+          "clip": "Run_SmartRigArmature",
+          "mesh_deformation": true,
+          "sampled_frames": [
+            {
+              "frame": 0.0,
+              "min": [
+                -0.2966454029083252,
+                -0.566628098487854,
+                -0.06478182226419449
+              ],
+              "max": [
+                0.33236199617385864,
+                0.38840290904045105,
+                1.7087091207504272
+              ]
+            },
+            {
+              "frame": 7.599999904632568,
+              "min": [
+                -0.3124246895313263,
+                -0.558326780796051,
+                -0.052695706486701965
+              ],
+              "max": [
+                0.30263110995292664,
+                0.4583304226398468,
+                1.70485520362854
+              ]
+            },
+            {
+              "frame": 15.199999809265137,
+              "min": [
+                -0.2966454327106476,
+                -0.5666280388832092,
+                -0.06478199362754822
+              ],
+              "max": [
+                0.33236193656921387,
+                0.38840293884277344,
+                1.7087091207504272
+              ]
+            }
+          ]
+        },
+        {
+          "clip": "Walk_SmartRigArmature",
+          "mesh_deformation": true,
+          "sampled_frames": [
+            {
+              "frame": 0.0,
+              "min": [
+                -0.3127244710922241,
+                -0.34274807572364807,
+                0.0030202779453247786
+              ],
+              "max": [
+                0.30391639471054077,
+                0.14913180470466614,
+                1.7791657447814941
+              ]
+            },
+            {
+              "frame": 12.399999618530273,
+              "min": [
+                -0.28236714005470276,
+                -0.35657036304473877,
+                -0.0024869965855032206
+              ],
+              "max": [
+                0.3243292272090912,
+                0.16568726301193237,
+                1.7663233280181885
+              ]
+            },
+            {
+              "frame": 24.799999237060547,
+              "min": [
+                -0.31272411346435547,
+                -0.34274789690971375,
+                0.0030202066991478205
+              ],
+              "max": [
+                0.30391639471054077,
+                0.1491319090127945,
+                1.7791656255722046
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "whoopa_tall_hooded.glb",
+      "bone_count": 72,
+      "animation_checks": [
+        {
+          "clip": "Idle_SmartRigArmature",
+          "mesh_deformation": true,
+          "sampled_frames": [
+            {
+              "frame": 0.0,
+              "min": [
+                -0.3286460041999817,
+                -0.46932822465896606,
+                -0.005038160365074873
+              ],
+              "max": [
+                0.3160625994205475,
+                0.33075836300849915,
+                1.6830977201461792
+              ]
+            },
+            {
+              "frame": 48.0,
+              "min": [
+                -0.29810914397239685,
+                -0.47065457701683044,
+                -0.0052438159473240376
+              ],
+              "max": [
+                0.2847614586353302,
+                0.3893399238586426,
+                1.6598827838897705
+              ]
+            },
+            {
+              "frame": 96.0,
+              "min": [
+                -0.32863980531692505,
+                -0.4693262577056885,
+                -0.005037936381995678
+              ],
+              "max": [
+                0.31604626774787903,
+                0.33075374364852905,
+                1.6831096410751343
+              ]
+            }
+          ]
+        },
+        {
+          "clip": "Run_SmartRigArmature",
+          "mesh_deformation": true,
+          "sampled_frames": [
+            {
+              "frame": 0.0,
+              "min": [
+                -0.2796602249145508,
+                -0.4171815514564514,
+                0.05255720764398575
+              ],
+              "max": [
+                0.3110886514186859,
+                0.45714136958122253,
+                1.69357168674469
+              ]
+            },
+            {
+              "frame": 7.599999904632568,
+              "min": [
+                -0.2834739089012146,
+                -0.40038827061653137,
+                -0.028508441522717476
+              ],
+              "max": [
+                0.2973397672176361,
+                0.535406768321991,
+                1.6829806566238403
+              ]
+            },
+            {
+              "frame": 15.199999809265137,
+              "min": [
+                -0.279660165309906,
+                -0.4171815514564514,
+                0.05255686119198799
+              ],
+              "max": [
+                0.3110886514186859,
+                0.457141637802124,
+                1.69357168674469
+              ]
+            }
+          ]
+        },
+        {
+          "clip": "Walk_SmartRigArmature",
+          "mesh_deformation": true,
+          "sampled_frames": [
+            {
+              "frame": 0.0,
+              "min": [
+                -0.27715322375297546,
+                -0.2783091962337494,
+                0.0005056699737906456
+              ],
+              "max": [
+                0.27805978059768677,
+                0.23643174767494202,
+                1.7769334316253662
+              ]
+            },
+            {
+              "frame": 12.399999618530273,
+              "min": [
+                -0.25263291597366333,
+                -0.2664683163166046,
+                0.013001996092498302
+              ],
+              "max": [
+                0.3022988438606262,
+                0.2427697330713272,
+                1.7614130973815918
+              ]
+            },
+            {
+              "frame": 24.799999237060547,
+              "min": [
+                -0.277152955532074,
+                -0.2783089578151703,
+                0.0005056355148553848
+              ],
+              "max": [
+                0.27805960178375244,
+                0.23643186688423157,
+                1.7769333124160767
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "checks": [
+    "GLB 2 binary structure and declared length",
+    "Embedded mesh, textures and rig; no external dependencies",
+    "Idle, Walk, Run clips imported in Blender 4.3.2",
+    "Mesh deformation evaluated at first, middle and last frame of each clip",
+    "Front, side and back preview rendering"
+  ],
+  "limitations": [
+    "Not tested inside Whoopa Towne repository",
+    "Auto-rigging needs gameplay foot-placement and collision checks; sampled foot height varies by several centimeters",
+    "Single skinned mesh per character; clothes and accessories are not separate customization slots",
+    "No facial blendshapes or jump, crouch, aim or attack animations supplied",
+    "3D reconstruction approximates the approved reference; side and rear are inferred"
+  ]
+}

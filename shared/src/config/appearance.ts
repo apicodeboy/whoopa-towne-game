@@ -26,6 +26,8 @@ export interface LookOption {
   /** Premium finishes: shiny metal (0..1) and a procedural print (see the client's palette). */
   metal?: number;
   pattern?: string;
+  /** Only the one-piece models wear it (their own sculpted garment): never random, not in the custom creator. */
+  modelOnly?: boolean;
 }
 
 import { GUN_IDS, type WeaponId } from './weapons';
@@ -52,6 +54,8 @@ export const SKIN_TONES = [
   opt('s10', 'Deep Brown', { color: '#603821' }),
   opt('s11', 'Espresso', { color: '#4a2a18' }),
   opt('s12', 'Ebony', { color: '#361e11' }),
+  // as the model was made (Whoopa Tall: as delivered; the custom character: its old default, s10)
+  opt('original', 'Original', { color: '#603821' }),
 ];
 
 export const HEAD_SHAPES = [opt('round', 'Round'), opt('oval', 'Oval'), opt('square', 'Square'), opt('narrow', 'Narrow')];
@@ -143,6 +147,8 @@ export const TOPS = [
   soon('jacket', 'Jacket'),
   opt('puffer', 'Puffer Jacket'),
   opt('puffervest', 'Puffer Vest'),
+  // Whoopa Tall's own (sculpted into the model)
+  opt('wtjacket', 'Whoopa Zip Jacket', { modelOnly: true }),
 ];
 export const TOP_COLORS = [
   opt('black', 'Black', { color: '#1e1e22' }),
@@ -164,6 +170,8 @@ export const TOP_COLORS = [
   aj('tiedye', 'Tie-Dye', { color: '#d45cc4', pattern: 'tiedye' }),
   aj('flames', 'Flames', { color: '#1e1e22', pattern: 'flames' }),
   aj('midnight', 'Midnight Sheen', { color: '#2a2146', metal: 0.45 }),
+  // as the model was made (Whoopa Tall: as delivered; the custom character: its old default, black)
+  opt('original', 'Original', { color: '#1e1e22' }),
 ];
 export const BOTTOMS = [
   opt('slimjeans', 'Slim Jeans'),
@@ -176,6 +184,8 @@ export const BOTTOMS = [
   soon('bballshorts', 'Basketball Shorts'),
   opt('leggings', 'Leggings'),
   soon('skirt', 'Skirt'),
+  // Whoopa Tall's own (sculpted into the model)
+  opt('wtcargos', 'Whoopa Stacked Cargos', { modelOnly: true }),
 ];
 export const BOTTOM_COLORS = [
   opt('black', 'Black', { color: '#1e1e22' }),
@@ -190,6 +200,8 @@ export const BOTTOM_COLORS = [
   opt('pink', 'Pink', { color: '#e86ba7' }),
   // AJ's exclusives
   aj('camo', 'Woodland Camo', { color: '#5b6b3a', pattern: 'camo' }),
+  // as the model was made (Whoopa Tall: as delivered; the custom character: its old default, black)
+  opt('original', 'Original', { color: '#1e1e22' }),
 ];
 export const SHOES = [
   soon('barefoot', 'Barefoot'),
@@ -219,6 +231,8 @@ export const SHOE_COLORS = [
   aj('icy', 'Icy Blue', { color: '#9fd6f2', metal: 0.35 }),
   aj('volt', 'Volt', { color: '#c8ff2e' }),
   aj('galaxy', 'Galaxy', { color: '#3a2a6e', pattern: 'galaxy' }),
+  // as the model was made (Whoopa Tall: as delivered; the custom character: its old default, white)
+  opt('original', 'Original', { color: '#ececea' }),
 ];
 
 export const HATS = [
@@ -275,6 +289,8 @@ export const BODY_DETAILS = [opt('freckles', 'Freckles'), opt('scar', 'Facial Sc
 type GunSkinFields = { [K in GunSkinField]: string };
 
 export interface Appearance extends GunSkinFields {
+  /** One of MODELS. With anything but 'custom' the rest of the look is kept but not drawn. */
+  model: string;
   bodyType: string;
   build: string;
   height: string;
@@ -398,6 +414,54 @@ export function gunSkinField(gun: string): GunSkinField {
 }
 const GUN_SKIN_FIELDS = Object.fromEntries(GUN_IDS.map((g) => [gunSkinField(g), GUN_SKINS])) as Record<GunSkinField, typeof GUN_SKINS>;
 
+/**
+ * The body a player is drawn with: their custom character, or a one-piece model (looks only: the
+ * collider and hitboxes are the same for all of them). Stable ids; append only. It is not one of
+ * EXTRA_FIELDS because the gun skins grow at the end of those: it has its own suffix in the code.
+ */
+export const MODELS = [
+  opt('custom', 'Classic Custom'), opt('whoopa_tall_unmasked', 'Whoopa Tall'), opt('whoopa_tall_hooded', 'Whoopa Tall, Hooded'),
+];
+/** The body everyone plays as unless they pick another (bots keep the custom character). */
+export const DEFAULT_MODEL = 'whoopa_tall_unmasked';
+
+/** The default look from before models: a look still exactly this was never customized. */
+const PREVIOUS_DEFAULT: Record<string, string> = {
+  hair: 'spikylocs', skin: 's10', top: 'puffer', topColor: 'black', bottom: 'baggyjeans', bottomColor: 'black', shoes: 'lowtops', shoeColor: 'white',
+  hat: 'none', mask: 'none', glasses: 'none', necklace: 'icedpendant', wrist: 'glovewatches', belt: 'redstuds', legPrint: 'gocrazy', face: 'gray', faceMark: 'none',
+};
+
+/** The custom character draws the one-piece models' own garments as its nearest ones. */
+export function forCustomCharacter(look: Readonly<Appearance>): Appearance {
+  const out = cloneAppearance(look);
+  if (out.top === 'wtjacket') out.top = 'ziphoodie';
+  if (out.bottom === 'wtcargos') out.bottom = 'cargo';
+  return out;
+}
+
+/** The colors every look started with before "Original" existed (they draw the same on the custom character). */
+const LEGACY_DEFAULT_COLORS: Record<string, string> = { skin: 's10', topColor: 'black', bottomColor: 'black', shoeColor: 'white' };
+
+/**
+ * A look saved before there were models: it moves to the default model, and the colors it still had
+ * at the old defaults become "Original" (the same on the custom character; the model's own colors on
+ * the model). Colors somebody picked stay.
+ */
+function adoptLegacy(out: Appearance, given: (field: string) => boolean = () => true): Appearance {
+  // never customized (still the default from before models): the new default outfit
+  const rec0 = out as unknown as Record<string, string>;
+  if (Object.entries(PREVIOUS_DEFAULT).every(([k, v]) => rec0[k] === v)) {
+    const fresh = cloneAppearance(DEFAULT_APPEARANCE);
+    for (const k of ['weaponSkin', 'backpack', 'mouthProp', 'height', ...GUN_IDS.map(gunSkinField)]) (fresh as unknown as Record<string, string>)[k] = rec0[k];
+    Object.assign(out, fresh);
+    return out;
+  }
+  out.model = DEFAULT_MODEL;
+  const rec = out as unknown as Record<string, string>;
+  for (const [field, old] of Object.entries(LEGACY_DEFAULT_COLORS)) if (given(field) && rec[field] === old) rec[field] = 'original';
+  return out;
+}
+
 /** A graphic on the left thigh of long pants. */
 export const LEG_PRINTS = [opt('none', 'None'), opt('gocrazy', 'Go Crazy + Scorpion'), opt('flames', 'Flames'), opt('stars', 'Stars')];
 
@@ -417,6 +481,7 @@ export const EXTRA_FIELD_KEYS = Object.keys(EXTRA_FIELDS) as ExtraField[];
 
 /** Every option list by field, the AJ's extras included. */
 export function optionsOf(field: string): readonly LookOption[] | null {
+  if (field === 'model') return MODELS;
   return (LOOK_FIELDS as Record<string, readonly LookOption[]>)[field] ?? (EXTRA_FIELDS as Record<string, readonly LookOption[]>)[field] ?? null;
 }
 
@@ -443,15 +508,14 @@ export function stripUnowned(look: Readonly<Appearance>, owned: ReadonlySet<stri
 }
 
 /**
- * The look everyone starts with: the blank gray face, big spiky locs, a black hooded puffer,
- * very wide stacked black pants with the blue graphic, a red studded belt, a chain with a
- * round pendant, black gloves with a watch on each wrist, and clean white low-tops.
+ * The look everyone starts with: Whoopa Tall in a plain brown tee and brown jeans, nothing else
+ * (his boots as made). Classic Custom wears the same with big spiky locs and white low-tops.
  */
 export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   bodyType: 'masc',
   build: 'average',
   height: 'average',
-  skin: 's10',
+  skin: 'original',
   headShape: 'oval',
   faceShape: 'defined',
   eyes: 'average',
@@ -467,17 +531,17 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   mouthAcc: 'none',
   mouthProp: 'none',
   teeth: 'natural',
-  top: 'puffer',
-  topColor: 'black',
-  bottom: 'baggyjeans',
-  bottomColor: 'black',
+  top: 'tee',
+  topColor: 'brown',
+  bottom: 'jeans',
+  bottomColor: 'brown',
   shoes: 'lowtops',
-  shoeColor: 'white',
+  shoeColor: 'original',
   hat: 'none',
   glasses: 'none',
   earrings: 'none',
-  necklace: 'icedpendant',
-  wrist: 'glovewatches',
+  necklace: 'none',
+  wrist: 'none',
   faceAcc: 'none',
   weaponSkin: 'none',
   backpack: 'none',
@@ -488,9 +552,10 @@ export const DEFAULT_APPEARANCE: Readonly<Appearance> = Object.freeze({
   waistChain: 'none',
   face: 'gray',
   faceMark: 'none',
-  belt: 'redstuds',
-  legPrint: 'gocrazy',
+  belt: 'none',
+  legPrint: 'none',
   ...(Object.fromEntries(GUN_IDS.map((g) => [gunSkinField(g), 'none'])) as Record<GunSkinField, string>),
+  model: DEFAULT_MODEL,
   tattoos: Object.freeze({}) as Record<string, string>,
   details: Object.freeze([]) as unknown as string[],
 });
@@ -530,6 +595,7 @@ function upgradeOldLook(look: Appearance): Appearance {
   out.backpack = look.backpack;
   out.mouthProp = look.mouthProp;
   out.height = look.height;
+  out.model = look.model;
   return out;
 }
 
@@ -603,6 +669,7 @@ export function sanitizeAppearance(raw: unknown, fallback: Readonly<Appearance> 
   if (r.mouth !== undefined && r.mouthProp === undefined && isPick(MOUTH_PROPS, r.mouth)) out.mouthProp = r.mouth;
   for (const key of LOOK_FIELD_KEYS) if (isPick(LOOK_FIELDS[key], r[key])) out[key] = r[key] as string;
   for (const key of EXTRA_FIELD_KEYS) if (isPick(EXTRA_FIELDS[key], r[key])) out[key] = r[key] as string;
+  if (isPick(MODELS, r.model)) out.model = r.model;
   if (r.tattoos && typeof r.tattoos === 'object' && !Array.isArray(r.tattoos)) {
     out.tattoos = {};
     for (const [spot, design] of Object.entries(r.tattoos as Record<string, unknown>)) {
@@ -613,7 +680,9 @@ export function sanitizeAppearance(raw: unknown, fallback: Readonly<Appearance> 
     out.details = BODY_DETAILS.map((d) => d.id).filter((id) => (r.details as unknown[]).includes(id));
   }
   // saved before the faceless character (no `face` yet)
-  return r.face === undefined && r.top !== undefined ? upgradeOldLook(out) : out;
+  const upgraded = r.face === undefined && r.top !== undefined ? upgradeOldLook(out) : out;
+  // (a real look from before models: it has clothes but no model)
+  return r.model === undefined && r.top !== undefined ? adoptLegacy(upgraded, (f) => r[f] !== undefined) : upgraded;
 }
 
 export function sameAppearance(a: Readonly<Appearance>, b: Readonly<Appearance>): boolean {
@@ -623,6 +692,8 @@ export function sameAppearance(a: Readonly<Appearance>, b: Readonly<Appearance>)
 // ------------------------------------------------------------------ compact wire code
 const CODE_PREFIX = 'L1';
 const B36 = '0123456789abcdefghijklmnopqrstuvwxyz';
+/** Before the model's digit at the very end of a code (never written for the custom character). */
+const MODEL_MARK = '~';
 
 /**
  * A short code for the network (~40 characters): one base-36 digit per field (its position in
@@ -639,6 +710,8 @@ export function encodeAppearance(a: Readonly<Appearance>): string {
   s += B36[mask];
   // AJ's fields after the original code: old codes simply end before them
   for (const key of EXTRA_FIELD_KEYS) s += B36[Math.max(0, EXTRA_FIELDS[key].findIndex((o) => o.id === a[key]))];
+  // always written: a code without it was saved before there were models (see adoptLegacy)
+  s += MODEL_MARK + B36[Math.max(0, MODELS.findIndex((o) => o.id === a.model))];
   return s;
 }
 
@@ -646,7 +719,9 @@ export function encodeAppearance(a: Readonly<Appearance>): string {
 export function decodeAppearance(code: unknown, fallback: Readonly<Appearance> = DEFAULT_APPEARANCE): Appearance {
   const out = cloneAppearance(fallback);
   if (typeof code !== 'string' || !code.startsWith(CODE_PREFIX) || code.length > 80) return out;
-  const digits = code.slice(CODE_PREFIX.length);
+  const mark = code.indexOf(MODEL_MARK);
+  const digits = code.slice(CODE_PREFIX.length, mark < 0 ? undefined : mark);
+  if (mark >= 0) out.model = MODELS[B36.indexOf(code[mark + 1] ?? '!')]?.id ?? DEFAULT_MODEL;
   const at = (i: number): number => (i < digits.length ? B36.indexOf(digits[i]) : -1);
   LOOK_FIELD_KEYS.forEach((key, i) => {
     const o = LOOK_FIELDS[key][at(i)];
@@ -666,7 +741,9 @@ export function decodeAppearance(code: unknown, fallback: Readonly<Appearance> =
     if (o && o.available !== false) out[key] = o.id;
   }
   // a code written before the faceless character ends before its `face` digit
-  return digits.length >= LOOK_FIELD_KEYS.length && digits.length <= faceAt ? upgradeOldLook(out) : out;
+  const upgraded = digits.length >= LOOK_FIELD_KEYS.length && digits.length <= faceAt ? upgradeOldLook(out) : out;
+  // a whole code from before there were models
+  return mark < 0 && digits.length >= LOOK_FIELD_KEYS.length ? adoptLegacy(upgraded) : upgraded;
 }
 
 // ------------------------------------------------------------------ random looks
@@ -684,7 +761,8 @@ export function seededRandom(seed: number): () => number {
 
 function pickFrom(list: readonly LookOption[], rand: () => number, weights?: Record<string, number>): string {
   // AJ's exclusives are bought, never handed out at random
-  const ok = list.filter((o) => o.available !== false && !o.premium);
+  // ("Original" is a pick of its own, not a color: never handed out at random)
+  const ok = list.filter((o) => o.available !== false && !o.premium && !o.modelOnly && o.id !== 'original');
   let total = 0;
   for (const o of ok) total += weights?.[o.id] ?? 1;
   let r = rand() * total;
@@ -698,6 +776,8 @@ function pickFrom(list: readonly LookOption[], rand: () => number, weights?: Rec
 /** A complete random character that looks put together (accessories are the exception, not the rule). */
 export function randomAppearance(rand: () => number = Math.random): Appearance {
   const a = cloneAppearance(DEFAULT_APPEARANCE);
+  // random looks are custom characters (bots, Randomize): the one-piece models have one look each
+  a.model = 'custom';
   a.bodyType = pickFrom(BODY_TYPES, rand, { masc: 4, fem: 4, neutral: 2 });
   const fem = a.bodyType === 'fem';
   a.build = pickFrom(BUILDS, rand, { slim: 2, average: 4, athletic: 3, heavy: 2 });

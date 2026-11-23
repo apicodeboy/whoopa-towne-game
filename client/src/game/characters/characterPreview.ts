@@ -166,18 +166,31 @@ export class CharacterPreview {
     visual.setMenuIdle?.(!this.held);
     this.scene.add(visual.root);
     visual.setVisible(true);
+    this.measure(visual);
+    // render it right away (also when the screen is idle) so a change shows instantly
+    this.visual.update(0, this.pose, true);
+    // a model still downloading: measured again when it is here
+    void visual.ready?.then(() => {
+      if (this.visual !== visual) return;
+      visual.setMenuIdle?.(!this.held);
+      this.measure(visual);
+    });
+  }
+
+  private measure(visual: CharacterVisual): void {
     const f = visual.frame;
     if (f) this.eyeH = f.eyeY * f.scale;
-    // its size as it stands (for the front view's measurements)
+    // its size as it stands (for the front view's measurements), unturned
+    const turned = visual.root.rotation.y;
+    visual.root.rotation.y = 0;
     visual.root.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(visual.root);
+    visual.root.rotation.y = turned;
     if (!box.isEmpty()) {
       const top = f ? Math.max(f.topY * f.scale, this.eyeH + 0.1) : box.max.y;
       this.size = { w: Math.min(1.4, box.max.x - box.min.x), h: Math.min(2.4, Math.max(top, box.max.y * 0.98)), cx: (box.min.x + box.max.x) / 2 };
     }
     this.boxKey = '';
-    // render it right away (also when the screen is idle) so a change shows instantly
-    this.visual.update(0, this.pose, true);
   }
 
   get character(): CharacterVisual | null {

@@ -5,6 +5,10 @@ import type { TeamId } from '@shared/config/crews';
 import { approach, clamp, damp, lerp } from '@shared/math';
 import { CHARACTER_MESH, type Assets, type CharacterTemplate, type ModelTemplate } from '../assets';
 import { BALLOON_GRIP, type CharacterPose, type CharacterVisual, type HeldItem } from './characterTypes';
+import { readCurve } from './imported/clips';
+import { lightUniforms } from '../lighting';
+import { SLOT } from './look/meshKit';
+import type { Dressed, ImportedBody } from './imported/models';
 import { LOOK_MATERIAL, weldedNormals, type Assembled, type LookBuilder } from './look/assemble';
 import { paint, paletteFor, printsFor } from './look/palette';
 import { MOUTH_SCALE, createMouthAccessory, type MouthAccessory } from './mouthAccessories';
@@ -150,6 +154,28 @@ const _el = new THREE.Vector3();
 const _wr = new THREE.Vector3();
 const _t = new THREE.Vector3();
 
+/**
+ * Clothes carried onto an imported model: the clothing system's vertex colors, finishes and baked
+ * creases, lit like the model itself (soft, not cel-shaded) so they sit with its textured head.
+ */
+const OUTFIT_MATERIAL = new THREE.MeshStandardMaterial({ name: 'outfit', vertexColors: true, roughness: 0.85, metalness: 0 });
+OUTFIT_MATERIAL.onBeforeCompile = (shader) => {
+  shader.uniforms.uCharGlow = lightUniforms.charGlow;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec2 pbr;\nattribute float ao;\nvarying vec2 vPbr;\nvarying float vAo;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvPbr = pbr;\n\tvAo = ao;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uCharGlow;\nvarying vec2 vPbr;\nvarying float vAo;')
+    // baked creases darken the cloth; finishes: rougher or glossier, metals with a little of their own light
+    .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= mix( 0.55, 1.0, clamp( vAo, 0.0, 1.0 ) );')
+    .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n\troughnessFactor = clamp( vPbr.y, 0.3, 1.0 );')
+    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * ( uCharGlow + 0.22 * vPbr.x );');
+};
+OUTFIT_MATERIAL.customProgramCacheKey = () => 'imported-outfit';
+
+/** Imported models' head size options (the same steps as the custom character's). */
+const IMPORTED_HEAD_SCALE: Record<string, number> = { small: 0.94, large: 1.07 };
+
 /** Ink outline width in meters (the comic-book line around every character). */
 const OUTLINE = 0.0085;
 
@@ -229,24 +255,38 @@ function reach(arm: Arm, target: THREE.Vector3, pole: THREE.Vector3): void {
  * lowered + two-bone leg IK onto the animated feet), recoil, reload and death.
  *
  * The body itself comes from the Character Creator: the player's Appearance is assembled
- * into one skinned mesh (see look/assemble.ts) and painted with their colors.
+ * into one skinned mesh (see look/assemble.ts) and painted with their colors. Or it is one of
+ * the imported one-piece models (see imported/models.ts), with its own mesh, maps and clips.
  */
 export class SkinnedCharacter implements CharacterVisual {
-  readonly root = new THREE.Group();
+  readonly root: THREE.Group;
+  /** False when the root is somebody else's (a model that arrived after the character did). */
+  private ownsRoot: boolean;
   private model: THREE.Object3D;
   private mixer: THREE.AnimationMixer;
   private clips: ClipSet;
   private assets: Assets;
-  private builder: LookBuilder;
+  private builder: LookBuilder | null;
   private look: Appearance;
-  private built: Assembled;
+  /** The assembled look, or null for an imported model. */
+  private built: Assembled | null;
+  private imported: ImportedBody | null;
+  private disposed = false;
+  /** Imported: the crew arm band (matches only). */
+  private band: THREE.SkinnedMesh | null = null;
+  /** Imported: tops / bottoms carried from the clothing system (see imported/outfit.ts), painted per character. */
+  private dressed: Dressed | null = null;
+  private outfit: THREE.SkinnedMesh | null = null;
+  /** Imported: 0..1 off the ground, and behind a long gun. */
+  private airT = 0;
+  private longT = 0;
   private team: TeamId;
   /** The character's one mesh, and its own geometry (shared buffers + its own colors). */
   private skin: THREE.SkinnedMesh;
-  private outline: THREE.SkinnedMesh;
-  private outlineMat: THREE.MeshBasicMaterial;
-  private geometry: THREE.BufferGeometry;
-  private colors: THREE.BufferAttribute;
+  private outline: THREE.SkinnedMesh | null = null;
+  private outlineMat: THREE.MeshBasicMaterial | null = null;
+  private geometry: THREE.BufferGeometry | null = null;
+  private colors: THREE.BufferAttribute | null = null;
   /** Expression preview (Character screen): morph weight now, target, and when it ends. */
   private expr = { id: 'neutral', w: 0, target: 0, until: 0 };
 
@@ -266,6 +306,8 @@ export class SkinnedCharacter implements CharacterVisual {
   private upCalm: THREE.AnimationAction;
   private upPunch: THREE.AnimationAction;
   private loWalk: THREE.AnimationAction;
+  /** Imported: the walk's own arms (the run's pump the arms up to the face at walking pace). */
+  private upWalk: THREE.AnimationAction | null = null;
   /** The model has been tilted / spun (hanging, skydiving, flipping) and needs putting back. */
   private tilted = false;
   private death: THREE.AnimationAction;
@@ -276,6 +318,8 @@ export class SkinnedCharacter implements CharacterVisual {
 
   private body: THREE.Object3D | null;
   private spine: THREE.Object3D | null;
+  /** Imported: the joint above the spine (shares the torso's steadying). */
+  private waist: THREE.Object3D | null = null;
   private chest: THREE.Object3D | null;
   private head: THREE.Object3D | null;
   private handR: THREE.Object3D | null;
@@ -326,17 +370,30 @@ export class SkinnedCharacter implements CharacterVisual {
   private wL = 0;
   private wR = 0;
 
-  /** Use `SkinnedCharacter.create` (it returns null when the look cannot be built). */
-  private constructor(built: Assembled, builder: LookBuilder, assets: Assets, team: TeamId, look: Appearance) {
-    const template: CharacterTemplate = built.rig.template;
+  /** Use `SkinnedCharacter.create` (it returns null when the look cannot be built) or `createImported`. */
+  private constructor(
+    source: { built: Assembled; builder: LookBuilder } | { imported: ImportedBody; crewBand: boolean; builder: LookBuilder | null },
+    assets: Assets, team: TeamId, look: Appearance, root?: THREE.Group,
+  ) {
+    this.root = root ?? new THREE.Group();
+    this.ownsRoot = !root;
+    const built = 'built' in source ? source.built : null;
+    const imported = 'imported' in source ? source.imported : null;
+    const template: CharacterTemplate = built ? built.rig.template : imported!.template;
     this.assets = assets;
-    this.builder = builder;
+    this.builder = 'built' in source ? source.builder : null;
     this.look = look;
     this.built = built;
+    this.imported = imported;
+    imported?.acquire();
     this.team = team;
-    this.clips = splitClips(template);
+    const clips = splitClips(template);
+    // (imported boots roll heel to toe: their strides are measured at the soles)
+    this.clips = imported
+      ? { ...clips, strideRun: imported.strideRun * clips.scale || clips.strideRun, strideWalk: imported.strideWalk * clips.scale || clips.strideWalk }
+      : clips;
     this.model = cloneSkinned(template.scene);
-    this.model.scale.setScalar(this.clips.scale * built.heightScale);
+    this.model.scale.setScalar(this.clips.scale * (built?.heightScale ?? 1));
     // glTF models face +Z; the game's "forward" at yaw 0 is -Z
     this.model.rotation.y = Math.PI;
     this.root.add(this.model);
@@ -344,29 +401,71 @@ export class SkinnedCharacter implements CharacterVisual {
     this.gunMount.add(this.muzzle);
 
     this.skin = this.model.getObjectByName(CHARACTER_MESH) as THREE.SkinnedMesh;
-    this.colors = new THREE.BufferAttribute(new Float32Array(built.paint.length / 5 * 3), 3);
-    if (!built.geometry.attributes.smoothNormal) {
-      const g = built.geometry;
-      g.setAttribute('smoothNormal', new THREE.BufferAttribute(weldedNormals(g.attributes.position.array, g.attributes.normal.array), 3));
+    if (built) {
+      this.colors = new THREE.BufferAttribute(new Float32Array(built.paint.length / 5 * 3), 3);
+      if (!built.geometry.attributes.smoothNormal) {
+        const g = built.geometry;
+        g.setAttribute('smoothNormal', new THREE.BufferAttribute(weldedNormals(g.attributes.position.array, g.attributes.normal.array), 3));
+      }
+      this.geometry = this.ownGeometry(built, null);
+      this.skin.geometry = this.geometry;
+      this.skin.material = LOOK_MATERIAL;
     }
-    this.geometry = this.ownGeometry(null);
-    this.skin.geometry = this.geometry;
-    this.skin.material = LOOK_MATERIAL;
     // skinned bounds are not tracked per pose: cull with a fixed sphere that covers every pose
     // (standing, crouched, lying dead) around the character's feet instead
     this.root.updateMatrixWorld(true);
     const center = this.skin.worldToLocal(this.root.localToWorld(new THREE.Vector3(0, 0.9, 0)));
     this.skin.boundingSphere = new THREE.Sphere(center, 2.1 / this.skin.matrixWorld.getMaxScaleOnAxis());
     this.skin.frustumCulled = true;
-    // the ink line (in the mesh's own units, which are scaled to make the model 1.8 m tall)
-    this.outlineMat = outlineMaterial(OUTLINE / this.skin.matrixWorld.getMaxScaleOnAxis());
-    this.outline = new THREE.SkinnedMesh(this.geometry, this.outlineMat);
-    this.outline.visible = SkinnedCharacter.outlines;
-    this.outline.bind(this.skin.skeleton, this.skin.bindMatrix);
-    this.outline.boundingSphere = this.skin.boundingSphere;
-    this.outline.castShadow = false;
-    this.outline.receiveShadow = false;
-    this.skin.parent!.add(this.outline);
+    if (this.geometry) {
+      // the ink line (in the mesh's own units, which are scaled to make the model 1.8 m tall)
+      this.outlineMat = outlineMaterial(OUTLINE / this.skin.matrixWorld.getMaxScaleOnAxis());
+      this.outline = new THREE.SkinnedMesh(this.geometry, this.outlineMat);
+      this.outline.visible = SkinnedCharacter.outlines;
+      this.outline.bind(this.skin.skeleton, this.skin.bindMatrix);
+      this.outline.boundingSphere = this.skin.boundingSphere;
+      this.outline.castShadow = false;
+      this.outline.receiveShadow = false;
+      this.skin.parent!.add(this.outline);
+    }
+    if (imported) {
+      // the model in the player's colors (its own maps, recolored: see imported/recolor.ts)
+      const dressed = imported.dress(look, 'imported' in source ? source.builder : null);
+      this.dressed = dressed;
+      this.skin.geometry = dressed.geometry;
+      this.skin.material = dressed.material;
+      if (dressed.outfit) {
+        // its other clothes: shared shape, this character's own colors
+        const src = dressed.outfit.geometry;
+        this.colors = new THREE.BufferAttribute(new Float32Array((dressed.outfit.paint.length / 5) * 3), 3);
+        const g = new THREE.BufferGeometry();
+        g.setIndex(src.index);
+        for (const [name, attr] of Object.entries(src.attributes)) g.setAttribute(name, attr);
+        g.setAttribute('color', this.colors);
+        g.boundingSphere = src.boundingSphere;
+        this.geometry = g;
+        this.outfit = new THREE.SkinnedMesh(g, OUTFIT_MATERIAL);
+        this.outfit.name = 'Outfit';
+        this.outfit.castShadow = true;
+        this.outfit.receiveShadow = true;
+        this.outfit.bind(this.skin.skeleton, this.skin.bindMatrix);
+        this.outfit.boundingSphere = this.skin.boundingSphere;
+        // (measured as it stands, not in the clothing's T-pose)
+        this.outfit.boundingBox = imported.standing.clone();
+        this.skin.parent!.add(this.outfit);
+      }
+      // (menus measure the character as it stands, not its T-pose)
+      this.skin.boundingBox = imported.standing.clone();
+      // (on its own jacket's sleeve: carried tops have none, like the custom character's)
+      if ('crewBand' in source && source.crewBand && dressed.ownTop) {
+        // one piece, so the sleeve cannot be painted: the band keeps crews readable in matches
+        this.band = new THREE.SkinnedMesh(imported.bandGeometry, imported.bandMaterial(team));
+        this.band.bind(this.skin.skeleton, this.skin.bindMatrix);
+        this.band.boundingSphere = this.skin.boundingSphere;
+        this.band.boundingBox = this.skin.boundingBox;
+        this.skin.parent!.add(this.band);
+      }
+    }
     this.repaint();
 
     const bones = new Map<string, THREE.Object3D>();
@@ -379,6 +478,11 @@ export class SkinnedCharacter implements CharacterVisual {
     this.chest = bone('Chest') ?? bone('Torso');
     this.head = bone('Head');
     this.handR = bone('WristR') ?? bone('LowerArmR');
+    if (imported) {
+      this.waist = bone('Torso');
+      // head size: the head bone itself (the clips never scale it)
+      this.head?.scale.setScalar(IMPORTED_HEAD_SCALE[look.headSize] ?? 1);
+    }
     for (const side of ['L', 'R']) {
       const upper = bone(`UpperLeg${side}`), lower = bone(`LowerLeg${side}`), foot = bone(`Foot${side}`);
       if (upper && lower && foot) this.legs.push({ upper, lower, foot });
@@ -386,7 +490,8 @@ export class SkinnedCharacter implements CharacterVisual {
       if (au && al && aw) this.arms[side as 'L' | 'R'] = { upper: au, lower: al, wrist: aw };
       for (const f of ['Index', 'Middle', 'Ring', 'Pinky']) {
         // Urban Ink hands: the palm is the wrist's, the fingers bend at their knuckles (2..4)
-        for (const j of built.rig.id === 'ink' ? [2, 3, 4] : [1, 2, 3]) {
+        // (imported rigs are renamed to count the same way)
+        for (const j of !built || built.rig.id === 'ink' ? [2, 3, 4] : [1, 2, 3]) {
           const b = bone(`${f}${j}${side}`);
           if (b) this.fingers[side as 'L' | 'R'].push(b);
         }
@@ -430,10 +535,11 @@ export class SkinnedCharacter implements CharacterVisual {
     }
 
     const adjusted = new Set<THREE.Object3D>();
-    for (const b of [this.body, this.spine, this.chest, this.head]) if (b) adjusted.add(b);
+    for (const b of [this.body, this.spine, this.waist, this.chest, this.head]) if (b) adjusted.add(b);
     for (const leg of this.legs) {
       adjusted.add(leg.upper);
       adjusted.add(leg.lower);
+      if (imported) adjusted.add(leg.foot);
     }
     for (const arm of [this.arms.L, this.arms.R]) {
       if (!arm) continue;
@@ -446,9 +552,9 @@ export class SkinnedCharacter implements CharacterVisual {
     for (const b of adjusted) this.touched.push({ bone: b, q: b.quaternion.clone(), p: b.position.clone() });
 
     // something held in the mouth rides on the head bone, placed at the lips
-    const accessory = this.head ? createMouthAccessory(look.mouthProp) : null;
-    const headIdx = built.rig.jointIndex.get('Head');
-    if (accessory && headIdx !== undefined) {
+    const accessory = built && this.head ? createMouthAccessory(look.mouthProp) : null;
+    const headIdx = built?.rig.jointIndex.get('Head');
+    if (built && accessory && headIdx !== undefined) {
       // where it should be in the bind pose (out of the face = +Z there, -Z in mouth space)...
       const m = new THREE.Matrix4().compose(
         built.mouth.clone().add(new THREE.Vector3(0, 0, 0.0015)),
@@ -473,7 +579,7 @@ export class SkinnedCharacter implements CharacterVisual {
       return a;
     };
     const { lower, upper, full } = this.clips;
-    this.loIdle = act(lower, 'Idle_Gun_Pointing', 'Idle');
+    this.loIdle = act(lower, imported ? 'Idle' : 'Idle_Gun_Pointing', 'Idle');
     this.loRun = act(lower, 'Run', 'Walk');
     this.loBack = act(lower, 'Run_Back', 'Run');
     this.loLeft = act(lower, 'Run_Left', 'Run');
@@ -486,6 +592,7 @@ export class SkinnedCharacter implements CharacterVisual {
     this.upCalm = act(upper, 'Idle_Neutral', 'Idle');
     this.upPunch = act(upper, 'Punch_Right', 'Idle_Gun_Shoot');
     this.loWalk = act(lower, 'Walk', 'Run');
+    if (imported) this.upWalk = act(upper, 'Walk', 'Run');
     this.death = act(full, 'Death', 'Idle');
     this.calm = act(full, 'Idle_Neutral', 'Idle');
     this.death.setLoop(THREE.LoopOnce, 1);
@@ -493,21 +600,37 @@ export class SkinnedCharacter implements CharacterVisual {
     this.death.stop();
     // locomotion + shoot clips are scrubbed by hand so the leg cycles stay in sync
     for (const a of [this.loRun, this.loWalk, this.loBack, this.loLeft, this.loRight, this.upAimRun, this.upSprint, this.upShoot, this.upPunch]) a.timeScale = 0;
+    if (this.upWalk) this.upWalk.timeScale = 0;
+    if (imported && 'crewBand' in source && source.crewBand) {
+      // the supplied idle looks around: players standing together must not do it in unison
+      // (menus start it at the beginning, facing front)
+      const at = Math.random() * this.calm.getClip().duration;
+      for (const a of [this.calm, this.upCalm, this.loIdle]) a.time = at;
+    }
   }
 
   /** Builds a character for a look, or null when the models are not loaded. */
-  static create(builder: LookBuilder, assets: Assets, team: TeamId, look: Appearance): SkinnedCharacter | null {
+  static create(builder: LookBuilder, assets: Assets, team: TeamId, look: Appearance, root?: THREE.Group): SkinnedCharacter | null {
     const built = builder.build(look);
-    return built ? new SkinnedCharacter(built, builder, assets, team, look) : null;
+    return built ? new SkinnedCharacter({ built, builder }, assets, team, look, root) : null;
+  }
+
+  /**
+   * A character wearing an imported one-piece model.
+   * @param crewBand show the crew arm band (matches)
+   * @param root draw into this group instead of a new one
+   */
+  static createImported(imported: ImportedBody, assets: Assets, team: TeamId, look: Appearance, crewBand: boolean, root?: THREE.Group, builder: LookBuilder | null = null): SkinnedCharacter {
+    return new SkinnedCharacter({ imported, crewBand, builder }, assets, team, look, root);
   }
 
   /** A per-character geometry: the look's shared buffers, this character's colors, an optional expression morph. */
-  private ownGeometry(morph: THREE.BufferAttribute | null): THREE.BufferGeometry {
-    const src = this.built.geometry;
+  private ownGeometry(built: Assembled, morph: THREE.BufferAttribute | null): THREE.BufferGeometry {
+    const src = built.geometry;
     const g = new THREE.BufferGeometry();
     g.setIndex(src.index);
     for (const [name, attr] of Object.entries(src.attributes)) g.setAttribute(name, attr);
-    g.setAttribute('color', this.colors);
+    g.setAttribute('color', this.colors!);
     if (morph) {
       g.morphAttributes.position = [morph];
       g.morphTargetsRelative = true;
@@ -518,6 +641,21 @@ export class SkinnedCharacter implements CharacterVisual {
   }
 
   private repaint(): void {
+    if (this.band) this.band.material = this.imported!.bandMaterial(this.team);
+    const d = this.dressed;
+    if (d?.outfit && d.outfitLook && this.colors) {
+      const palette = paletteFor(d.outfitLook, this.team);
+      // bare arms, legs and neck in the model's own skin (unless a tone was picked)
+      if (this.look.skin === 'original') {
+        const c = this.imported!.reference.skinColor;
+        palette[SLOT.SKIN] = [c[0], c[1], c[2]];
+        palette[SLOT.SKIN_DARK] = [c[0] * 0.72, c[1] * 0.72, c[2] * 0.72];
+      }
+      paint(this.colors.array as Float32Array, d.outfit.paint, palette, d.outfit.rigPos, printsFor(d.outfitLook));
+      this.colors.needsUpdate = true;
+      return;
+    }
+    if (!this.built || !this.colors) return;
     paint(this.colors.array as Float32Array, this.built.paint, paletteFor(this.look, this.team), this.built.rigPos, printsFor(this.look));
     this.colors.needsUpdate = true;
   }
@@ -532,6 +670,8 @@ export class SkinnedCharacter implements CharacterVisual {
    * normal face. Never used in matches.
    */
   previewExpression(id: string, holdMs = 2600): void {
+    // (imported models have no face morphs)
+    if (!this.built || !this.builder || !this.geometry || !this.outline) return;
     if (id === 'neutral') {
       this.expr.target = 0;
       return;
@@ -543,7 +683,7 @@ export class SkinnedCharacter implements CharacterVisual {
       const delta = new Float32Array(base.count * 3);
       for (let i = 0; i < delta.length; i++) delta[i] = (to.array[i] as number) - (base.array[i] as number);
       const old = this.geometry;
-      this.geometry = this.ownGeometry(new THREE.BufferAttribute(delta, 3));
+      this.geometry = this.ownGeometry(this.built, new THREE.BufferAttribute(delta, 3));
       this.skin.geometry = this.geometry;
       this.skin.updateMorphTargets();
       this.outline.geometry = this.geometry;
@@ -558,7 +698,7 @@ export class SkinnedCharacter implements CharacterVisual {
 
   /** Bind-pose heights (meters, before the height preset) the Character screen frames on. */
   get frame(): Assembled['frame'] & { scale: number } {
-    return { ...this.built.frame, scale: this.built.heightScale };
+    return this.built ? { ...this.built.frame, scale: this.built.heightScale } : { ...this.imported!.spec.frame, scale: this.clips.scale };
   }
 
   setVisible(v: boolean): void {
@@ -566,7 +706,7 @@ export class SkinnedCharacter implements CharacterVisual {
   }
 
   setOutline(on: boolean): void {
-    this.outline.visible = on && SkinnedCharacter.outlines;
+    if (this.outline) this.outline.visible = on && SkinnedCharacter.outlines;
   }
 
   /** Off on low graphics quality and in performance mode (set by the app). */
@@ -679,6 +819,8 @@ export class SkinnedCharacter implements CharacterVisual {
     this.death.setEffectiveWeight(1);
     this.death.play();
     this.gunMount.visible = false;
+    // (the death clip carries its own height)
+    if (this.imported && !this.tilted) this.model.position.y = 0;
   }
 
   respawn(): void {
@@ -760,7 +902,7 @@ export class SkinnedCharacter implements CharacterVisual {
       if (performance.now() > this.expr.until) this.expr.target = 0;
       this.expr.w = approach(this.expr.w, this.expr.target, dt * 5);
       if (this.skin.morphTargetInfluences) this.skin.morphTargetInfluences[0] = this.expr.w;
-      if (this.outline.morphTargetInfluences) this.outline.morphTargetInfluences[0] = this.expr.w;
+      if (this.outline?.morphTargetInfluences) this.outline.morphTargetInfluences[0] = this.expr.w;
     }
 
     if (this.dead) {
@@ -780,8 +922,9 @@ export class SkinnedCharacter implements CharacterVisual {
         t.q.copy(t.bone.quaternion);
         t.p.copy(t.bone.position);
       }
+      if (this.imported) this.standOnGround(0, 0);
       this.npcLayer(dt, pose.yaw);
-      if (this.look.carry === 'phone') this.phonePose(dt);
+      if (this.built && this.look.carry === 'phone') this.phonePose(dt);
       else if (this.phone) this.phone.visible = false;
       return;
     }
@@ -805,6 +948,7 @@ export class SkinnedCharacter implements CharacterVisual {
       this.model.quaternion.copy(_flip);
       this.gunMount.visible = true;
     }
+    if (this.imported) this.model.position.y = 0;
 
     const speed = Math.hypot(pose.vx, pose.vz);
     const sinY = Math.sin(pose.yaw), cosY = Math.cos(pose.yaw);
@@ -818,7 +962,9 @@ export class SkinnedCharacter implements CharacterVisual {
     const armed = twoHand || pistol;
     const unarmed = held === 'none';
 
-    this.moveT = approach(this.moveT, moving ? clamp(speed / 3.2, 0.35, 1) : 0, dt * 6);
+    // (the imported idle is a big look-around: a walk is all walk, not half of that)
+    const fullAt = this.imported ? 1.2 : 3.2;
+    this.moveT = approach(this.moveT, moving ? clamp(speed / fullAt, 0.35, 1) : 0, dt * 6);
     this.sprintT = approach(this.sprintT, pose.sprinting && speed > 5.6 ? 1 : 0, dt * 6);
     this.crouchT = approach(this.crouchT, pose.crouching ? 1 : 0, dt * 7);
     this.lowT = approach(this.lowT, !armed && !unarmed ? 1 : 0, dt * 8);
@@ -842,7 +988,7 @@ export class SkinnedCharacter implements CharacterVisual {
     // feet: walk when slow, run when fast, and the cycle advances exactly as fast as the
     // ground goes by (each clip's stride is measured from the animation) so feet do not slide
     const walkK = clamp((4.1 - speed) / 1.7, 0, 1) * this.wF;
-    const scaleH = this.built.heightScale;
+    const scaleH = this.built?.heightScale ?? 1;
     // (a touch longer than measured: the stylized clips take short steps, and matching them
     // exactly at a sprint would make the legs a blur)
     const stride = lerp(this.clips.strideRun, this.clips.strideWalk, walkK) * scaleH * (1 + 0.25 * this.sprintT);
@@ -851,6 +997,7 @@ export class SkinnedCharacter implements CharacterVisual {
     for (const a of [this.loRun, this.loWalk, this.loBack, this.loLeft, this.loRight, this.upAimRun, this.upSprint]) {
       a.time = this.phase * a.getClip().duration;
     }
+    if (this.upWalk) this.upWalk.time = this.phase * this.upWalk.getClip().duration;
 
     const m = this.moveT * air + (1 - air) * 0.6;
     this.loIdle.setEffectiveWeight(1 - m);
@@ -869,7 +1016,10 @@ export class SkinnedCharacter implements CharacterVisual {
       this.upAimRun.setEffectiveWeight(0);
       this.upLow.setEffectiveWeight(0);
       this.upShoot.setEffectiveWeight(0);
-      this.upSprint.setEffectiveWeight(this.moveT * (1 - punch));
+      // (imported: the arms walk with the legs at walking pace)
+      const armsWalk = this.upWalk ? walkK : 0;
+      this.upWalk?.setEffectiveWeight(this.moveT * (1 - punch) * armsWalk);
+      this.upSprint.setEffectiveWeight(this.moveT * (1 - punch) * (1 - armsWalk));
       this.upCalm.setEffectiveWeight((1 - this.moveT) * (1 - punch));
       this.upPunch.setEffectiveWeight(punch);
       if (shoot > 0) this.upPunch.time = (1 - shoot) * this.upPunch.getClip().duration * 0.75;
@@ -885,6 +1035,7 @@ export class SkinnedCharacter implements CharacterVisual {
       this.upShoot.setEffectiveWeight(shoot * 0.85 * aim);
       this.upCalm.setEffectiveWeight(0);
       this.upPunch.setEffectiveWeight(0);
+      this.upWalk?.setEffectiveWeight(0);
       if (shoot > 0) this.upShoot.time = (1 - shoot) * Math.min(0.3, this.upShoot.getClip().duration);
     }
 
@@ -909,7 +1060,9 @@ export class SkinnedCharacter implements CharacterVisual {
     this.landDip = Math.max(0, this.landDip - dt * 3.2);
     const dipK = Math.sin(Math.min(1, this.landDip) * Math.PI * 0.5) * 0.55;
     if ((this.crouchT > 0.001 || dipK > 0.001) && this.body) {
-      const drop = CROUCH_DROP * Math.min(1, this.crouchT + dipK);
+      const drop = (this.imported?.spec.crouchDrop ?? CROUCH_DROP) * Math.min(1, this.crouchT + dipK);
+      // (an imported foot hangs off its shin: it has to be turned back flat afterwards)
+      const footTurn = this.imported ? this.legs.map((leg) => leg.foot.getWorldQuaternion(new THREE.Quaternion())) : null;
       const anchors = this.legs.map((leg) => ({
         knee: leg.lower.getWorldPosition(new THREE.Vector3()),
         hip: leg.upper.getWorldPosition(new THREE.Vector3()),
@@ -944,7 +1097,18 @@ export class SkinnedCharacter implements CharacterVisual {
         const newShin = a.foot.clone().sub(knee).normalize();
         _q1.setFromUnitVectors(oldShin, newShin);
         rotateBoneWorld(leg.lower, _q1);
+        if (footTurn) {
+          leg.foot.parent!.getWorldQuaternion(_q1);
+          leg.foot.quaternion.copy(_q1.invert().multiply(footTurn[i]));
+        }
       }
+    }
+    if (this.imported) {
+      this.airT = approach(this.airT, pose.grounded ? 0 : 1, dt * 8);
+      // how much of the pose is a running cycle (the only kind with a moment off the ground)
+      this.standOnGround(this.moveT * (1 - walkK) * (1 - this.crouchT), this.airT);
+      this.longT = approach(this.longT, twoHand ? 1 : 0, dt * 8);
+      if (!unarmed) this.steadyTorso(1 - this.sprintT);
     }
 
     // aim pitch through the spine (+ lean forward when crouched or sprinting, flinch when hit)
@@ -1035,7 +1199,12 @@ export class SkinnedCharacter implements CharacterVisual {
       const a = this.aimT * this.aimT * (3 - 2 * this.aimT);
       // where the grip goes, from the right shoulder, in the gun's own directions (right, up, back)
       let want: THREE.Vector3;
-      if (twoHand) {
+      const hold = this.imported?.spec.hold;
+      if (twoHand && hold) {
+        // short arms and a big head: closer in, and the barrel just under the cheek
+        const out = -clamp(-fit.butt * sc * 0.72, hold.near, hold.far);
+        want = new THREE.Vector3(lerp(hold.hipX, hold.aimX, a), lerp(hold.hipY, hold.aimY, a) - boreY, lerp(out + 0.03, out, a));
+      } else if (twoHand) {
         // aimed: the barrel just above the shoulder, the butt back against it
         const aimY = 0.06 - boreY, aimZ = -Math.max(0.24, Math.min(0.31, -fit.butt * sc * 0.72));
         // from the hip: lower, and out to the right so it shows past the body from behind
@@ -1308,7 +1477,10 @@ export class SkinnedCharacter implements CharacterVisual {
     if (kind === 2 || kind === 3) {
       // an orange up to the mouth, a bite at a time (pills: shaken out and tossed back)
       const sip = kind === 3 ? Math.max(0, Math.sin(t * 4.5)) : 0.5 + 0.5 * Math.sin(t * 3.2);
-      reach(R, at(shR.clone().add(new THREE.Vector3(-0.1, 0.14 + 0.03 * sip, -0.12))), new THREE.Vector3(1, -1.2, 0.3).applyQuaternion(rq));
+      // (an imported head is bigger: its mouth is further out)
+      const lips = this.imported ? -0.25 : -0.12;
+      const lipsUp = this.imported ? 0.07 : 0.14;
+      reach(R, at(shR.clone().add(new THREE.Vector3(-0.1, lipsUp + 0.03 * sip, lips))), new THREE.Vector3(1, -1.2, 0.3).applyQuaternion(rq));
       reach(L, at(shL.clone().add(new THREE.Vector3(0.0, -0.45, 0.05))), new THREE.Vector3(-0.3, 0, 1).applyQuaternion(rq));
       headPitch = 0.25 + 0.12 * sip;
       this.grip('R', WRIST_TWIST * 0.5, 0.9);
@@ -1512,6 +1684,14 @@ export class SkinnedCharacter implements CharacterVisual {
     this.model.quaternion.copy(_q1).multiply(_flip);
     this.model.position.copy(_grip).sub(_v1.copy(_grip).applyQuaternion(_q1));
 
+    if (this.imported && this.arms.R) {
+      // shorter arms: hang higher, so the hands still close on the strings
+      const { upper, lower, wrist } = this.arms.R;
+      const sh = upper.getWorldPosition(new THREE.Vector3()), el = lower.getWorldPosition(new THREE.Vector3());
+      const arm = (sh.distanceTo(el) + el.distanceTo(wrist.getWorldPosition(new THREE.Vector3()))) * 0.96;
+      this.model.position.y += Math.max(0, BALLOON_GRIP.y - 0.1 - (this.root.worldToLocal(sh).y + arm));
+    }
+
     // hands up on the strings (right a little higher), elbows out to the sides
     const up = _v5.set(cosY, 0, -sinY); // character's right in world space
     const back = new THREE.Vector3(sinY, 0, cosY);
@@ -1534,11 +1714,67 @@ export class SkinnedCharacter implements CharacterVisual {
     });
   }
 
+  /**
+   * Imported models: their clips each float or sink by a few centimeters, so the soles of the
+   * pose as blended decide the height. Nothing here moves the player, only the model inside.
+   * @param flight how much of the pose is running (keeps the flight between footfalls)
+   * @param air how far off the ground the player is (0..1)
+   */
+  private standOnGround(flight: number, air: number): void {
+    const body = this.imported!;
+    const scale = this.clips.scale;
+    this.model.position.y = 0;
+    for (const leg of this.legs) leg.upper.updateWorldMatrix(true, true);
+    const low = body.soles.lowest(this.skin.skeleton.bones) - this.root.matrixWorld.elements[13];
+    let lift = -low;
+    if (flight > 0) {
+      let sum = 0, weight = 0;
+      for (const action of [this.loRun, this.loBack, this.loLeft, this.loRight]) {
+        const w = action.getEffectiveWeight();
+        // (named "Run:lower": see splitClips)
+        const curve = w > 0 ? body.contact.get(action.getClip().name.split(':')[0]) : undefined;
+        if (!curve) continue;
+        sum += w * readCurve(curve, this.phase);
+        weight += w;
+      }
+      if (weight > 0) lift = lerp(lift, Math.max(lift, (-sum / weight) * scale), flight);
+    }
+    this.model.position.y = Math.max(lerp(lift, body.restLift * scale, air), -low);
+  }
+
+  /**
+   * Imported models: the supplied idle and walk swing the whole torso, which would swing the
+   * gun off the crosshair. With something in hand the torso holds the aiming clip's facing
+   * (turned side-on behind a long gun, so the short left arm gets to the handguard).
+   */
+  private steadyTorso(amount: number): void {
+    if (amount <= 0 || !this.spine) return;
+    const body = this.imported!;
+    const want = this.model.getWorldQuaternion(new THREE.Quaternion())
+      .multiply(_q1.copy(body.aimTorso).slerp(body.aimTorsoMoving, this.moveT));
+    const up = new THREE.Vector3(0, 1, 0);
+    const blade = body.spec.hold.blade * this.longT;
+    want.premultiply(_q1.setFromAxisAngle(up, -blade));
+    const turn = want.multiply(this.spine.getWorldQuaternion(_q1).invert());
+    if (turn.w < 0) turn.set(-turn.x, -turn.y, -turn.z, -turn.w);
+    // half at the hips and half above them: all in one joint wrings the jacket at the waist
+    const part = new THREE.Quaternion().slerp(turn, amount * (this.waist ? 0.5 : 1));
+    rotateBoneWorld(this.spine, part);
+    if (this.waist) rotateBoneWorld(this.waist, part);
+    // the face stays on the target
+    if (this.head && blade > 0) rotateBoneWorld(this.head, _q1.setFromAxisAngle(up, blade * amount));
+  }
+
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.model);
-    this.geometry.dispose();
-    this.outlineMat.dispose();
+    // each clone has its own skeleton (and bone texture)
+    this.skin.skeleton.dispose();
+    this.geometry?.dispose();
+    this.outlineMat?.dispose();
+    this.imported?.release();
     this.mouth?.dispose();
     this.phone?.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -1554,7 +1790,8 @@ export class SkinnedCharacter implements CharacterVisual {
         (m.material as THREE.Material).dispose();
       }
     });
-    this.root.removeFromParent();
+    if (this.ownsRoot) this.root.removeFromParent();
+    else for (const part of [this.model, this.gunMount, this.phone, this.healProp]) part?.removeFromParent();
   }
 }
 

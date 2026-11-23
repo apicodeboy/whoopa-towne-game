@@ -26,6 +26,21 @@ export function wearing(look: Readonly<Appearance>, item: StoreItem): Appearance
   return { ...cloneAppearance(look), ...(item.equip as Partial<Appearance>) };
 }
 
+/** What of an item Whoopa Tall can show: tops, bottoms, colors and weapon skins (not shoes, hats, jewelry or bags). */
+const SHOWS_ON_MODEL = (f: string) => ['top', 'topColor', 'bottom', 'bottomColor', 'shoeColor', 'weaponSkin'].includes(f) || f.startsWith('gs_');
+/** 'all': shows on a one-piece model; 'colors': some of it does; 'none': only on the custom character. */
+function onModel(item: StoreItem): 'all' | 'colors' | 'none' {
+  const fields = Object.keys(item.equip);
+  return fields.every(SHOWS_ON_MODEL) ? 'all' : fields.some(SHOWS_ON_MODEL) ? 'colors' : 'none';
+}
+
+/** How an item is previewed: on the custom character when a one-piece model cannot show it at all. */
+function previewing(look: Readonly<Appearance>, item: StoreItem): Appearance {
+  const out = wearing(look, item);
+  if (look.model !== 'custom' && onModel(item) === 'none') out.model = 'custom';
+  return out;
+}
+
 /** A look with an item taken off (each of its fields back to a free default). */
 export function without(look: Readonly<Appearance>, item: StoreItem): Appearance {
   const out = cloneAppearance(look) as unknown as Record<string, string>;
@@ -269,6 +284,8 @@ abstract class ShopLike {
   /** The look shown in the preview. */
   protected shown: Appearance;
   private shownKey = '';
+  /** One-piece model worn, and the item picked does not (all) show on it. */
+  private modelNote = el('p', 'eco-model-note', '');
 
   constructor(parent: HTMLElement, deps: EconomyDeps & { auth: AuthModal; openGrams: () => void }, cls: string, title: string, sub: string) {
     this.deps = deps;
@@ -276,7 +293,8 @@ abstract class ShopLike {
     const head = header(title, sub, () => this.show(false), deps.account, () => (deps.account.signedIn ? deps.openGrams() : deps.auth.open()));
     this.grid = el('div', 'eco-grid');
     this.side = el('aside', 'eco-side');
-    const stage = el('div', 'eco-stage', [this.preview.canvas]);
+    this.modelNote.hidden = true;
+    const stage = el('div', 'eco-stage', [this.preview.canvas, this.modelNote]);
     const turn = (d: number, label: string) => {
       const b = button(label, 'eco-round', () => this.preview.turnStep(d));
       b.setAttribute('aria-label', d < 0 ? 'Turn left' : 'Turn right');
@@ -317,7 +335,12 @@ abstract class ShopLike {
 
   protected select(it: StoreItem | null): void {
     this.selected = it;
-    this.previewLook(it ? wearing(this.deps.profile.look, it) : this.deps.profile.look, it?.category === 'weapons');
+    const fit = it && this.deps.profile.look.model !== 'custom' ? onModel(it) : 'all';
+    this.modelNote.hidden = fit === 'all';
+    this.modelNote.textContent = fit === 'none'
+      ? 'Shown on Classic Custom: Whoopa Tall cannot wear it (switch in Character to wear it in a match).'
+      : 'On Whoopa Tall its top, bottom and colors show; hats, jewelry, shoes and bags do not.';
+    this.previewLook(it ? previewing(this.deps.profile.look, it) : this.deps.profile.look, it?.category === 'weapons');
     this.render();
   }
 
@@ -632,7 +655,7 @@ export class TrapScreen extends ShopLike {
     info.innerHTML = `<div class="eco-iname">${it.name}</div><div class="eco-imeta">${rarityTag(it)}${worn ? '<span class="eco-limited">EQUIPPED</span>' : ''}</div><p>${it.blurb}</p>`;
     const equip = button('Equip', 'eco-btn gold', () => void this.wear(it, true));
     const unequip = button('Unequip', 'eco-btn ghost', () => void this.wear(it, false));
-    const preview = button('Preview', 'eco-btn ghost', () => this.previewLook(wearing(this.deps.profile.look, it), it.category === 'weapons'));
+    const preview = button('Preview', 'eco-btn ghost', () => this.previewLook(previewing(this.deps.profile.look, it), it.category === 'weapons'));
     equip.disabled = worn;
     unequip.disabled = !worn;
     this.side.append(info, el('div', 'eco-actions trap-actions', [equip, unequip, preview]));

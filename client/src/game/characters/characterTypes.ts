@@ -82,6 +82,8 @@ export interface CharacterVisual {
   previewExpression?(id: string): void;
   /** Menus: a wave hello (the Character Creator's Action button). */
   wave?(): void;
+  /** Set while what will be shown is still downloading: resolves when it is in place. */
+  readonly ready?: Promise<void>;
   /** Bind-pose heights the Character screen frames its camera on (meters, before `scale`). */
   readonly frame?: { eyeY: number; topY: number; chestY: number; scale: number };
 }

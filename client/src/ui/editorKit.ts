@@ -44,6 +44,8 @@ export const ED = {
   star: ln('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/>'),
 };
 export const SHORT: Record<string, [string, string]> = {
+  model: ['Character', ED.body],
+  'wt-head': ['Skin & Head', ED.head], 'wt-top': ['Tops', ED.top], 'wt-bottom': ['Bottoms', ED.pants], 'wt-boots': ['Boots', ED.shoes],
   presets: ['Starter', ED.starter], body: ['Body', ED.body], head: ['Head', ED.head], hair: ['Hair', ED.hair], top: ['Tops', ED.top],
   bottom: ['Bottoms', ED.pants], shoes: ['Shoes', ED.shoes], headacc: ['Hats', ED.hat], jewelry: ['Jewelry', ED.gem], tattoos: ['Tattoos', ED.tattoo],
 };

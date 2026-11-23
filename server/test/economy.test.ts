@@ -212,6 +212,10 @@ test('TRAP: equip only what you own; balance, items and look survive a restart',
     let err: unknown;
     try { await eco.equip(acc(), encodeAppearance({ ...look, weaponSkin: 'chrome' })); } catch (e) { err = e; }
     assert(err instanceof EconomyError && err.code === 'not_owned', 'unowned item refused');
+    // the model is free to wear and is saved with the look (a bought color shows on it too)
+    const model = decodeAppearance(await eco.equip(acc(), encodeAppearance({ ...look, model: 'whoopa_tall_hooded' })));
+    assert(model.model === 'whoopa_tall_hooded' && model.topColor === 'gold', 'model equipped, gold kept');
+    await eco.equip(acc(), encodeAppearance(look));
     // a fresh process reading the same file
     const again = new Economy(new FileEconomyStore(path), dev);
     const back = again.accountFor(token)!;

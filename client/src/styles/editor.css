@@ -760,3 +760,10 @@
   .eco.trap .eco-grid { right: auto; width: 46vw; }
   .eco.trap .eco-right { left: calc(46vw + 24px); }
 }
+
+/* a one-piece model is picked: only its controls (display rules would beat the hidden attribute) */
+.ed [hidden], .eco-model-note[hidden] { display: none !important; }
+.eco-model-note {
+  position: absolute; left: 12px; right: 12px; top: 12px; margin: 0 auto; max-width: 380px; padding: 8px 12px;
+  border-radius: 10px; background: rgba(12, 12, 14, 0.82); color: #f2f2f2; font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none;
+}

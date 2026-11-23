@@ -177,6 +177,81 @@ About 24–32k triangles and 26–34k vertices per assembled character (the head
 outline. A look is assembled in about 0.2 s the first time and cached. Characters far away
 skip the outline. The GLB is about 3.6 MB (served precompressed).
 
+## Whoopa Tall (the default character)
+
+Everyone plays as **Whoopa Tall** (`whoopa_tall_unmasked`) unless they pick the hooded version
+(`whoopa_tall_hooded`) or **Classic Custom** (the custom character above) under **Character** in
+the Character Creator. Bots stay custom characters. They are looks only: the collider, hitboxes,
+camera, movement and weapons are the same for everyone.
+
+- **Files.** `client/public/assets/characters/whoopa/*.glb`, exactly as delivered (SHA-256 checked
+  against the pack's `VALIDATION.json`; the pack's README, reference sheet and preview are in
+  `docs/characters/whoopa/`). About 12 MB each (10 MB compressed), downloaded after the game's own
+  models. One skinned mesh each, with its own material and three 2048² maps (color, normal,
+  metal/roughness). Phones, Low quality and performance mode get 1024² copies made in memory.
+- **Code.** `client/src/game/characters/imported/`: `models.ts` loads and prepares a model once and
+  shares it (each wearer is a `SkeletonUtils.clone` with its own `AnimationMixer`); `rig.ts` renames
+  the Mixamo-style bones to the game's and finds the soles; `clips.ts` prepares the clips;
+  `recolor.ts` does the customization; `pendingCharacter.ts` stands in while a model downloads (the
+  custom character in a match, nothing in a menu). `SkinnedCharacter` drives them.
+- **Clips.** Idle, Walk and Run are the files' own (renamed, and moved so the feet center on the
+  player; they have no root motion). The files have no aiming, firing, strafing, backpedal, punch or
+  death clips: those are the game's existing CC0 clips retargeted onto each skeleton at load. Jump,
+  crouch, roll, climb, reloads, throws, healing and hanging are the game's procedural poses.
+- **Feet.** The clips float or sink by up to 6.5 cm. Every frame the lowest point of the boots (about
+  90 sole vertices, transformed exactly) is put on the ground; running keeps its flight.
+- **Fit.** One uniform scale (1.75 m bind height to the game's 1.8 m). Their arms are short and their
+  heads big, so long guns sit closer in with the torso turned side-on (`HOLD` in `models.ts`, fitted
+  so the left palm ends within 3 cm of every handguard).
+- **Crews.** In matches a band in the crew color is drawn on the upper arms (the sleeve's own
+  triangles again, cut to a strip).
+
+### Clothes
+
+He starts in a **plain brown tee and brown jeans**, nothing else (his boots as made). The creator's
+**Tops** and **Bottoms** tabs offer:
+
+- **his own garments**: the Whoopa Zip Jacket and Whoopa Stacked Cargos sculpted into the model
+  (options `wtjacket`, `wtcargos`; the custom character draws them as its zip hoodie and cargos);
+- **every top and bottom of the clothing system**: tee, tank, crop top, hoodie, zip hoodie, puffer,
+  puffer vest; slim / regular / baggy jeans, cargo pants, shorts, leggings. They are built by
+  `look/assemble.ts` on the custom character's body, then carried onto his skeleton bone by bone
+  (`imported/outfit.ts`): each segment stretched to his limb length and widened to his girth (the
+  torso as one piece, so it is not squashed), with the arms, legs and neck under them. His own head
+  (without the jacket's collar, found by the texture's color at each vertex), hands and boots stay;
+  pant legs widen over his boot openings; tops sit 12 mm out so waistbands never show through.
+  Mixing works both ways (his jacket over jeans, a tee over his cargos).
+
+Every color, AJ'S print and finish applies to both kinds (on his own garments as a recolor of the
+delivered maps, see below; on carried ones as paint). Bare arms and legs take his own skin color
+unless a tone is picked. The hooded model keeps its own hoodie (the hood and mask are part of it):
+only its bottoms change. Bought tops and bottoms (AJ'S fits) show on him; hats, jewelry, sneakers
+and backpacks do not, and AJ'S previews those on Classic Custom with a note.
+
+### Recoloring his own garments, skin and hair
+
+The delivered maps are never replaced: a copy of the model's own material moves the color of three
+kinds of texel (clothing, skin, hair, told apart by their own color) and keeps each texel's
+brightness relative to its kind, so folds, seams and painted shading stay. Which garment a vertex
+belongs to is found once from the mesh: boots below the pants' cuffs (and the toe caps), the jacket
+above its hem (both found as bands of downward-facing surface), the pants inside the hem's ring, the
+hood with the jacket, the hooded model's mask and the unmasked model's eyes and glasses left as made.
+
+| Creator item | Field | Notes |
+| --- | --- | --- |
+| Skin Tone | `skin` | every tone, or Original |
+| Braids Color | `hairColor` | unmasked only; black is as made |
+| Head Size | `headSize` | the head bone, 0.94 / 1 / 1.07 |
+| Top / Bottom / Boot Color | `topColor`, `bottomColor`, `shoeColor` | every color, prints and finishes; Original = his own garment as made |
+
+### Limits
+
+- The carried clothes are the clothing system's shapes (smooth, vertex colored), not sculpted like
+  his head and boots; baggy jeans' stacked folds come out sharper on his shorter shins.
+- No face shapes or expressions: the head is one sculpted piece without blend shapes. Those, and
+  sculpted garments in his style, need parts on his skeleton (a base body, each garment as its own
+  skinned mesh, face blend shapes) that the delivered pack does not include.
+
 ## Known limits
 
 - The anatomy and clothing are procedural sculpts, not hand-modelled art. They are real 3D

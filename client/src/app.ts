@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DevPasscodePrompt } from './ui/devMode';
-import { botAppearance, decodeAppearance, encodeAppearance, isPremiumOption, type Appearance } from '@shared/config/appearance';
+import { botAppearance, decodeAppearance, encodeAppearance, forCustomCharacter, isPremiumOption, type Appearance } from '@shared/config/appearance';
 import { unlocksOf, type StoreCategory } from '@shared/config/economy';
 import type { ModeId } from '@shared/config/game';
 import type { Loadout } from '@shared/config/weapons';
@@ -15,6 +15,8 @@ import type { CharacterVisual } from './game/characters/characterTypes';
 import { ProceduralCharacter } from './game/characters/proceduralCharacter';
 import { LookBuilder } from './game/characters/look/assemble';
 import { SkinnedCharacter } from './game/characters/skinnedCharacter';
+import { ImportedModels } from './game/characters/imported/models';
+import { PendingCharacter } from './game/characters/imported/pendingCharacter';
 import { Game } from './game/game';
 import { Stage } from './game/stage';
 import { buildWorld } from './game/world/worldBuilder';
@@ -140,6 +142,8 @@ export class App {
   private net: NetClient | null = null;
   private debug: DebugOptions;
   private R: Rapier;
+  /** The one-piece characters (downloaded when first worn). */
+  private models!: ImportedModels;
   private backdropCam: THREE.PerspectiveCamera;
   private backdropT = Math.random() * 100;
   private raf = 0;
@@ -178,6 +182,7 @@ export class App {
           this.tourReady = true;
         }).catch(() => undefined);
 
+    this.models = new ImportedModels(this.assets, () => this.assetsReady, () => smallTextures(this.settings.values));
     this.toasts = new Toasts(ui);
     this.tourCaption = document.createElement('div');
     this.tourCaption.className = 'tour-caption';
@@ -241,6 +246,7 @@ export class App {
     this.characterScreen = new CharacterScreen(ui, {
       profile: this.profile,
       build: (look) => this.makeCharacter(0, 0, look),
+      loadModel: async (id) => !!(await this.models.load(id)),
       // a kept look goes to the lobby right away (it shows from the next match) and to the account
       onKeep: (look) => {
         this.lobby?.setLook(look);
@@ -666,10 +672,13 @@ export class App {
       session,
       loadout: this.profile.loadout,
       audio: this.audio,
-      characterFactory: (team, seed, look) => this.makeCharacter(team, seed, look),
+      characterFactory: (team, seed, look) => this.makeCharacter(team, seed, look, true),
       assets: this.assets,
       prewarmLooks: (looks) => {
-        for (const l of looks) this.looks.build(l);
+        for (const l of looks) {
+          if (this.models.has(l.model)) void this.models.load(l.model);
+          else this.looks.build(l);
+        }
       },
     });
     game.onPause = () => this.togglePause();
@@ -706,9 +715,25 @@ export class App {
    * procedural stand-in while / if the models are unavailable. Servers that send no look get
    * a stable random one per slot.
    */
-  private makeCharacter(team: 0 | 1, seed: number, look?: Appearance): CharacterVisual {
+  private makeCharacter(team: 0 | 1, seed: number, look?: Appearance, inMatch = false): CharacterVisual {
     const l = look ?? botAppearance('Player', seed);
-    return SkinnedCharacter.create(this.looks, this.assets, team, l) ?? new ProceduralCharacter(team, seed, l);
+    if (this.models.has(l.model) && this.assets.loaded) {
+      const body = this.models.get(l.model);
+      if (body) return SkinnedCharacter.createImported(body, this.assets, team, l, inMatch, undefined, this.looks);
+      return new PendingCharacter(
+        team,
+        this.models.load(l.model).then((b) => !!b),
+        (t, root) => {
+          const b = this.models.get(l.model);
+          return b ? SkinnedCharacter.createImported(b, this.assets, t, l, inMatch, root, this.looks) : null;
+        },
+        (t, root) => SkinnedCharacter.create(this.looks, this.assets, t, forCustomCharacter(l), root),
+        inMatch,
+      );
+    }
+    // (the custom character draws the models' own garments as its nearest ones)
+    const custom = forCustomCharacter(l);
+    return SkinnedCharacter.create(this.looks, this.assets, team, custom) ?? new ProceduralCharacter(team, seed, custom);
   }
 
   private endGame(): void {
@@ -719,6 +744,8 @@ export class App {
       this.game.dispose();
       this.game = null;
     }
+    // each screen's WebGL context keeps its own copy of a model's 2K maps: keep only the next one's
+    this.models.freeGpu();
     if (this.session) {
       this.session.leave();
       this.session = null;
@@ -823,4 +850,10 @@ export class App {
     this.input.dispose();
     this.stage.dispose();
   }
+}
+
+/** Phones and tablets, low-memory devices and Low quality get 1K copies of the one-piece characters' maps. */
+function smallTextures(s: { quality: string; performanceMode: boolean }): boolean {
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return s.quality === 'low' || s.performanceMode || (memory !== undefined && memory <= 4) || window.matchMedia('(pointer: coarse)').matches;
 }
